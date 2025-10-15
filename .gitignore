@@ -1,0 +1,114 @@
+# ==========================================
+# 🌟 Universal Arm Controller - Git Ignore
+# ==========================================
+
+# === ROS 2 / Colcon Build ===
+src/hardware_driver/
+src/trajectory_interpolator/
+src/trajectory_planning/
+install/
+build/
+log/
+.colcon/
+*.log
+
+# === CMake / Make ===
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+
+# === VSCode ===
+.vscode/
+.history/
+*.code-workspace
+
+# === Python Cache (if any tools/scripts) ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pycache/
+
+# === System Files ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# === IDE / Editor ===
+.idea/
+*.iml
+*.user
+*.sublime-project
+*.sublime-workspace
+
+# === Dependency / External ===
+*.so
+*.a
+*.o
+*.out
+*.obj
+*.exe
+*.dll
+
+# === Generated Artifacts ===
+*.pdf
+*.docx
+*.pptx
+*.xlsx
+*.rtf
+*.zip
+*.tar
+*.gz
+*.7z
+
+# === Launch / Config Caches ===
+**/*.yaml~
+**/*.launch.py~
+**/*.launch~
+params/
+temp/
+tmp/
+
+# === ROS2 Workspace ===
+ros2_ws/
+dev_ws/
+install_isolated/
+devel/
+logs/
+
+# === Local Test Data ===
+test_results/
+data/
+recordings/
+captures/
+datasets/
+
+# === Tools / Simulation ===
+gazebo_log/
+*.world~
+*.urdf~
+*.xacro~
+*.rviz
+*.bag
+*.db3
+
+# === Platform Specific ===
+*.exe
+*.dll
+*.bat
+*.sh~
+*.command
+*.app
+
+# === Git / Metadata ===
+.gitignore~
+*.orig
+*.rej
+

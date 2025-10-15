@@ -1,0 +1,7 @@
+# Request
+string mode
+string mapping     # 可选：指定要操作的映射 ("single_arm", "left_arm", "right_arm")
+---
+# Response
+bool success
+string message

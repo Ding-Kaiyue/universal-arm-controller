@@ -1,0 +1,74 @@
+common:
+    - key: controller_mode_service
+      name: /controller_api/controller_mode
+      type: controller_interfaces/srv/WorkMode
+      kind: service
+
+    - key: running_status
+      name: /controller_api/running_status
+      type: std_msgs/msg/String
+      kind: input_topic
+  
+
+controllers:
+  # - key: CartesianVelocity
+  #   class: CartesianVelocityController
+  #   input_topic: 
+  #     name: /controller_api/cartesian_velocity_action
+  #     type: geometry_msgs/msg/Twist
+  - key: Disable
+    class: DisableController
+
+  - key: HoldState
+    class: HoldStateController
+
+  - key: JointVelocity
+    class: JointVelocityController
+    input_topic:
+      name: /controller_api/joint_velocity_action
+      type: sensor_msgs/msg/JointState
+
+  - key: Move2Initial
+    class: Move2InitialController
+
+  - key: Move2Start
+    class: Move2StartController
+
+  - key: ROS2ActionControl
+    class: ROS2ActionControlController
+
+  - key: MoveC
+    class: MoveCController
+    input_topic: 
+      name: /controller_api/movec_action
+      type: geometry_msgs/msg/PoseArray
+  - key: MoveJ
+    class: MoveJController
+    input_topic: 
+      name: /controller_api/movej_action
+      type: sensor_msgs/msg/JointState
+  - key: MoveL
+    class: MoveLController
+    input_topic: 
+      name: /controller_api/movel_action
+      type: geometry_msgs/msg/Pose
+  # - key: PointRecord
+  #   class: PointRecordController
+  #   input_topic: 
+  #     name: /controller_api/point_record_action
+  #     type: std_msgs/msg/String
+  # - key: PointReplay
+  #   class: PointReplayController
+  #   input_topic: 
+  #     name: /controller_api/point_replay_action
+  #     type: std_msgs/msg/String
+  # - key: TrajectoryRecord
+  #   class: TrajectoryRecordController
+  #   input_topic: 
+  #     name: /controller_api/trajectory_record_action
+  #     type: std_msgs/msg/String
+  # - key: TrajectoryReplay
+  #   class: TrajectoryReplayController
+  #   input_topic: 
+  #     name: /controller_api/trajectory_replay_action
+  #     type: std_msgs/msg/String

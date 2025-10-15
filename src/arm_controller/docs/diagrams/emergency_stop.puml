@@ -1,0 +1,53 @@
+@startuml Emergency_Stop
+!theme plain
+title 急停处理流程
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 12
+
+rectangle "正常运行\nNormal Operation" as Normal #C8E6C9
+
+rectangle "急停触发条件\nEmergency Trigger" as Trigger #FFCCBC {
+  label "• 位置超限\n• 速度过高\n• 通信丢失\n• 硬件故障\n• 用户请求"
+}
+
+rectangle "急停响应\nEmergency Response" as Response #FFCDD2 {
+  label "1. 设置急停标志\n2. 发送零速度\n3. 通知控制器\n4. 记录原因"
+}
+
+rectangle "急停状态\nEmergency State" as State #FF8A80 {
+  label "• 停止所有运动\n• 禁用危险操作\n• 仅允许安全反向"
+}
+
+rectangle "安全反向运动\nSafe Direction Motion" as SafeMotion #FFF59D {
+  label "• 检查违规方向\n• 仅允许离开限位\n• 实时监控位置"
+}
+
+rectangle "恢复检查\nRecovery Check" as Recovery #B2DFDB {
+  label "• 关节回到限位内?\n• 系统健康?\n• 用户确认?"
+}
+
+rectangle "恢复完成\nRecovery Complete" as Complete #A5D6A7
+
+Normal --> Trigger : 触发条件
+Trigger --> Response : 立即响应
+Response --> State : 进入急停
+State --> SafeMotion : 允许反向
+SafeMotion --> Recovery : 脱离限位
+Recovery --> Complete : 所有检查通过
+Complete --> Normal : 恢复运行
+
+State --> State : 等待恢复
+
+note right of SafeMotion
+  示例:
+  关节超下限 → 仅允许正向
+  关节超上限 → 仅允许负向
+end note
+
+note right of Recovery
+  自动检查 + 手动确认
+  确保安全后才能恢复
+end note
+
+@enduml

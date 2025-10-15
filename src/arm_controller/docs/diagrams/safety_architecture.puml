@@ -1,0 +1,54 @@
+@startuml Safety_Architecture
+!theme plain
+title 多层安全架构
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 12
+
+rectangle "用户指令层\nUser Command Layer" as User #FFE4B5
+
+rectangle "第1层: 钩子状态安全检查\nHook State Safety Check" as Layer1 #FFF9C4 {
+  label "• 机器人停止检查\n• 关节限位检查\n• 系统健康检查"
+}
+
+rectangle "第2层: 运动规划安全\nMotion Planning Safety" as Layer2 #FFE0B2 {
+  label "• MoveIt碰撞检测\n• 工作空间限制\n• IK可解性检查"
+}
+
+rectangle "第3层: 实时执行安全\nReal-time Execution Safety" as Layer3 #FFCCBC {
+  label "• 速度限制\n• 加速度限制\n• 位置限位监控"
+}
+
+rectangle "第4层: 硬件层安全\nHardware Layer Safety" as Layer4 #F8BBD0 {
+  label "• CAN通信超时保护\n• 电机过流保护\n• 编码器故障检测"
+}
+
+rectangle "电机\nMotors" as Motors #BDBDBD
+
+User --> Layer1 : 指令流
+Layer1 --> Layer2 : 安全可规划
+Layer2 --> Layer3 : 规划轨迹
+Layer3 --> Layer4 : 控制命令
+Layer4 --> Motors : 电机命令
+
+note bottom of Layer1
+安全过渡状态
+确保切换前满足条件
+end note
+
+note bottom of Layer2
+规划阶段检查
+碰撞检测与可达性
+end note
+
+note bottom of Layer3
+执行阶段监控
+实时动态限制
+end note
+
+note bottom of Layer4
+硬件底层保护
+通信与电气安全
+end note
+
+@enduml

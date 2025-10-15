@@ -1,0 +1,13 @@
+repositories:
+  trajectory_planning:
+    type: git
+    url: https://github.com/Ding-Kaiyue/trajectory-planning.git
+    version: planning-only
+  hardware_driver:
+    type: git
+    url: https://github.com/Ding-Kaiyue/hardware-driver.git
+    version: master
+  trajectory_interpolator:
+    type: git
+    url: https://github.com/Ding-Kaiyue/trajectory-interpolator.git
+    version: master

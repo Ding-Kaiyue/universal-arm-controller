@@ -1,0 +1,65 @@
+@startuml Limit_Protection
+!theme plain
+title 实时限位保护机制
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 12
+
+rectangle "运动控制指令\nMotion Command" as Command #E3F2FD
+
+rectangle "位置限位检查\nPosition Limit Check" as PosCheck #FFF9C4 {
+  label "• 读取当前位置\n• 对比软限位\n• 检查安全余量"
+}
+
+rectangle "速度限位检查\nVelocity Limit Check" as VelCheck #FFE0B2 {
+  label "• 读取当前速度\n• 对比最大速度\n• 自动钳位限制"
+}
+
+rectangle "加速度限位检查\nAcceleration Limit Check" as AccCheck #FFCCBC {
+  label "• 计算加速度\n• 对比最大值\n• 平滑过渡"
+}
+
+rectangle "决策\nDecision" as Decision #E1BEE7
+
+rectangle "正常执行\nNormal Execution" as Normal #C8E6C9
+rectangle "限速执行\nLimited Execution" as Limited #FFF59D
+rectangle "触发急停\nTrigger E-Stop" as EStop #FF8A80
+
+Command --> PosCheck : 实时监控
+PosCheck --> Decision : 检查结果
+
+Decision --> VelCheck : 位置安全
+VelCheck --> AccCheck : 速度合理
+AccCheck --> Decision : 加速度检查
+
+Decision --> Normal : 所有检查通过
+Decision --> Limited : 接近限位
+Decision --> EStop : 超出限位
+
+note right of PosCheck
+  软限位配置示例:
+  lower: [-3.14, -2.09, ...]
+  upper: [3.14, 2.09, ...]
+  margin: 0.1 rad
+end note
+
+note right of VelCheck
+  速度限制示例:
+  max_velocity: [3.14, 3.14, ...]
+  自动钳位到安全范围
+end note
+
+note right of AccCheck
+  加速度限制示例:
+  max_acceleration: [5.0, 5.0, ...]
+  dt = 0.01s
+end note
+
+note bottom of Decision
+  三层防护:
+  1. 预警 (接近限位)
+  2. 限制 (自动钳位)
+  3. 急停 (超出范围)
+end note
+
+@enduml

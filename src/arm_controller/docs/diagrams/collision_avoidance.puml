@@ -1,0 +1,78 @@
+@startuml Collision_Avoidance
+!theme plain
+title 碰撞检测与规避机制
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 12
+
+start
+
+:用户运动请求
+Motion Request;
+
+:MoveIt规划阶段
+Planning Phase
+----
+• 场景更新
+• 碰撞检测
+• 路径规划;
+
+if (规划成功?\nPlanning Success?) then (是)
+  :轨迹验证
+  Trajectory Validation;
+
+  if (无碰撞?\nCollision Free?) then (是)
+    :执行轨迹
+    Execute Trajectory;
+    stop
+  else (否)
+    :碰撞检测到
+    Collision Detected;
+
+    if (MoveL模式?\nMoveL Mode?) then (是)
+      :智能回退
+      Intelligent Fallback;
+
+      :关节空间规划
+      Joint Space Planning;
+
+      if (回退成功?\nFallback Success?) then (是)
+        :执行回退轨迹
+        Execute Fallback;
+        stop
+      else (否)
+        :报告失败
+        Report Failure;
+        stop
+      endif
+    else (否)
+      :报告失败
+      Report Failure;
+      stop
+    endif
+  endif
+else (否)
+  :规划失败
+  Planning Failed;
+
+  :报告失败
+  Report Failure;
+  stop
+endif
+
+note right
+  **MoveIt碰撞检测**
+  • 自碰撞检测
+  • 环境碰撞检测
+  • 实时场景更新
+end note
+
+note left
+  **MoveL智能策略**
+  • INTELLIGENT (自动)
+  • CARTESIAN_SPACE (优先)
+  • JOINT_SPACE (回退)
+end note
+
+@enduml
+
