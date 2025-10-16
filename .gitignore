@@ -112,3 +112,5 @@ gazebo_log/
 *.orig
 *.rej
 
+# === Docs ===
+*.puml
