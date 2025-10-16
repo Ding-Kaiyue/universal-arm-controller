@@ -206,37 +206,44 @@ void TrajectoryControllerNode::execute_trajectory(const std::shared_ptr<GoalHand
         // 将ROS轨迹转换为插值器格式
         auto interpolator_trajectory = arm_controller::utils::TrajectoryConverter::convertRosToInterpolator(goal->trajectory);
 
-        // 分析轨迹动力学参数并应用动态配置
-        auto dynamics = arm_controller::utils::TrajectoryConverter::analyzeTrajectoryDynamics(goal->trajectory);
-        auto safe_params = arm_controller::utils::TrajectoryConverter::calculateSafeInterpolationParams(dynamics);
+        // 检查轨迹点数：如果少于3个点，认为已在目标位置，直接执行不进行插值
+        trajectory_interpolator::Trajectory final_trajectory = interpolator_trajectory;
 
-        RCLCPP_INFO(this->get_logger(), "Using dynamic interpolation params - vel:%.3f acc:%.3f jerk:%.3f",
-                    safe_params.max_velocity, safe_params.max_acceleration, safe_params.max_jerk);
+        if (goal->trajectory.points.size() < 3) {
+            RCLCPP_INFO(this->get_logger(), "⚠️ Trajectory has < 3 points (%zu), skipping interpolation and executing directly",
+                        goal->trajectory.points.size());
+        } else {
+            // 分析轨迹动力学参数并应用动态配置
+            auto dynamics = arm_controller::utils::TrajectoryConverter::analyzeTrajectoryDynamics(goal->trajectory);
+            auto safe_params = arm_controller::utils::TrajectoryConverter::calculateSafeInterpolationParams(dynamics);
 
-        // 使用动态配置加载轨迹
-        if (!trajectory_interpolator_->loadTrajectoryWithDynamicConfig(interpolator_trajectory,
-                                                                      safe_params.max_velocity,
-                                                                      safe_params.max_acceleration,
-                                                                      safe_params.max_jerk)) {
-            RCLCPP_ERROR(this->get_logger(), "Failed to load trajectory with dynamic config");
-            result->error_code = FollowJointTrajectory::Result::INVALID_GOAL;
-            result->error_string = "Failed to load trajectory";
-            goal_handle->abort(result);
-            publish_action_event("action_aborted", mapping);
-            return;
+            RCLCPP_INFO(this->get_logger(), "Using dynamic interpolation params - vel:%.3f acc:%.3f jerk:%.3f",
+                        safe_params.max_velocity, safe_params.max_acceleration, safe_params.max_jerk);
+
+            // 使用动态配置加载轨迹
+            if (!trajectory_interpolator_->loadTrajectoryWithDynamicConfig(interpolator_trajectory,
+                                                                          safe_params.max_velocity,
+                                                                          safe_params.max_acceleration,
+                                                                          safe_params.max_jerk)) {
+                RCLCPP_ERROR(this->get_logger(), "Failed to load trajectory with dynamic config");
+                result->error_code = FollowJointTrajectory::Result::INVALID_GOAL;
+                result->error_string = "Failed to load trajectory";
+                goal_handle->abort(result);
+                publish_action_event("action_aborted", mapping);
+                return;
+            }
+
+            final_trajectory = trajectory_interpolator_->interpolate();
+            RCLCPP_INFO(this->get_logger(), "Interpolation successful, trajectory has %zu points (was %zu)",
+                        final_trajectory.points.size(), goal->trajectory.points.size());
         }
-            
-
-        auto interpolated_trajectory = trajectory_interpolator_->interpolate();
-        RCLCPP_INFO(this->get_logger(), "Interpolation successful, trajectory has %zu points (was %zu)",
-                    interpolated_trajectory.points.size(), goal->trajectory.points.size());
 
         // 使用传入的mapping获取对应的interface
         // std::string interface = hardware_manager_->get_interface(mapping);
-        
+
         // 执行轨迹
-        if (!hardware_manager_->executeTrajectory(interface, interpolated_trajectory)) {
-            RCLCPP_ERROR(this->get_logger(), "❎ Failed to execute trajectory on interface: %s (mapping: %s)", 
+        if (!hardware_manager_->executeTrajectory(interface, final_trajectory)) {
+            RCLCPP_ERROR(this->get_logger(), "❎ Failed to execute trajectory on interface: %s (mapping: %s)",
                         interface.c_str(), mapping.c_str());
             result->error_code = FollowJointTrajectory::Result::GOAL_TOLERANCE_VIOLATED;
             result->error_string = "Trajectory execution failed";

@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.8)
 project(arm_controller)
 
+# 默认禁用测试
+if(NOT DEFINED BUILD_TESTING)
+  set(BUILD_TESTING OFF)
+endif()
+
 enable_testing()
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
