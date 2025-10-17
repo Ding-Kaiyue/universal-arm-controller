@@ -20,13 +20,21 @@ jobs:
           set -e
           # Basic runner prep: locales and timezone non-interactively
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl gnupg2 lsb-release tzdata locales
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl gnupg2 lsb-release tzdata locales ca-certificates apt-transport-https
           sudo locale-gen en_US en_US.UTF-8
           sudo bash -c 'echo "Etc/UTC" > /etc/timezone'
           sudo ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime
 
-          # Add the ROS 2 apt keyring (gpg dearmor into keyrings directory)
-          curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key | sudo gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg
+          # Quick HTTPS connectivity test to packages.ros.org (helpful for debugging cert issues)
+          echo "Checking HTTPS connectivity to packages.ros.org..."
+          curl -vI --max-time 15 https://packages.ros.org/ros2/ubuntu || true
+
+          # Download ROS key to temp file then dearmor without prompting gpg for a tty
+          TMP_KEY=/tmp/ros.key
+          sudo rm -f /usr/share/keyrings/ros-archive-keyring.gpg || true
+          curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o ${TMP_KEY}
+          sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg ${TMP_KEY}
+          rm -f ${TMP_KEY}
 
           # Remove any ROS1 apt source (prevents 404) and add ROS2 repo signed-by the keyring
           sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
