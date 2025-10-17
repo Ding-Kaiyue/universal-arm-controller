@@ -27,21 +27,33 @@ jobs:
 
           # Quick HTTPS connectivity test to packages.ros.org (helpful for debugging cert issues)
           echo "Checking HTTPS connectivity to packages.ros.org..."
-          curl -vI --max-time 15 https://packages.ros.org/ros2/ubuntu || true
+          if curl -fsSL --max-time 15 https://packages.ros.org/ros2/ubuntu -o /dev/null; then
+            echo "HTTPS OK"
+            echo "USE_HTTP=false" >> $GITHUB_ENV
+          else
+            echo "HTTPS failed, will fallback to HTTP for ROS2 repo"
+            echo "USE_HTTP=true" >> $GITHUB_ENV
+          fi
 
-          # Download ROS key to temp file then dearmor without prompting gpg for a tty
-          TMP_KEY=/tmp/ros.key
-          sudo rm -f /usr/share/keyrings/ros-archive-keyring.gpg || true
-          curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o ${TMP_KEY}
-          sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg ${TMP_KEY}
-          rm -f ${TMP_KEY}
+          if [ "${USE_HTTP:-false}" = "true" ]; then
+            echo "Using HTTP for ROS2 repo (insecure fallback)"
+            sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
+            echo "deb [arch=$(dpkg --print-architecture)] http://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+          else
+            # Download ROS key to temp file then dearmor without prompting gpg for a tty
+            TMP_KEY=/tmp/ros.key
+            sudo rm -f /usr/share/keyrings/ros-archive-keyring.gpg || true
+            curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o ${TMP_KEY}
+            sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg ${TMP_KEY}
+            rm -f ${TMP_KEY}
 
-          # Remove any ROS1 apt source (prevents 404) and add ROS2 repo signed-by the keyring
-          sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+            # Remove any ROS1 apt source (prevents 404) and add ROS2 repo signed-by the keyring
+            sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+          fi
 
           # Update apt now that repos are correct
-          sudo apt-get update
+          sudo apt-get update || true
 
       - name: Ensure ROS 2 apt key and repository (explicit)
         run: |
@@ -117,6 +129,24 @@ jobs:
           rosdep update || true
           # Fail the build if rosdep cannot install required dependencies
           rosdep install --from-paths src --ignore-src -r -y
+
+      - name: Collect apt/key diagnostics (always)
+        if: always()
+        run: |
+          set -e || true
+          mkdir -p /tmp/ci-diagnostics
+          sudo ls -l /etc/apt/sources.list.d > /tmp/ci-diagnostics/sources_list_d.txt || true
+          sudo cat /etc/apt/sources.list > /tmp/ci-diagnostics/sources_list.txt || true
+          sudo ls -l /etc/apt/trusted.gpg.d > /tmp/ci-diagnostics/trusted_gpg_d.txt || true
+          sudo ls -l /usr/share/keyrings > /tmp/ci-diagnostics/keyrings.txt || true
+          sudo openssl s_client -showcerts -servername packages.ros.org -connect packages.ros.org:443 </dev/null > /tmp/ci-diagnostics/ros_org_openssl.txt 2>&1 || true
+
+      - name: Upload diagnostics artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-apt-diagnostics
+          path: /tmp/ci-diagnostics
 
 
       - name: Build
