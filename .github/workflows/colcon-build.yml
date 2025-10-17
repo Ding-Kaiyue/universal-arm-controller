@@ -15,68 +15,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare runner and add ROS 2 apt key/repo (manual)
-        run: |
-          set -e
-          # Basic runner prep: locales and timezone non-interactively
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl gnupg2 lsb-release tzdata locales ca-certificates apt-transport-https
-          sudo locale-gen en_US en_US.UTF-8
-          sudo bash -c 'echo "Etc/UTC" > /etc/timezone'
-          sudo ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime
-
-          # Quick HTTPS connectivity test to packages.ros.org (helpful for debugging cert issues)
-          echo "Checking HTTPS connectivity to packages.ros.org..."
-          if curl -fsSL --max-time 15 https://packages.ros.org/ros2/ubuntu -o /dev/null; then
-            echo "HTTPS OK"
-            echo "USE_HTTP=false" >> $GITHUB_ENV
-          else
-            echo "HTTPS failed, will fallback to HTTP for ROS2 repo"
-            echo "USE_HTTP=true" >> $GITHUB_ENV
-          fi
-
-          if [ "${USE_HTTP:-false}" = "true" ]; then
-            echo "Using HTTP for ROS2 repo (insecure fallback)"
-            sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
-            echo "deb [arch=$(dpkg --print-architecture)] http://ftp.osuosl.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
-          else
-            # Download ROS key to temp file then dearmor without prompting gpg for a tty
-            TMP_KEY=/tmp/ros.key
-            sudo rm -f /usr/share/keyrings/ros-archive-keyring.gpg || true
-            curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o ${TMP_KEY}
-            sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg ${TMP_KEY}
-            rm -f ${TMP_KEY}
-
-            # Remove any ROS1 apt source (prevents 404) and add ROS2 repo signed-by the keyring
-            sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://ftp.osuosl.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
-          fi
-
-          # Update apt now that repos are correct
-          sudo apt-get update || true
-
-      - name: Ensure ROS 2 apt key and repository (explicit)
-        run: |
-          set -e
-          # Install required tools
-          sudo apt-get update
-          sudo apt-get install -y curl gnupg2 lsb-release
-
-          # Add the ROS 2 apt keyring safely: download then dearmor without TTY
-          TMP_KEY=/tmp/ros.key
-          sudo rm -f /usr/share/keyrings/ros-archive-keyring.gpg || true
-          curl --retry 3 --retry-delay 5 -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o ${TMP_KEY}
-          sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg ${TMP_KEY}
-          rm -f ${TMP_KEY}
-
-          # Ensure only ROS2 repo is present (remove ROS1 repo that can cause 404)
-          sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
-
-          # Add ROS2 repository using signed-by (secure and avoids apt-key deprecation)
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
-          # Update apt after adding repo
-          sudo apt-get update
+      - name: Setup ROS 2
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: humble
 
       - name: Cache rosdep and pip
         uses: actions/cache@v4
@@ -91,7 +33,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-vcstool python3-colcon-common-extensions python3-pip git
+          sudo apt-get install -y python3-vcstool python3-colcon-common-extensions python3-pip
 
       - name: Cache colcon build artifacts
         uses: actions/cache@v4
@@ -134,23 +76,6 @@ jobs:
           # Fail the build if rosdep cannot install required dependencies
           rosdep install --from-paths src --ignore-src -r -y
 
-      - name: Collect apt/key diagnostics (always)
-        if: always()
-        run: |
-          set -e || true
-          mkdir -p /tmp/ci-diagnostics
-          sudo ls -l /etc/apt/sources.list.d > /tmp/ci-diagnostics/sources_list_d.txt || true
-          sudo cat /etc/apt/sources.list > /tmp/ci-diagnostics/sources_list.txt || true
-          sudo ls -l /etc/apt/trusted.gpg.d > /tmp/ci-diagnostics/trusted_gpg_d.txt || true
-          sudo ls -l /usr/share/keyrings > /tmp/ci-diagnostics/keyrings.txt || true
-          sudo openssl s_client -showcerts -servername packages.ros.org -connect packages.ros.org:443 </dev/null > /tmp/ci-diagnostics/ros_org_openssl.txt 2>&1 || true
-
-      - name: Upload diagnostics artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-apt-diagnostics
-          path: /tmp/ci-diagnostics
 
 
       - name: Build
