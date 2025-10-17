@@ -18,7 +18,7 @@ jobs:
       - name: Setup ROS 2 Humble
         uses: ros-tooling/setup-ros@v0.2
         with:
-          distribution: humble
+          required-ros-distributions: humble
 
       - name: Cache rosdep and pip
         uses: actions/cache@v4
