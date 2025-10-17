@@ -1,5 +1,9 @@
 # Universal Arm Controller
 
+[![ROS Version](https://img.shields.io/badge/ROS-ROS2%20Humble-blue)](https://docs.ros.org/en/humble/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Build Status](https://github.com/Ding-Kaiyue/universal-arm-controller/actions/workflows/colcon-build.yml/badge.svg?branch=master)](https://github.com/Ding-Kaiyue/universal-arm-controller/actions/workflows/colcon-build.yml)
+
 一个**完整的机械臂控制系统解决方案**，基于 ROS2 的模块化多组件架构，集成了轨迹规划、轨迹插值、硬件驱动等核心功能，为工业机械臂提供高效、可靠的运动控制。
 
 > 📖 **快速导航**: 首次使用请先参考 [arm_controller 使用文档](src/arm_controller/README.md) 了解系统详细功能。
