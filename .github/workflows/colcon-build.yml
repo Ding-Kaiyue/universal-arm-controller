@@ -50,9 +50,9 @@ jobs:
         run: |
           # support deps.repos at repo root or under src/
           if [ -f deps.repos ]; then
-            vcs import src < deps.repos || true
+            vcs import src < deps.repos
           elif [ -f src/deps.repos ]; then
-            vcs import src < src/deps.repos || true
+            vcs import src < src/deps.repos
           else
             echo "no deps.repos found"
           fi
@@ -69,12 +69,13 @@ jobs:
 
       - name: Install ROS dependencies
         run: |
+          source /opt/ros/humble/setup.bash
           sudo apt-get update
           python3 -m pip install -U rosdep
           sudo rosdep init || true
-          rosdep update || true
-          # Fail the build if rosdep cannot install required dependencies
-          rosdep install --from-paths src --ignore-src -r -y
+          rosdep update
+          # Install dependencies from all packages in src (including those from deps.repos)
+          rosdep install --from-paths src --ignore-src -r -y --skip-keys="trac_ik"
 
 
 
