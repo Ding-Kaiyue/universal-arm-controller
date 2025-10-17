@@ -80,6 +80,8 @@ jobs:
 
       - name: Build
         run: |
+          # Source ROS 2 setup before building
+          source /opt/ros/humble/setup.bash
           # Use merge-install for simpler runtime sourcing
           colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 
@@ -98,5 +100,7 @@ jobs:
       - name: Run tests
         if: always()
         run: |
+          source /opt/ros/humble/setup.bash
+          source install/setup.bash
           colcon test --event-handlers console_direct+
           colcon test-result --verbose
