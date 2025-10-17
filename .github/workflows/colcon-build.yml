@@ -75,7 +75,7 @@ jobs:
           sudo rosdep init || true
           rosdep update
           # Install dependencies from all packages in src (including those from deps.repos)
-          rosdep install --from-paths src --ignore-src -r -y --skip-keys="trac_ik"
+          rosdep install --from-paths src --ignore-src -r -y
 
 
 
