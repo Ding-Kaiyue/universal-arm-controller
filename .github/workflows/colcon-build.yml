@@ -20,6 +20,25 @@ jobs:
         with:
           required-ros-distributions: humble
 
+      - name: Ensure ROS 2 apt key and repository (explicit)
+        run: |
+          set -e
+          # Install required tools
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg2 lsb-release
+
+          # Add the ROS 2 apt keyring (gpg dearmor into keyrings directory)
+          curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key | sudo gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+          # Ensure only ROS2 repo is present (remove ROS1 repo that can cause 404)
+          sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
+
+          # Add ROS2 repository using signed-by (secure and avoids apt-key deprecation)
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+          # Update apt after adding repo
+          sudo apt-get update
+
       - name: Cache rosdep and pip
         uses: actions/cache@v4
         with:
