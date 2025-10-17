@@ -15,10 +15,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup ROS 2 Humble
-        uses: ros-tooling/setup-ros@v0.2
-        with:
-          required-ros-distributions: humble
+      - name: Prepare runner and add ROS 2 apt key/repo (manual)
+        run: |
+          set -e
+          # Basic runner prep: locales and timezone non-interactively
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl gnupg2 lsb-release tzdata locales
+          sudo locale-gen en_US en_US.UTF-8
+          sudo bash -c 'echo "Etc/UTC" > /etc/timezone'
+          sudo ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime
+
+          # Add the ROS 2 apt keyring (gpg dearmor into keyrings directory)
+          curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key | sudo gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+          # Remove any ROS1 apt source (prevents 404) and add ROS2 repo signed-by the keyring
+          sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+          # Update apt now that repos are correct
+          sudo apt-get update
 
       - name: Ensure ROS 2 apt key and repository (explicit)
         run: |
