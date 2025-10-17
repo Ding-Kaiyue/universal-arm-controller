@@ -38,7 +38,7 @@ jobs:
           if [ "${USE_HTTP:-false}" = "true" ]; then
             echo "Using HTTP for ROS2 repo (insecure fallback)"
             sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
-            echo "deb [arch=$(dpkg --print-architecture)] http://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+            echo "deb [arch=$(dpkg --print-architecture)] http://ftp.osuosl.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
           else
             # Download ROS key to temp file then dearmor without prompting gpg for a tty
             TMP_KEY=/tmp/ros.key
@@ -49,7 +49,7 @@ jobs:
 
             # Remove any ROS1 apt source (prevents 404) and add ROS2 repo signed-by the keyring
             sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://packages.ros.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://ftp.osuosl.org/ros2/ubuntu $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
           fi
 
           # Update apt now that repos are correct
@@ -62,8 +62,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y curl gnupg2 lsb-release
 
-          # Add the ROS 2 apt keyring (gpg dearmor into keyrings directory)
-          curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key | sudo gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg
+          # Add the ROS 2 apt keyring safely: download then dearmor without TTY
+          TMP_KEY=/tmp/ros.key
+          sudo rm -f /usr/share/keyrings/ros-archive-keyring.gpg || true
+          curl --retry 3 --retry-delay 5 -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o ${TMP_KEY}
+          sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg ${TMP_KEY}
+          rm -f ${TMP_KEY}
 
           # Ensure only ROS2 repo is present (remove ROS1 repo that can cause 404)
           sudo rm -f /etc/apt/sources.list.d/ros-latest.list || true
