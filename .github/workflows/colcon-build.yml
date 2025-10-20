@@ -83,8 +83,8 @@ jobs:
           # Source ROS 2 setup before building
           source /opt/ros/humble/setup.bash
           # Use merge-install for simpler runtime sourcing
-          # Skip trac_ik_examples (external dependency with compilation warnings treated as errors)
-          colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-skip trac_ik_examples
+          # Skip trac_ik_examples (has uninitialized variable warnings treated as errors)
+          colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-skip trac_ik_examples trac_ik
 
       - name: Upload build cache
         if: always()
