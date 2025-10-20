@@ -38,7 +38,6 @@ jobs:
         with:
           path: |
             build
-            install
             log
           key: ${{ runner.os }}-colcon-${{ hashFiles('**/deps.repos','**/package.xml') }}
           restore-keys: |
@@ -78,15 +77,23 @@ jobs:
           # Install dependencies from all packages in src (including those from deps.repos)
           # Skip warehouse_ros_mongo as it's not available in ROS 2 Humble (removed upstream)
           rosdep install --from-paths src --ignore-src -r -y --skip-keys warehouse_ros_mongo
-
+      - name: Ensure clean install layout
+        run: |
+          # Remove any existing install/ directory created with a different layout
+          if [ -d install ]; then
+            echo "Removing existing install/ (to avoid 'created with layout merged' errors)"
+            rm -rf install
+          else
+            echo "No existing install/ directory"
+          fi
 
 
       - name: Build
         run: |
           # Source ROS 2 setup before building
           source /opt/ros/humble/setup.bash
-          # Use merge-install for simpler runtime sourcing
-          colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+          # Plain colcon build (do not use --merge-install)
+          colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 
       - name: Upload build cache
         if: always()
@@ -94,7 +101,6 @@ jobs:
         with:
           path: |
             build
-            install
             log
           key: ${{ runner.os }}-colcon-${{ hashFiles('**/deps.repos','**/package.xml') }}
           restore-keys: |
