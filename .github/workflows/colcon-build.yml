@@ -20,15 +20,13 @@ jobs:
         with:
           required-ros-distributions: humble
 
-      - name: Cache rosdep and pip
+      - name: Cache pip
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cache/rosdep
-            ~/.cache/pip
-          key: ${{ runner.os }}-rosdep-pip-${{ hashFiles('**/deps.repos','**/package.xml') }}
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/deps.repos','**/package.xml') }}
           restore-keys: |
-            ${{ runner.os }}-rosdep-pip-
+            ${{ runner.os }}-pip-
 
       - name: Install system dependencies
         run: |
@@ -73,11 +71,10 @@ jobs:
           sudo apt-get update
           python3 -m pip install -U rosdep
           sudo rosdep init || true
-          # Clear rosdep cache to ensure fresh dependency resolution
-          rm -rf ~/.cache/rosdep
           rosdep update
           # Install dependencies from all packages in src (including those from deps.repos)
-          rosdep install --from-paths src --ignore-src -r -y --skip-keys="warehouse_ros_mongo"
+          # Skip warehouse_ros_mongo as it's not available in ROS 2 Humble (removed upstream)
+          rosdep install --from-paths src --ignore-src -r -y --skip-keys warehouse_ros_mongo
 
 
 
@@ -86,7 +83,8 @@ jobs:
           # Source ROS 2 setup before building
           source /opt/ros/humble/setup.bash
           # Use merge-install for simpler runtime sourcing
-          colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+          # Skip trac_ik_examples (external dependency with compilation warnings treated as errors)
+          colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release --skip-packages trac_ik_examples
 
       - name: Upload build cache
         if: always()
