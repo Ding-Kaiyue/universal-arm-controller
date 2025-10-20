@@ -73,6 +73,8 @@ jobs:
           sudo apt-get update
           python3 -m pip install -U rosdep
           sudo rosdep init || true
+          # Clear rosdep cache to ensure fresh dependency resolution
+          rm -rf ~/.cache/rosdep
           rosdep update
           # Install dependencies from all packages in src (including those from deps.repos)
           rosdep install --from-paths src --ignore-src -r -y
