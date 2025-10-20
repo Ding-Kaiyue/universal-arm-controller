@@ -65,6 +65,14 @@ jobs:
             echo "TracIK already present or will be provided by deps.repos"
           fi
 
+      - name: Configure trac_ik to skip examples (CI compatibility)
+        run: |
+          # Modify trac_ik package.xml to remove trac_ik_examples dependency
+          # This allows trac_ik metapackage to work without building the problematic examples
+          if [ -f src/trac_ik/package.xml ]; then
+            sed -i '/trac_ik_examples/d' src/trac_ik/package.xml || true
+          fi
+
       - name: Install ROS dependencies
         run: |
           source /opt/ros/humble/setup.bash
@@ -83,8 +91,8 @@ jobs:
           # Source ROS 2 setup before building
           source /opt/ros/humble/setup.bash
           # Use merge-install for simpler runtime sourcing
-          # Disable -Werror for maybe-uninitialized to allow trac_ik_examples to compile
-          colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release -Wno-error=maybe-uninitialized
+          # Skip trac_ik_examples which has compiler warnings treated as errors in CI environment
+          colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-skip trac_ik_examples
 
       - name: Upload build cache
         if: always()
