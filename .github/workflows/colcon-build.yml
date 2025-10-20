@@ -67,10 +67,13 @@ jobs:
 
       - name: Configure trac_ik to skip examples (CI compatibility)
         run: |
-          # Modify trac_ik package.xml to remove trac_ik_examples dependency
+          # Modify trac_ik package.xml and CMakeLists.txt to remove trac_ik_examples dependency
           # This allows trac_ik metapackage to work without building the problematic examples
           if [ -f src/trac_ik/package.xml ]; then
             sed -i '/trac_ik_examples/d' src/trac_ik/package.xml || true
+          fi
+          if [ -f src/trac_ik/CMakeLists.txt ]; then
+            sed -i '/trac_ik_examples/d' src/trac_ik/CMakeLists.txt || true
           fi
 
       - name: Install ROS dependencies
