@@ -2,7 +2,7 @@ name: colcon build
 
 on:
   push:
-    branches: [ test ]
+    branches: [ master ]
   pull_request:
 
 jobs:
