@@ -81,7 +81,17 @@ vcs pull < ../deps.repos
 # 4. 编译和安装
 cd ~/robotic_arm_ws
 rosdep install --from-paths src --ignore-src -r -y
-colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+# Recommended: use the provided build wrapper which will automatically
+# handle an existing `install/` directory created with a different layout
+./build.sh --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+# Alternatively, run colcon directly. If an incompatible `install/` exists,
+# delete or move the existing `install/` directory before running a plain
+# colcon build to avoid layout conflicts:
+#   rm -rf install build log
+#   colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+
 source install/setup.bash
 ```
 
