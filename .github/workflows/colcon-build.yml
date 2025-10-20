@@ -61,20 +61,12 @@ jobs:
           if [ ! -d src/trac_ik ] && [ ! -d trac_ik_ws/src/trac_ik ]; then
             echo "TracIK not found in workspace, cloning aprotyas/trac_ik into src/trac_ik"
             git clone https://github.com/aprotyas/trac_ik.git src/trac_ik || true
+            # Remove trac_ik_examples since it has uninitialized variable warnings in CI environment
+            rm -rf src/trac_ik/trac_ik_examples || true
           else
             echo "TracIK already present or will be provided by deps.repos"
           fi
 
-      - name: Configure trac_ik to skip examples (CI compatibility)
-        run: |
-          # Modify trac_ik package.xml and CMakeLists.txt to remove trac_ik_examples dependency
-          # This allows trac_ik metapackage to work without building the problematic examples
-          if [ -f src/trac_ik/package.xml ]; then
-            sed -i '/trac_ik_examples/d' src/trac_ik/package.xml || true
-          fi
-          if [ -f src/trac_ik/CMakeLists.txt ]; then
-            sed -i '/trac_ik_examples/d' src/trac_ik/CMakeLists.txt || true
-          fi
 
       - name: Install ROS dependencies
         run: |
@@ -94,8 +86,7 @@ jobs:
           # Source ROS 2 setup before building
           source /opt/ros/humble/setup.bash
           # Use merge-install for simpler runtime sourcing
-          # Skip trac_ik_examples which has compiler warnings treated as errors in CI environment
-          colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-skip trac_ik_examples
+          colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 
       - name: Upload build cache
         if: always()
