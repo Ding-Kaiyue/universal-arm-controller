@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.8)
 project(arm_controller)
 
+# Ensure option() honors normal variables behavior consistently
+if(POLICY CMP0077)
+  cmake_policy(SET CMP0077 NEW)
+endif()
+
 # 默认禁用测试
 if(NOT DEFINED BUILD_TESTING)
   set(BUILD_TESTING OFF)
