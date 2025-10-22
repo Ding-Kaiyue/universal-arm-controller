@@ -43,43 +43,6 @@ public:
 
 protected:
     rclcpp::Node::SharedPtr node_;
-
-    // // 辅助方法：根据frame_id确定mapping
-    // std::string determine_mapping_from_frame_id(const std::string& frame_id) {
-    //     if (frame_id.empty()) {
-    //         return "single_arm";  // 默认单臂
-    //     }
-
-    //     // 直接根据frame_id的前缀或内容确定mapping
-    //     if (frame_id == "base_link") {
-    //         return "single_arm";
-    //     } else if (frame_id == "left_base_link" || frame_id.find("left_") == 0) {
-    //         return "left_arm";
-    //     } else if (frame_id == "right_base_link" || frame_id.find("right_") == 0) {
-    //         return "right_arm";
-    //     } else {
-    //         return "single_arm";  // 默认单臂
-    //     }
-    // }
-
-    // // 辅助方法：根据关节名称直接确定mapping
-    // std::string determine_mapping_from_joint_names(const std::vector<std::string>& joint_names) {
-    //     if (joint_names.empty()) {
-    //         return "single_arm";
-    //     }
-
-    //     // 检查第一个关节名称的前缀来确定mapping
-    //     const std::string& first_joint = joint_names[0];
-
-    //     if (first_joint.find("left_") == 0) {
-    //         return "left_arm";
-    //     } else if (first_joint.find("right_") == 0) {
-    //         return "right_arm";
-    //     } else {
-    //         return "single_arm";  // 默认单臂 (joint1, joint2等)
-    //     }
-    // }
-
 };
 
 #endif  // TRAJECTORY_CONTROLLER_BASE_HPP_

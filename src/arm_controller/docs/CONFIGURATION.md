@@ -147,7 +147,6 @@ controllers:
     class: JointVelocityController
     input_topic:
       name: /controller_api/joint_velocity_action
-      type: sensor_msgs/msg/JointState
 
   - key: Move2Initial
     class: Move2InitialController
@@ -162,26 +161,23 @@ controllers:
     class: MoveCController
     input_topic: 
       name: /controller_api/movec_action
-      type: geometry_msgs/msg/PoseArray
 
   - key: MoveJ
     class: MoveJController
     input_topic: 
       name: /controller_api/movej_action
-      type: sensor_msgs/msg/JointState
 
   - key: MoveL
     class: MoveLController
     input_topic: 
       name: /controller_api/movel_action
-      type: geometry_msgs/msg/Pose
 ```
 | 参数 | 类型 | 说明 | 示例 | 
 | --- | --- | --- | --- |
 | key | string | 控制器唯一标识符 | MoveJ |
 | class | string | 控制器类名(需在注册宏中定义) | MoveJController |
 | input_topic.name | string | 控制器订阅的ROS话题名称 | /controller_api/movej_action |
-| input_topic.type | string | 控制器订阅的ROS话题类型 | sensor_msgs/msg/JointState |
+
 
 #### 已注册的控制器一览
 | 控制器Key | 控制器类名 | 输入话题 | 消息类型 | 说明 |
@@ -203,7 +199,6 @@ controllers:
   class: TrajectoryReplayController
   input_topic:
     name: /controller_api/trajectory_replay_action
-    type: std_msgs/msg/String
 ```
 
 ## 插值配置

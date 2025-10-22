@@ -26,7 +26,7 @@ controllers:
     class: JointVelocityController
     input_topic:
       name: /controller_api/joint_velocity_action
-      type: sensor_msgs/msg/JointState
+      # type: sensor_msgs/msg/JointState
 
   - key: Move2Initial
     class: Move2InitialController
@@ -41,17 +41,17 @@ controllers:
     class: MoveCController
     input_topic: 
       name: /controller_api/movec_action
-      type: geometry_msgs/msg/PoseArray
+      # type: geometry_msgs/msg/PoseArray
   - key: MoveJ
     class: MoveJController
     input_topic: 
       name: /controller_api/movej_action
-      type: sensor_msgs/msg/JointState
+      # type: sensor_msgs/msg/JointState
   - key: MoveL
     class: MoveLController
     input_topic: 
       name: /controller_api/movel_action
-      type: geometry_msgs/msg/Pose
+      # type: geometry_msgs/msg/Pose
   # - key: PointRecord
   #   class: PointRecordController
   #   input_topic: 

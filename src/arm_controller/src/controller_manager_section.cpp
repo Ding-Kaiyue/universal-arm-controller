@@ -383,7 +383,7 @@ void ControllerManagerNode::publish_status() {
 void ControllerManagerNode::init_action_event_listener() {
     // 创建动作事件订阅器
     action_event_subscriber_ = this->create_subscription<std_msgs::msg::String>(
-        "/internal/action_controller_events", rclcpp::QoS(10).reliable(),
+        "/action_controller_events", rclcpp::QoS(10).reliable(),
         std::bind(&ControllerManagerNode::handle_action_event, this, std::placeholders::_1));
 
     RCLCPP_INFO(this->get_logger(), "Action event listener initialized");

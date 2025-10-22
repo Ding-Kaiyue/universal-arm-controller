@@ -24,7 +24,7 @@
 │                                                                     │
 │  ┌──────────────────────────┐    ┌──────────────────────────┐       │
 │  │   ControllerManager      │    │   TrajectoryController   │       │
-│  │   (状态管理节点)          │    │   (轨迹执行节点)          │       │
+│  │   (状态管理节点)           │    │   (轨迹执行节点)           │       │
 │  │                          │    │                          │       │
 │  │  • WorkMode Service      │    │  • Action Server         │       │
 │  │  • Controller Registry   │    │  • MoveIt Integration    │       │
@@ -32,17 +32,17 @@
 │  │  • Safety Monitoring     │    │  • Interpolation         │       │
 │  └──────────┬───────────────┘    └───────────┬──────────────┘       │
 │             │                                │                      │
-│             └────────────┬────────────────────┘                      │
+│             └────────────┬───────────────────┘                      │
 │                          │                                          │
-│              ┌───────────▼──────────┐                                │
-│              │  HardwareManager     │                                │
-│              │    (Singleton)       │                                │
-│              │                      │                                │
-│              │  • Motor Control     │                                │
-│              │  • State Feedback    │                                │
-│              │  • CAN-FD Protocol   │                                │
-│              └───────────┬──────────┘                                │
-└──────────────────────────┼─────────────────────────────────────────┘
+│              ┌───────────▼──────────┐                               │
+│              │  HardwareManager     │                               │
+│              │    (Singleton)       │                               │
+│              │                      │                               │
+│              │  • Motor Control     │                               │
+│              │  • State Feedback    │                               │
+│              │  • CAN-FD Protocol   │                               │
+│              └───────────┬──────────┘                               │
+└──────────────────────────┼──────────────────────────────────────────┘
                            │
                     ┌──────▼───────┐
                     │  CAN-FD Bus  │
@@ -71,195 +71,102 @@ Arm Controller 基于以下设计理念:
 
 ### 节点职责
 
-#### 1. ControllerManager (控制管理节点)
+#### 1. ControllerManagerNode (控制管理节点)
 
 **主要职责**:
-- 控制器注册和管理
-- 工作模式切换
-- 安全状态监控
+- 创建和管理所有控制模式的控制器实例
+- 工作模式切换和状态管理
+- 处理安全状态转换（钩子状态）
 - 系统状态发布
 
 **关键接口**:
 ```cpp
 // 服务
-/controller_api/controller_mode (controller_interfaces/srv/WorkMode)
+/controller_api/controller_mode (controller_interfaces/srv/WorkMode) // 工作模式切换
 
 // 话题
-/controller_api/running_status (std_msgs/msg/String)
-/controller_api/movej_action (sensor_msgs/msg/JointState)
-/controller_api/movel_action (geometry_msgs/msg/Pose)
-/controller_api/movec_action (geometry_msgs/msg/PoseArray)
-/controller_api/joint_velocity_action (sensor_msgs/msg/JointState)
+/controller_api/running_status (std_msgs/msg/String)                 // 当前工作模式
+/controller_api/movej_action (sensor_msgs/msg/JointState)            // movej目标点
+/controller_api/movel_action (geometry_msgs/msg/Pose)                // movel目标点
+/controller_api/movec_action (geometry_msgs/msg/PoseArray)           // movec目标点
+/controller_api/joint_velocity_action (sensor_msgs/msg/JointState)   // 关节速度控制目标速度
 ```
 
-**核心组件**:
-```cpp
-class ControllerManager {
-private:
-    std::map<std::string, std::shared_ptr<IController>> controllers_;
-    std::shared_ptr<HardwareManager> hardware_manager_;
-    std::string current_mode_;
-    std::string current_mapping_;
+**核心功能** - 见 [controller_manager_section.hpp](../include/arm_controller/controller_manager_section.hpp):
+- 从 YAML 配置加载所有控制器
+- 通过 WorkMode 服务处理模式切换
+- 管理 HoldState 确保安全过渡
+- 发布运行状态和监听轨迹执行完成事件
 
-public:
-    void registerController(const std::string& name,
-                           std::shared_ptr<IController> controller);
-    bool switchMode(const std::string& mode,
-                   const std::string& mapping);
-    void update();  // 定时调用当前控制器的update()
-};
-```
-
-#### 2. TrajectoryController (轨迹控制节点)
+#### 2. TrajectoryControllerNode (轨迹执行节点)
 
 **主要职责**:
-- 接收 MoveIt 轨迹执行请求
+- 接收和执行轨迹执行请求
 - 轨迹插值和优化
-- 实时轨迹跟踪
-- 执行状态反馈
+- 与硬件管理器交互执行运动
 
 **关键接口**:
 ```cpp
-// Action Server
-/arm_controller/follow_joint_trajectory
-  (control_msgs/action/FollowJointTrajectory)
+// Action Server (每个映射独立)
+/arm_controller/follow_joint_trajectory (control_msgs/action/FollowJointTrajectory)
 
 // 话题
-/joint_states (sensor_msgs/msg/JointState)
+/action_controller_events (std_msgs/msg/String)  // 发布轨迹执行事件：START, PAUSE, RESUME, STOP
 ```
 
-**核心组件**:
-```cpp
-class TrajectoryController {
-private:
-    rclcpp_action::Server<FollowJointTrajectory>::SharedPtr action_server_;
-    std::shared_ptr<TrajectoryInterpolator> interpolator_;
-    std::shared_ptr<HardwareManager> hardware_manager_;
-
-public:
-    void executeTrajectory(const Trajectory& trajectory);
-    void handleGoal(const GoalHandle& goal_handle);
-    void handleCancel(const GoalHandle& goal_handle);
-};
-```
+**核心功能** - 见 [trajectory_controller_section.hpp](../include/arm_controller/trajectory_controller_section.hpp):
+- 为每个机械臂映射维护独立的 Action Server
+- 使用 TrajectoryInterpolator 进行轨迹光滑化
+- 通过 TrajectoryConverter 进行轨迹格式转换
+- 发布轨迹执行事件供 ControllerManagerNode 监听
 
 ### 节点通信
 
 ```
 用户/MoveIt
     │
-    ├──► ControllerManager (WorkMode Service)
+    ├──► ControllerManagerNode (WorkMode Service)
     │         │
-    │         ├──► HardwareManager (Motor Control)
-    │         └──► 控制器切换
+    │         ├──► start_working_controller()
+    │         │    └──► ModeControllerBase::start(mapping)
+    |         |         ├──► TrajectoryInterpolator (插值)
+    │         │         └──► HardwareManager (轨迹执行)
+    │         └──► 监听 /action_controller_events 话题
     │
-    └──► TrajectoryController (Action Server)
+    └──► TrajectoryControllerNode (Action Server)
               │
-              ├──► HardwareManager (Trajectory Execution)
-              └──► 状态反馈
+              ├──► execute_trajectory()
+              │    ├──► TrajectoryInterpolator (插值)
+              │    └──► HardwareManager (轨迹执行)
+              └──► 发布 /action_controller_events 话题
 ```
 
 ### 并行执行
 
-两个节点在同一进程中并行运行:
+两个节点在同一进程中并行运行，见 [main 入口](../src/main.cpp)。
 
-```cpp
-int main(int argc, char** argv) {
-    rclcpp::init(argc, argv);
-
-    // 创建执行器
-    rclcpp::executors::MultiThreadedExecutor executor;
-
-    // 创建节点
-    auto controller_manager = std::make_shared<ControllerManager>();
-    auto trajectory_controller = std::make_shared<TrajectoryController>();
-
-    // 添加到执行器
-    executor.add_node(controller_manager);
-    executor.add_node(trajectory_controller);
-
-    // 并行执行
-    executor.spin();
-
-    rclcpp::shutdown();
-    return 0;
-}
-```
+使用 `MultiThreadedExecutor` 确保两个节点可以独立且并发地处理各自的回调和事件。
 
 ---
 
-## 核心组件
+## 其他组件
 
-### HardwareManager (单例模式)
-
-**职责**:
-- 管理所有电机的通信
-- 封装硬件驱动库接口
-- 提供线程安全的访问接口
-
-**实现**:
-```cpp
-class HardwareManager {
-private:
-    static std::shared_ptr<HardwareManager> instance_;
-    static std::mutex instance_mutex_;
-
-    std::shared_ptr<hardware_driver::RobotHardware> robot_hardware_;
-    std::map<std::string, HardwareConfig> hardware_configs_;
-
-    HardwareManager();  // 私有构造
-
-public:
-    static std::shared_ptr<HardwareManager> getInstance();
-
-    void controlMotor(const std::string& mapping,
-                     const std::vector<double>& positions);
-    void controlMotorVelocity(const std::string& mapping,
-                             const std::vector<double>& velocities);
-    std::vector<double> getJointPositions(const std::string& mapping);
-    std::vector<double> getJointVelocities(const std::string& mapping);
-};
-```
-
-**单例保证**:
-```cpp
-std::shared_ptr<HardwareManager> HardwareManager::getInstance() {
-    std::lock_guard<std::mutex> lock(instance_mutex_);
-    if (!instance_) {
-        instance_ = std::shared_ptr<HardwareManager>(new HardwareManager());
-    }
-    return instance_;
-}
-```
-
-### ControllerFactory
+### HardwareManager (单例硬件管理)
 
 **职责**:
-- 创建和注册所有控制器
-- 提供控制器依赖注入
+- 管理所有电机的 CAN-FD 通信
+- 封装 hardware_driver 库接口
+- 提供线程安全的硬件访问接口
 
 **实现**:
-```cpp
-class ControllerFactory {
-public:
-    static void registerAllControllers(
-        ControllerManager& manager,
-        const std::shared_ptr<HardwareManager>& hardware_manager,
-        const std::shared_ptr<rclcpp::Node>& node) {
+见 [hardware_manager.hpp](../include/arm_controller/hardware/hardware_manager.hpp)
 
-        // 轨迹控制器
-        auto movej = std::make_shared<MoveJController>(
-            hardware_manager, node);
-        manager.registerController("MoveJ", movej);
-
-        auto movel = std::make_shared<MoveLController>(
-            hardware_manager, node);
-        manager.registerController("MoveL", movel);
-
-        // ... 注册其他控制器
-    }
-};
-```
+关键功能：
+- 单例实例管理（线程安全）
+- 支持多个机械臂映射 (single_arm/left_arm/right_arm)
+- 电机控制接口：位置控制、速度控制、力矩控制、MIT 模式等
+- 电机状态缓存和查询
+- 支持观察者模式进行状态变化通知
 
 ---
 
@@ -267,86 +174,54 @@ public:
 
 ### 控制器接口
 
-所有控制器实现统一接口:
+所有控制器实现统一接口，见 [mode_controller_base.hpp](../include/arm_controller/controller_base/mode_controller_base.hpp)
 
-```cpp
-class IController {
-public:
-    virtual ~IController() = default;
-
-    // 控制器生命周期
-    virtual void onEnter(const std::string& mapping) = 0;
-    virtual void onExit() = 0;
-    virtual void update() = 0;
-
-    // 钩子状态
-    virtual bool requiresHookState() const { return true; }
-    virtual HookStrategy getHookStrategy() const {
-        return HookStrategy::POSITION_HOLD;
-    }
-};
-```
+关键方法：
+- `start(mapping)` - 控制器激活时调用
+- `stop(mapping)` - 控制器停用时调用
+- `handle_message(msg)` - 处理接收到的消息
+- `needs_hook_state()` - 状态转移时是否需要钩子状态
 
 ### 控制器分类
 
 #### 1. 轨迹控制器基类
 
-```cpp
-class TrajectoryControllerBase : public IController {
-protected:
-    std::shared_ptr<HardwareManager> hardware_manager_;
-    std::shared_ptr<trajectory_planning::MotionPlanningService> planning_service_;
-    std::shared_ptr<trajectory_interpolator::TrajectoryInterpolator> interpolator_;
+见 [trajectory_controller_base.hpp](../include/arm_controller/controller_base/trajectory_controller_base.hpp)
 
-    virtual void planTrajectory() = 0;
-    virtual void executeTrajectory() = 0;
-};
-```
+职责：
+- 规划轨迹（调用 trajectory_planning）
+- 插值轨迹（调用 trajectory_interpolator）
+- 执行轨迹（调用 HardwareManager）
 
 #### 2. 速度控制器基类
 
-```cpp
-class VelocityControllerBase : public IController {
-protected:
-    std::shared_ptr<HardwareManager> hardware_manager_;
-    std::vector<double> velocity_limits_;
-    std::vector<double> position_limits_lower_;
-    std::vector<double> position_limits_upper_;
+见 [velocity_controller_base.hpp](../include/arm_controller/controller_base/velocity_controller_base.hpp)
 
-    virtual bool checkSafety(const std::vector<double>& velocities);
-    virtual void applyVelocity(const std::vector<double>& velocities);
-};
-```
+职责：
+- 安全检查（关节限位、速度限制）
+- 速度控制执行
 
 ### 状态机设计
 
-```
-          ┌─────────────┐
-          │   Disable   │
-          └──────┬──────┘
-                 │
-                 ▼
-          ┌─────────────┐
-          │  HoldState  │◄────────┐
-          └──────┬──────┘         │
-                 │                │
-                 ▼                │
-          ┌─────────────┐         │
-          │   MoveJ     │─────────┤
-          └─────────────┘         │
-                                  │
-          ┌─────────────┐         │
-          │   MoveL     │─────────┤
-          └─────────────┘         │
-                                  │
-          ┌─────────────┐         │
-          │   MoveC     │─────────┤
-          └─────────────┘         │
-                                  │
-          ┌─────────────┐         │
-          │JointVelocity│─────────┘
-          └─────────────┘
-```
+状态转移遵循以下规则：
+
+![HoldState_Workflow](diagrams/HoldState_Workflow.png)
+
+**状态转移规则**:
+
+1. **Disable 和 EmergencyStop 模式**:
+   - 可以从任意状态直接转移到任意模式
+   - 无需安全检查或 HoldState 过渡
+   - 用于紧急停止或快速模式切换
+
+2. **MoveJ/MoveL/MoveC/JointVelocity 之间的转移**:
+   - 如果当前控制器的 `needs_hook_state()` 返回 true，则必须先转移到 HoldState
+   - HoldState 会持续监控转移条件（如轨迹执行完成、速度降为零等）
+   - 条件满足时，自动转移到目标模式
+
+3. **任意模式回到 HoldState**:
+   - 所有模式都支持转移到 HoldState
+   - HoldState 是一个中间安全状态，用于模式间的缓冲和过渡
 
 ---
 
@@ -354,71 +229,46 @@ protected:
 
 ### 1. trajectory_planning 集成
 
-```cpp
-// 创建规划服务
-auto moveit_adapter = std::make_shared<MoveItAdapter>(node);
-auto planning_service = std::make_shared<MotionPlanningService>(
-    movej_strategy, movel_strategy, movec_strategy,
-    moveit_adapter, logger);
+见 [movej_controller.cpp](../src/controller/movej/movej_controller.cpp)、[movel_controller.cpp](../src/controller/movel/movel_controller.cpp)、[movec_controller.cpp](../src/controller/movec/movec_controller.cpp)
 
-// 在控制器中使用
-auto result = planning_service->planJointMotion(goal_state);
-if (result.success) {
-    executeTrajectory(result.trajectory);
-}
-```
+**集成方式**:
+- 各控制器在 `initialize_planning_services()` 中创建 `MoveItAdapter` 和 `MotionPlanningService`
+- 注册对应的规划策略：`registerMoveJStrategy()`、`registerMoveLStrategy()`、`registerMoveCStrategy()`
+- 在 `plan_and_execute()` 方法中调用规划服务：`planJointMotion()`、`planLinearMotion()`、`planArcMotion()`
+- 规划完成后获得轨迹点列表，通过 `TrajectoryConverter` 转换为插值器格式
 
 **集成点**:
-- MoveJ 控制器: 使用 `planJointMotion()`
-- MoveL 控制器: 使用 `planLinearMotion()`
-- MoveC 控制器: 使用 `planArcMotion()`
+- 各控制器初始化时创建规划服务实例（支持多 mapping）
+- 在 `trajectory_callback()` 中接收目标点请求
+- 调用 `plan_and_execute()` 进行规划和执行
 
 ### 2. trajectory_interpolator 集成
 
-```cpp
-// 创建插值器
-auto interpolator = std::make_shared<TrajectoryInterpolator>();
+见 [trajectory_converter.hpp](../include/arm_controller/utils/trajectory_converter.hpp)、[movej_controller.cpp](../src/controller/movej/movej_controller.cpp)、[movel_controller.cpp](../src/controller/movel/movel_controller.cpp)、[movec_controller.cpp](../src/controller/movec/movec_controller.cpp)
 
-// 配置插值参数
-SplineConfig config;
-config.dt = 0.01;
-config.spline_type = SplineConfig::CUBIC_SPLINE;
-config.boundary_condition = BoundaryCondition::SECOND_DERIVATIVE;
-interpolator->setInterpolationConfig(config);
-
-// 插值轨迹
-if (interpolator->loadTrajectory(trajectory)) {
-    auto interpolated = interpolator->interpolate(0.01);
-    executeInterpolatedTrajectory(interpolated);
-}
-```
+**集成方式**:
+- 各控制器在构造函数中创建 `TrajectoryInterpolator` 实例
+- 规划完成后通过 `TrajectoryConverter::convertPlanningToInterpolator()` 转换轨迹格式
+- 通过 `TrajectoryConverter::analyzeTrajectoryDynamics()` 分析轨迹动力学参数
+- 在 `interpolate_trajectory()` 方法中调用 `loadTrajectoryWithDynamicConfig()` 和 `interpolate()` 进行插值
 
 **集成点**:
-- TrajectoryController: 接收 MoveIt 轨迹后插值
-- 所有轨迹控制器: 规划完成后插值优化
+- 各轨迹控制器：在 `plan_and_execute()` 中执行插值并生成光滑轨迹
+- 动力学分析：通过规划结果计算安全的插值参数（速度、加速度、加加速度限制）
 
 ### 3. hardware_driver 集成
 
-```cpp
-// 初始化硬件栈
-std::vector<std::string> interfaces = {"can0"};
-std::map<std::string, std::vector<uint32_t>> motor_config = {
-    {"can0", {1, 2, 3, 4, 5, 6}}
-};
+见 [hardware_manager.hpp](../include/arm_controller/hardware/hardware_manager.hpp)
 
-auto bus = std::make_shared<hardware_driver::bus::CanFdBus>(interfaces);
-auto motor_driver = std::make_shared<hardware_driver::motor_driver::MotorDriverImpl>(bus);
-auto robot_hardware = std::make_shared<hardware_driver::RobotHardware>(
-    motor_driver, motor_config);
-
-// 控制电机
-robot_hardware->enable_motor("can0", 1, 4);
-robot_hardware->control_motor_in_position_mode("can0", 1, 90.0f);
-```
+**集成方式**:
+- HardwareManager 单例类封装了所有 hardware_driver 接口
+- 提供统一的硬件控制接口：位置控制、速度控制、力矩控制等
+- 通过 CAN-FD 总线与电机通信
 
 **集成点**:
-- HardwareManager: 封装所有硬件通信
-- 所有控制器: 通过 HardwareManager 访问硬件
+- ControllerManagerNode 和 TrajectoryControllerNode: 初始化 HardwareManager 实例
+- 所有控制器: 通过 HardwareManager 的公共接口访问和控制硬件
+- 状态反馈: HardwareManager 缓存并提供电机的实时状态信息
 
 ---
 
@@ -463,7 +313,7 @@ Hardware Driver (Observer Pattern)
     ↓
 HardwareManager (缓存状态)
     ↓
-ControllerManager / TrajectoryController
+ControllerManagerNode / TrajectoryControllerNode
     ↓
 /joint_states 话题
     ↓
@@ -486,21 +336,9 @@ ControllerManager / TrajectoryController
 
 **目的**: 运行时切换不同的控制策略
 
-```cpp
-class ControllerManager {
-private:
-    std::shared_ptr<IController> current_controller_;
+见 [controller_manager_section.hpp](../include/arm_controller/controller_manager_section.hpp)
 
-public:
-    void switchController(std::shared_ptr<IController> new_controller) {
-        if (current_controller_) {
-            current_controller_->onExit();
-        }
-        current_controller_ = new_controller;
-        current_controller_->onEnter(mapping_);
-    }
-};
-```
+ControllerManagerNode 通过 `switch_to_mode(mode, mapping)` 方法在不同的 ModeControllerBase 子类间切换（MoveJ、MoveL、MoveC、JointVelocity 等），每次切换时调用前一个控制器的 `stop(mapping)` 和新控制器的 `start(mapping)`。
 
 ### 3. 观察者模式 (Observer)
 
@@ -508,15 +346,9 @@ public:
 
 **目的**: 实时接收电机状态变化
 
-```cpp
-class MotorStatusObserver {
-public:
-    virtual void on_motor_status_update(
-        const std::string& interface,
-        uint32_t motor_id,
-        const Motor_Status& status) = 0;
-};
-```
+见 [hardware_manager.hpp](../include/arm_controller/hardware/hardware_manager.hpp)
+
+HardwareManager 通过观察者模式接收来自 hardware_driver 的电机状态变化，定期缓存和更新电机的位置、速度、加速度等信息，供控制器和其他模块查询。
 
 ### 4. 工厂模式 (Factory)
 
@@ -537,25 +369,37 @@ public:
 ```
 Main Thread
   │
-  ├──► ControllerManager Node (ROS2 Executor)
+  ├──► MultiThreadedExecutor (spin())
   │     │
-  │     └──► Timer Callback (10Hz - 控制器 update)
-  │
-  ├──► TrajectoryController Node (ROS2 Executor)
+  │     ├──► ControllerManagerNode
+  │     │     ├──► Service Callback (/controller_api/controller_mode)
+  │     │     ├──► Timer Callback (1Hz, 发布状态)
+  │     │     └──► Subscription Callback (监听 /action_controller_events)
   │     │
-  │     └──► Action Server Callbacks
+  │     └──► TrajectoryControllerNode
+  │           ├──► Action Server Callbacks (FollowJointTrajectory，每个mapping独立)
+  │           └──► Executor 线程池（处理多个callback）
   │
-  └──► HardwareManager
+  └──► HardwareManager (Singleton)
         │
-        ├──► CAN 接收线程 (hardware_driver)
-        │
-        └──► CAN 发送线程 (hardware_driver)
+        └──► CanFdBus (hardware_driver)
+              ├──► CAN 接收线程（每个接口一个）
+              │     └──► MotorStatusObserver Callback
+              └──► CAN 发送（同步执行，无专门线程）
 ```
 
+**执行模型**:
+- 使用 `MultiThreadedExecutor` 管理两个节点的 callback 执行
+- ControllerManagerNode 和 TrajectoryControllerNode 共享同一个执行器
+- hardware_driver 的 CanFdBus 维护独立的接收线程池（每个 CAN 接口一个线程）
+- 发送操作在调用线程中同步执行
+
 **线程安全保证**:
-- HardwareManager: 单例 + 互斥锁
-- 控制器切换: 互斥锁保护
-- 硬件通信: hardware_driver 内部保证
+- HardwareManager: 单例 + 互斥锁（`instance_mutex_`, `joint_state_mutex_`, `status_mutex_`）确保全局唯一实例和状态访问安全
+- 控制器切换: HoldState 机制和互斥锁保护状态转移
+- 节点间通信: ROS2 话题和服务提供线程安全（QoS reliable）
+- 硬件通信: CanFdBus 通过线程池管理 CAN 接收，send() 在调用线程中同步执行
+- 观察者回调: MotorStatusObserver 在接收线程中被调用，通过互斥锁保护状态更新
 
 ---
 
@@ -563,50 +407,47 @@ Main Thread
 
 ```
 config/
-  ├── hardware_config.yaml      # 硬件配置
-  ├── config.yaml               # 通用配置
-  └── controllers/
-      ├── movej_config.yaml
-      ├── movel_config.yaml
-      └── ...
+  ├── hardware_config.yaml        # 硬件配置：机械臂映射、电机ID、接口信息
+  ├── config.yaml                 # 控制器配置：所有控制器的定义和订阅话题配置
+  ├── interpolator_config.yaml    # 轨迹插值器配置
+  ├── arm380_joint_limits.yaml     # ARM380 关节限位配置
+  └── arm620_joint_limits.yaml     # ARM620 关节限位配置
 ```
 
 **加载流程**:
-```cpp
-// 1. 加载 YAML
-YAML::Node config = YAML::LoadFile("config/hardware_config.yaml");
+- 系统启动时，`ControllerManagerNode::load_config()` 加载 `config.yaml`
+- `HardwareManager::initialize()` 加载 `hardware_config.yaml` 和关节限位配置
+- `ControllerManagerNode::init_controllers()` 根据 `config.yaml` 中的 `controllers` 部分创建并注册所有控制器
+- 各控制器在初始化时读取 `config.yaml` 中的参数（如 `input_topic`）
 
-// 2. 解析配置
-HardwareConfig hw_config;
-hw_config.robot_type = config["robot_type"].as<std::string>();
-hw_config.interface = config["interface"].as<std::string>();
-// ...
-
-// 3. 初始化组件
-hardware_manager->initialize(hw_config);
-```
+**config.yaml 结构**:
+- `common`: 全局话题和服务定义（服务、发布话题等）
+- `controllers`: 所有控制器的配置，包括类名、输入话题名称和类型等
 
 ---
 
-## 性能考虑
+## 性能参数
 
-### 1. 实时性保证
+### 1. 控制频率
 
-- **控制频率**: 10Hz (ControllerManager)
-- **硬件通信**: < 1ms (hardware_driver)
-- **规划超时**: 5s (可配置)
+- **状态发布频率**: 1Hz (ControllerManagerNode，发送当前控制模式)
+- **HoldState 安全检查频率**: 100ms (每个 mapping 一个定时器)
+- **硬件通信频率**: 取决于 CAN-FD 接收线程和电机反馈速率
 
-### 2. 资源占用
+### 2. 超时和安全检查
 
-- **内存**: < 200MB
-- **CPU**: < 10% (单核)
-- **网络**: 仅 ROS2 本地通信
+- **HoldState 超时**: 无硬性超时，持续检查直到满足安全条件
+- **安全条件检查**:
+  - 机器人已停止（关节速度接近零）
+  - 关节在限位范围内
+  - 系统健康（无故障、无紧急停止）
+- **日志输出频率**: 1000ms（DEBUG 和 WARN 级别的 throttle 设置）
 
-### 3. 优化策略
+### 3. 实现特点
 
-- 轨迹预计算和缓存
-- 硬件状态批量读取
-- 关键路径无动态内存分配
+- **动态保持策略**: 根据前一个模式选择位置保持或速度保持
+- **并行执行**: 多个 mapping 可以独立运行各自的 HoldState 超时检查
+- **自适应安全检查**: 系统不健康时暂停安全检查，恢复后自动恢复
 
 ---
 
@@ -614,16 +455,15 @@ hardware_manager->initialize(hw_config);
 
 ### 添加新控制器
 
-1. 继承 `IController` 接口
-2. 实现 `onEnter()`, `onExit()`, `update()`
-3. 在 `ControllerFactory` 中注册
-4. 添加对应的话题订阅
+1. 继承 `ModeControllerBase` 或 `TrajectoryControllerBase` 类
+2. 实现 `start(mapping)`, `stop(mapping)`方法
+3. 在 `ControllerManagerNode::init_controllers()` 中创建实例并注册
+4. 在配置文件中添加控制器参数
+5. 添加对应的消息订阅/发布
 
 ### 添加新硬件
 
-1. 实现 hardware_driver 接口
-2. 在 HardwareManager 中集成
-3. 更新 hardware_config.yaml
+1. 在 hardwre_driver 中实现
 
 ### 添加新规划策略
 
