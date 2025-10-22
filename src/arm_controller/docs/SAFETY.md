@@ -22,43 +22,7 @@
 
 ### Multi-Layer Safety Architecture
 
-```plantuml
-@startuml
-skinparam componentStyle rectangle
-skinparam backgroundColor #FEFEFE
-skinparam defaultTextAlignment center
-
-rectangle "User Command Layer" as user #E3F2FD
-rectangle "Layer 1: Hook State Safety Check" as layer1 #FFF9C4 {
-  (Robot Stop Check)
-  (Joint Limit Check)
-  (System Health Check)
-}
-rectangle "Layer 2: Motion Planning Safety" as layer2 #FFE0B2 {
-  (MoveIt Collision Detection)
-  (Workspace Limits)
-  (IK Solvability Check)
-}
-rectangle "Layer 3: Real-time Execution Safety" as layer3 #FFCCBC {
-  (Velocity Limits)
-  (Acceleration Limits)
-  (Position Limit Monitoring)
-}
-rectangle "Layer 4: Hardware Layer Safety" as layer4 #F8BBD0 {
-  (CAN Timeout Protection)
-  (Motor Overcurrent Protection)
-  (Encoder Fault Detection)
-}
-rectangle "Motors" as motors #BDBDBD
-
-user -down-> layer1
-layer1 -down-> layer2
-layer2 -down-> layer3
-layer3 -down-> layer4
-layer4 -down-> motors
-
-@enduml
-```
+![Safety_Architecture](diagrams/Safety_Architecture.png)
 
 ### 安全原则
 
@@ -211,146 +175,98 @@ bool HoldState::isSystemHealthy() const {
 ```cpp
 class DisableController : public IController {
 public:
-    bool requiresHookState() const override {
+    bool needs_hook_state() const override {
         return false;  // Disable 直接执行,无需安全检查
     }
 };
 ```
 
-### 超时处理
+### 持续等待机制
+
+HoldState 不设置硬性超时，而是**持续等待直到安全条件满足**。通过定时器（100ms 检查频率）不断检查以下条件：
 
 ```cpp
-bool HoldState::waitForSafetyConditions(
-    std::chrono::seconds timeout = std::chrono::seconds(10)) {
-
-    auto start = std::chrono::steady_clock::now();
-
-    while (!allSafetyConditionsMet()) {
-        auto elapsed = std::chrono::steady_clock::now() - start;
-        if (elapsed > timeout) {
-            RCLCPP_ERROR(logger_, "HoldState timeout! Safety conditions not met.");
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+// 见 hold_state_controller.cpp::safety_check_timer_callback()
+void HoldStateController::safety_check_timer_callback(const std::string& mapping) {
+    // 1. 持续发送保持命令（位置保持或速度保持）
+    if (is_velocity_mode) {
+        hardware_manager_->send_hold_velocity_command(normalized_mapping);
+    } else {
+        hardware_manager_->send_hold_position_command(normalized_mapping, hold_positions);
     }
-    return true;
+
+    // 2. 检查系统健康状态
+    if (ctx.system_health_check_paused) {
+        if (is_system_healthy) {
+            // 系统恢复，恢复安全检查
+            ctx.system_health_check_paused = false;
+        } else {
+            // 系统不健康，继续暂停检查
+            return;
+        }
+    }
+
+    // 3. 检查是否可以转换到目标模式
+    if (can_transition_to_target(normalized_mapping)) {
+        // 所有安全条件满足，执行转换
+        transition_ready_callback_();
+        // 停止定时器
+        ctx.safety_timer->cancel();
+    }
+    // 条件不满足时，继续等待下一次检查（100ms）
 }
 ```
+
+**关键特点**:
+- **无硬性超时**: 不会因为等待时间过长而强制失败
+- **自适应暂停**: 当系统不健康时暂停检查，恢复后自动继续
+- **持续保持**: 不断发送保持命令防止机械臂移动
+- **100ms 检查频率**: 足以捕捉系统状态变化
 
 ---
 
 ## 实时限位保护
 
-### 位置限位
+### 限位配置
 
-#### 软限位配置
+限位配置分别存储在各机器人型号的 YAML 文件中，见：
+- [config/arm620_joint_limits.yaml](../config/arm620_joint_limits.yaml)
+- [config/arm380_joint_limits.yaml](../config/arm380_joint_limits.yaml)
 
+配置格式（YAML）:
 ```yaml
-# config/hardware_config.yaml
-hardware_interfaces:
-  single_arm:
-    position_limits:
-      lower: [-3.14, -2.09, -2.09, -3.14, -2.09, -3.14]  # 弧度
-      upper: [3.14, 2.09, 2.09, 3.14, 2.09, 3.14]
+joint_limits:
+  joint1:
+    has_position_limits: true
+    min_position: -2.9760
+    max_position: 2.9760
+    has_velocity_limits: true
+    max_velocity: 3.14     # rad/s
+    has_acceleration_limits: true
+    max_acceleration: 3.14 # rad/s^2
+  joint_2:
+    # ... 其他关节
 ```
 
-#### 实时监控
+加载流程：见 [hardware_manager.cpp:load_joint_limits_config()](../src/hardware/hardware_manager.cpp)
+1. 根据机械臂类型（robot_type）加载对应的限位配置文件
+2. 解析 YAML 中的 `joint_limits` 节点
+3. 将限位信息存储在 `joint_limits_config_` 映射中
 
-```cpp
-bool SafetyMonitor::checkPositionLimits(
-    const std::vector<double>& positions) {
+### 位置和速度限位检查
 
-    for (size_t i = 0; i < positions.size(); ++i) {
-        // 检查是否超限
-        if (positions[i] < position_limits_lower_[i]) {
-            RCLCPP_ERROR(logger_, "Joint %zu below lower limit: %.3f < %.3f",
-                        i, positions[i], position_limits_lower_[i]);
-            triggerEmergencyStop();
-            return false;
-        }
+实现：见 [hardware_manager.cpp:are_joints_within_limits()](../src/hardware/hardware_manager.cpp)
 
-        if (positions[i] > position_limits_upper_[i]) {
-            RCLCPP_ERROR(logger_, "Joint %zu above upper limit: %.3f > %.3f",
-                        i, positions[i], position_limits_upper_[i]);
-            triggerEmergencyStop();
-            return false;
-        }
+检查内容：
+- **位置限位**: 检查关节位置是否在 `[min_position, max_position]` 范围内
+- **速度限位**: 检查关节速度是否不超过 `max_velocity` 限制
 
-        // 检查是否接近限位
-        double margin = 0.1;  // 弧度
-        if (positions[i] < position_limits_lower_[i] + margin ||
-            positions[i] > position_limits_upper_[i] - margin) {
-            RCLCPP_WARN(logger_, "Joint %zu approaching limits!", i);
-        }
-    }
-    return true;
-}
-```
+如果发现违规，记录警告并返回 false，使系统进入安全状态。
 
-### 速度限位
-
-```yaml
-# config/config.yaml
-joint_velocity:
-  max_velocity: [3.14, 3.14, 3.14, 3.14, 3.14, 3.14]  # rad/s
-```
-
-```cpp
-bool SafetyMonitor::checkVelocityLimits(
-    const std::vector<double>& velocities) {
-
-    for (size_t i = 0; i < velocities.size(); ++i) {
-        if (std::abs(velocities[i]) > max_velocities_[i]) {
-            RCLCPP_ERROR(logger_, "Joint %zu velocity exceeds limit: %.3f > %.3f",
-                        i, std::abs(velocities[i]), max_velocities_[i]);
-            return false;
-        }
-    }
-    return true;
-}
-```
-
-**自动限制**:
-```cpp
-std::vector<double> SafetyMonitor::clampVelocities(
-    const std::vector<double>& velocities) {
-
-    std::vector<double> clamped = velocities;
-    for (size_t i = 0; i < clamped.size(); ++i) {
-        clamped[i] = std::clamp(clamped[i],
-                               -max_velocities_[i],
-                               max_velocities_[i]);
-    }
-    return clamped;
-}
-```
-
-### 加速度限位
-
-```yaml
-# config/config.yaml
-safety:
-  max_acceleration: [5.0, 5.0, 5.0, 5.0, 5.0, 5.0]  # rad/s²
-```
-
-```cpp
-bool SafetyMonitor::checkAccelerationLimits(
-    const std::vector<double>& current_velocities,
-    const std::vector<double>& target_velocities,
-    double dt) {
-
-    for (size_t i = 0; i < current_velocities.size(); ++i) {
-        double acceleration = (target_velocities[i] - current_velocities[i]) / dt;
-
-        if (std::abs(acceleration) > max_accelerations_[i]) {
-            RCLCPP_WARN(logger_, "Joint %zu acceleration too high: %.3f",
-                       i, acceleration);
-            return false;
-        }
-    }
-    return true;
-}
-```
+**检查集成点**:
+- **HoldState**: 在 [can_transition_to_target()](../src/controller/hold_state/hold_state_controller.cpp) 中调用此方法
+- **运动规划**: TrajectoryConverter 在规划阶段分析动力学参数
+- **实时执行**: TrajectoryInterpolator 生成插值轨迹时遵守限位参数
 
 ---
 
@@ -358,35 +274,15 @@ bool SafetyMonitor::checkAccelerationLimits(
 
 ### 触发条件
 
-1. **位置超限**: 关节位置超出软限位
+1. **位置超限**: 关节位置超出硬限位
 2. **速度过高**: 关节速度超出最大值
 3. **通信丢失**: CAN 通信超时
-4. **硬件故障**: 电机或编码器故障
-5. **用户请求**: 手动触发急停
+4. **硬件故障**: 电机温度过高
+5. **用户请求**: 手动触发急停(TODO: 暂无实现)
 
-### 急停流程
+### 急停策略
 
-```cpp
-void SafetyMonitor::triggerEmergencyStop() {
-    RCLCPP_ERROR(logger_, "EMERGENCY STOP TRIGGERED!");
-
-    // 1. 设置急停标志
-    emergency_stop_flag_ = true;
-
-    // 2. 发送零速度命令
-    std::vector<double> zero_velocity(joint_count_, 0.0);
-    hardware_manager_->controlMotorVelocity(mapping_, zero_velocity);
-
-    // 3. 通知控制器管理器
-    controller_manager_->notifyEmergencyStop();
-
-    // 4. 记录急停原因
-    logEmergencyStopReason();
-
-    // 5. 等待用户确认
-    waitForUserConfirmation();
-}
-```
+当前的急停策略为速度模式下电机速度设为 0（简单实现），无位置模式下的急停策略（TODO: 暂无实现）
 
 ### 急停状态
 
@@ -399,156 +295,58 @@ void SafetyMonitor::triggerEmergencyStop() {
                            └─► 等待恢复
                                 │
                         ┌───────▼───────┐
-                        │ 安全反向运动  │
-                        │(仅允许离开限位)│
+                        │ 安全反向运动    │
+                        │（仅允许离开限位）│
                         └───────┬───────┘
                                 │
                         ┌───────▼───────┐
-                        │ 用户确认恢复  │
+                        │ 用户确认恢复    │
                         └───────┬───────┘
                                 │
-                           正常运行
+                             正常运行
 ```
 
 ### 安全反向运动
 
-急停状态下允许反向运动以脱离限位区:
+急停状态下允许反向运动以脱离限位区，实现见：[joint_velocity_controller.cpp](../src/controller/joint_velocity/joint_velocity_controller.cpp)
 
-```cpp
-bool JointVelocityController::isSafeDirectionInEmergency(
-    const std::vector<double>& velocities) {
-
-    if (!emergency_stop_flag_) {
-        return true;  // 非急停状态,所有方向都安全
-    }
-
-    auto positions = hardware_manager_->getJointPositions(mapping_);
-
-    for (size_t i = 0; i < velocities.size(); ++i) {
-        // 检查关节是否超下限
-        if (positions[i] < position_limits_lower_[i]) {
-            // 只允许正向运动(远离下限)
-            if (velocities[i] < 0) {
-                RCLCPP_WARN(logger_,
-                           "Joint %zu: Cannot move further below limit!", i);
-                return false;
-            }
-        }
-
-        // 检查关节是否超上限
-        if (positions[i] > position_limits_upper_[i]) {
-            // 只允许负向运动(远离上限)
-            if (velocities[i] > 0) {
-                RCLCPP_WARN(logger_,
-                           "Joint %zu: Cannot move further above limit!", i);
-                return false;
-            }
-        }
-    }
-
-    return true;  // 允许安全方向的运动
-}
-```
+当关节超出限位时：
+- 超出下限：只允许正向运动（远离下限）
+- 超出上限：只允许负向运动（远离上限）
 
 ### 恢复流程
 
-```cpp
-void SafetyMonitor::recoverFromEmergencyStop() {
-    // 1. 检查所有关节是否回到限位内
-    if (!areJointsWithinLimits()) {
-        RCLCPP_ERROR(logger_, "Cannot recover: joints still out of limits!");
-        return;
-    }
+急停恢复需满足以下条件，实现见：[hardware_manager.cpp](../src/hardware/hardware_manager.cpp)
 
-    // 2. 检查系统健康
-    if (!isSystemHealthy()) {
-        RCLCPP_ERROR(logger_, "Cannot recover: system not healthy!");
-        return;
-    }
+恢复步骤：
+1. 检查所有关节是否回到限位内
+2. 检查系统健康状态
+3. 清除急停标志
+4. 重置控制器状态
 
-    // 3. 清除急停标志
-    emergency_stop_flag_ = false;
-
-    // 4. 重置控制器状态
-    controller_manager_->reset();
-
-    RCLCPP_INFO(logger_, "Emergency stop recovered. System ready.");
-}
-```
+只有当所有条件都满足时，系统才允许从急停状态恢复
 
 ---
 
-## 碰撞检测
+## 碰撞检测 (⚠️ TODO: 待测试)
 
-### MoveIt 碰撞检测
+**当前状态**: 碰撞检测功能未集成测试。MoveIt 碰撞检测在规划阶段已集成，但需要完整的机械臂 URDF 和场景配置进行验证。
 
-#### 规划阶段检测
+### 规划阶段碰撞检测
 
-```cpp
-bool MoveJController::planMotion(const JointState& goal) {
-    // MoveIt 会自动检查碰撞
-    auto result = planning_service_->planJointMotion(goal);
+见各控制器实现：
+- [movej_controller.cpp](../src/controller/movej/movej_controller.cpp)
+- [movel_controller.cpp](../src/controller/movel/movel_controller.cpp)
+- [movec_controller.cpp](../src/controller/movec/movec_controller.cpp)
 
-    if (!result.success) {
-        if (result.error_code == ErrorCode::COLLISION_DETECTED) {
-            RCLCPP_ERROR(logger_, "Planning failed: collision detected!");
-            return false;
-        }
-    }
+MoveIt 在路径规划时会自动进行碰撞检测。规划失败会返回相应的错误码。
 
-    return true;
-}
-```
+### MoveIt 场景配置
 
-#### 碰撞场景更新
-
-```yaml
-# MoveIt 配置
-planning_scene_monitor:
-  publish_planning_scene: true
-  publish_geometry_updates: true
-  publish_state_updates: true
-  publish_transforms_updates: true
-```
-
-### MoveL 智能碰撞规避
-
-```cpp
-bool MoveLController::planWithCollisionAvoidance(const Pose& goal) {
-    // 1. 尝试笛卡尔规划
-    auto result = planning_service_->planLinearMotion(goal, CARTESIAN_SPACE);
-
-    if (result.success) {
-        return true;
-    }
-
-    // 2. 如果碰撞,回退规划
-    if (result.error_code == ErrorCode::COLLISION_DETECTED) {
-        RCLCPP_WARN(logger_, "Cartesian path collides, trying fallback...");
-
-        // 回退到关节空间规划
-        result = planning_service_->planLinearMotion(goal, JOINT_SPACE);
-
-        if (result.success) {
-            RCLCPP_INFO(logger_, "Fallback planning successful!");
-            return true;
-        }
-    }
-
-    return false;
-}
-```
-
-### 自碰撞检测
-
-```yaml
-# SRDF 配置
-robot_description_semantic:
-  self_collision_checks:
-    - link1: "link_1"
-      link2: "link_2"
-      reason: "Adjacent links"
-```
+碰撞检测依赖 MoveIt 的规划场景配置，包括：
+- 机械臂 URDF 模型
+- 自碰撞检测矩阵（SRDF）
+- 环境障碍物定义
 
 ---
 
@@ -556,60 +354,20 @@ robot_description_semantic:
 
 ### 配置文件
 
-```yaml
-# config/safety_config.yaml
-safety:
-  # 位置限位
-  position_limits:
-    lower: [-3.14, -2.09, -2.09, -3.14, -2.09, -3.14]
-    upper: [3.14, 2.09, 2.09, 3.14, 2.09, 3.14]
+安全参数通过 YAML 配置文件管理，见：
+- [config/arm620_joint_limits.yaml](../config/arm620_joint_limits.yaml) - ARM620 关节限位
+- [config/arm380_joint_limits.yaml](../config/arm380_joint_limits.yaml) - ARM380 关节限位
+- [config/interpolator_config.yaml](../config/interpolator_config.yaml) - 插值器配置
 
-  # 速度限位
-  max_velocity: [3.14, 3.14, 3.14, 3.14, 3.14, 3.14]  # rad/s
+配置包括：
+- **位置限位**: min_position 和 max_position
+- **速度限位**: max_velocity
+- **速度停止阈值**: 0.01 rad/s（用于判断机器人是否已停止）
+- **安全裕度**: 接近限位时的警告边界
 
-  # 加速度限位
-  max_acceleration: [5.0, 5.0, 5.0, 5.0, 5.0, 5.0]  # rad/s²
+### 配置加载
 
-  # 安全阈值
-  velocity_stopped_threshold: 0.01  # rad/s
-  position_limit_margin: 0.1        # rad
-
-  # 超时设置
-  holdstate_timeout: 10.0           # 秒
-  can_communication_timeout: 1.0    # 秒
-
-  # 急停设置
-  emergency_stop:
-    auto_trigger: true
-    allow_safe_direction: true
-```
-
-### 加载配置
-
-```cpp
-class SafetyMonitor {
-public:
-    void loadConfig(const std::string& config_file) {
-        YAML::Node config = YAML::LoadFile(config_file);
-
-        auto safety = config["safety"];
-
-        // 加载限位
-        position_limits_lower_ = safety["position_limits"]["lower"]
-            .as<std::vector<double>>();
-        position_limits_upper_ = safety["position_limits"]["upper"]
-            .as<std::vector<double>>();
-
-        // 加载速度限制
-        max_velocities_ = safety["max_velocity"].as<std::vector<double>>();
-
-        // 加载阈值
-        velocity_threshold_ = safety["velocity_stopped_threshold"].as<double>();
-
-        RCLCPP_INFO(logger_, "Safety configuration loaded successfully.");
-    }
-};
-```
+配置在系统初始化时由 HardwareManager 自动加载，见：[hardware_manager.cpp:load_joint_limits_config()](../src/hardware/hardware_manager.cpp)
 
 ---
 
@@ -625,42 +383,20 @@ public:
 | 急停触发 | - | ✅ 确认恢复 |
 | 硬件故障 | - | ✅ 维修后重启 |
 
-### 自动重试
+### 自动重试机制
 
-```cpp
-bool ControllerManager::executionWithRetry(
-    std::function<bool()> operation,
-    int max_retries = 3) {
+见：[controller_manager_section.cpp](../src/controller_manager_section.cpp)
 
-    for (int attempt = 0; attempt < max_retries; ++attempt) {
-        if (operation()) {
-            return true;
-        }
-
-        RCLCPP_WARN(logger_, "Attempt %d/%d failed, retrying...",
-                   attempt + 1, max_retries);
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }
-
-    RCLCPP_ERROR(logger_, "Operation failed after %d attempts", max_retries);
-    return false;
-}
-```
+控制器执行失败时会进行自动重试，具体的重试逻辑在各个控制器的实现中。
 
 ### 状态恢复
 
-```cpp
-void ControllerManager::saveState() {
-    saved_state_.mode = current_mode_;
-    saved_state_.mapping = current_mapping_;
-    saved_state_.positions = hardware_manager_->getJointPositions(current_mapping_);
-}
+见：[controller_manager_section.cpp](../src/controller_manager_section.cpp)
 
-void ControllerManager::restoreState() {
-    switchMode(saved_state_.mode, saved_state_.mapping);
-    // 可选: 恢复到保存的位置
-}
-```
+状态恢复流程：
+1. 保存当前控制模式和 mapping
+2. 进入 HoldState 安全状态
+3. 条件满足后恢复到目标模式
 
 ---
 

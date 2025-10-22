@@ -1,0 +1,53 @@
+# GitHub 仓库设置
+# 用于源码保护策略
+
+# 启用 Issues
+issues:
+  enabled: true
+  # 允许的标签
+allowed_labels:
+  - bug
+  - enhancement
+  - question
+  - documentation
+  - good first issue
+  - help wanted
+
+# 启用 Pull Request（欢迎社区贡献）
+pull_requests:
+  enabled: true
+  # 欢迎社区贡献
+  required_reviews: 1
+  dismiss_stale_reviews: true
+  require_code_owner_reviews: false
+
+# 禁用 Wiki
+wiki:
+  enabled: false
+
+# 禁用 Projects
+projects:
+  enabled: false
+
+# 禁用 Discussions
+discussions:
+  enabled: false
+
+# 设置分支保护
+branches:
+  - name: master
+    protection:
+      required_status_checks:
+        strict: true
+        contexts: []
+      enforce_admins: true
+      required_pull_request_reviews:
+        required_approving_review_count: 1
+        dismiss_stale_reviews: true
+        require_code_owner_reviews: true
+      restrictions: null
+
+# 设置代码所有者
+code_owners:
+  - path: "*"
+    owner: "Ding-Kaiyue" 

@@ -136,7 +136,7 @@ void TrajectoryControllerNode::init_action_servers() {
 void TrajectoryControllerNode::init_event_publisher() {
     // 创建事件发布器，用于通知状态管理器
     action_event_publisher_ = this->create_publisher<std_msgs::msg::String>(
-        "/internal/action_controller_events", rclcpp::QoS(10).reliable());
+        "/action_controller_events", rclcpp::QoS(10).reliable());
 
     RCLCPP_INFO(this->get_logger(), "Action event publisher initialized");
 }

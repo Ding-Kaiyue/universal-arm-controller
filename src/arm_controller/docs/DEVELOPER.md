@@ -52,10 +52,14 @@ source install/setup.bash
 
 ```
 arm_controller/
-├── include/arm_controller/     # 头文件
-│   ├── controllers/           # 控制器
+├── include/arm_controller/    # 头文件
+│   ├── controller_base/       # 控制器基类
+|   ├── controller_interface/  # 控制器接口
 │   ├── hardware/              # 硬件接口
-│   └── utils/                 # 工具类
+│   ├── utils/                 # 工具类
+|   ├── controller_interface.hpp            # 控制器接口头文件
+|   ├── controller_manager_section.hpp      # 控制器管理器头文件
+|   └── trajectory_controller_section.hpp   # 轨迹控制器头文件
 ├── src/                       # 源文件
 ├── config/                    # 配置文件
 ├── test/                      # 测试
@@ -66,10 +70,10 @@ arm_controller/
 
 | 模块 | 说明 | 关键文件 |
 |-----|------|---------|
-| ControllerManager | 控制器管理 | `controller_manager.hpp/cpp` |
-| Controllers | 各种控制器 | `controllers/*.hpp/cpp` |
+| ControllerManager | 控制器管理 | `controller_manager_section.hpp/cpp` |
+| Controllers | 各种控制器 | `controller/*.hpp/cpp` |
 | HardwareManager | 硬件接口 | `hardware/hardware_manager.hpp/cpp` |
-| TrajectoryController | 轨迹执行 | `trajectory_controller.hpp/cpp` |
+| TrajectoryController | 轨迹执行 | `trajectory_controller_section.hpp/cpp` |
 
 ---
 
@@ -344,76 +348,100 @@ git commit -m "feat: add new controller
 git push origin feature/new-controller
 ```
 
+### 5. CI
+
+提交后稍等 5 分钟，CI 系统会自动运行测试，请保证测试通过。
 ---
 
 ## 测试
 
 ### 单元测试
 
-```cpp
-// test/test_controller_manager.cpp
-#include <gtest/gtest.h>
-#include "arm_controller/controller_manager.hpp"
+**⚠️ TODO: 单元测试框架待集成**
 
-TEST(ControllerManagerTest, RegisterController) {
-  auto manager = std::make_shared<ControllerManager>();
-  auto controller = std::make_shared<MockController>();
+目前项目尚未集成 gtest 单元测试框架。所有功能已通过手动测试验证。
 
-  manager->registerController("TestMode", controller);
+计划添加以下测试用例：
+- ControllerManager 的控制器注册和切换
+- 各个控制器的 start/stop 方法
+- HoldState 的状态转移逻辑
+- HardwareManager 的硬件通信接口
+- TrajectoryController 的轨迹规划和执行
 
-  EXPECT_TRUE(manager->hasController("TestMode"));
-}
-```
+### 集成测试 (已验证)
 
-### 运行测试
+**测试系统启动和基本功能**:
 
 ```bash
-# 编译测试
-colcon build --cmake-args -DBUILD_TESTING=ON
+# 1. 编译项目
+cd ~/robotic_arm_ws
+colcon build --packages-select arm_controller
 
-# 运行所有测试
-colcon test
-
-# 运行特定测试
-colcon test --packages-select arm_controller --ctest-args -R test_controller_manager
-```
-
-### 集成测试
-
-```bash
-# 启动系统
+# 2. 启动系统
 ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 
-# 在另一个终端测试
+# 3. 在另一个终端测试控制器切换
 ros2 service call /controller_api/controller_mode \
   controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
+
+# 4. 发送 MoveJ 目标点
+ros2 topic pub --once /controller_api/movej_action sensor_msgs/msg/JointState \
+  "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+
+# 5. 切换到 HoldState
+ros2 service call /controller_api/controller_mode \
+  controller_interfaces/srv/WorkMode "{mode: 'HoldState', mapping: 'single_arm'}"
+
+# 6. 切换到 Disable
+ros2 service call /controller_api/controller_mode \
+  controller_interfaces/srv/WorkMode "{mode: 'Disable', mapping: 'single_arm'}"
 ```
+
+**验证项目**:
+- ✅ 系统启动成功，两个节点并行运行
+- ✅ 控制器切换通过 ROS2 服务正常工作
+- ✅ 轨迹规划和执行通过话题订阅正常工作
+- ✅ HoldState 的安全转移机制正常运作
+- ✅ 硬件通信通过 CAN-FD 正常进行
 
 ---
 
 ## 代码审查
 
-### 自动检查
+我们鼓励使用自动化工具检查代码质量，但代码格式问题不会阻止代码提交。重点是代码的**功能正确性**和**可维护性**。
+
+### 自动检查工具
+
+**代码格式检查** (推荐，但非强制):
 
 ```bash
-# 代码格式
+# 检查代码风格
 ament_cpplint src/
 
-# 静态分析
-ament_cppcheck src/
-
-# 格式化
+# 可选：自动格式化
 ament_uncrustify --reformat src/
+```
+
+**静态分析** (推荐检查):
+
+```bash
+# 静态代码分析，查找潜在的逻辑错误
+ament_cppcheck src/
 ```
 
 ### 提交前检查清单
 
-- [ ] 代码通过编译,无警告
+**必须满足的要求** ✅:
+- [ ] 代码通过编译，无编译错误和警告
+- [ ] 通过集成测试验证
+- [ ] 代码具有清晰的逻辑和注释
+- [ ] 相关文档已更新
+- [ ] 提交信息清晰描述改动内容
+
+**可选建议** (鼓励，但非强制):
+- [ ] 代码通过 ament_cpplint 检查
+- [ ] 代码通过 ament_cppcheck 静态分析
 - [ ] 遵循[代码规范](CODE_STYLE.md)
-- [ ] 添加必要的注释
-- [ ] 通过所有测试
-- [ ] 更新相关文档
-- [ ] 提交信息清晰
 
 ---
 

@@ -4,63 +4,25 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/Ding-Kaiyue/universal-arm-controller/actions/workflows/colcon-build.yml/badge.svg?branch=master)](https://github.com/Ding-Kaiyue/universal-arm-controller/actions/workflows/colcon-build.yml)
 
-一个**完整的机械臂控制系统解决方案**，基于 ROS2 的模块化多组件架构，集成了轨迹规划、轨迹插值、硬件驱动等核心功能，为工业机械臂提供高效、可靠的运动控制。
-
-> 📖 **快速导航**: 首次使用请先参考 [arm_controller 使用文档](src/arm_controller/README.md) 了解系统详细功能。
+完整的机械臂控制系统解决方案。基于 ROS2 的模块化架构，集成轨迹规划、轨迹插值、硬件驱动等核心功能，为工业机械臂提供高效、可靠的运动控制。
 
 ## 🚀 特性
 
-- **模块化设计**: 系统采用清晰的分层架构，各组件职责明确，可独立开发和维护
-- **四种运动模式**: MoveJ(关节空间) + MoveL(直线) + MoveC(圆弧) + 速度控制模式
-- **高性能集成**: 基于 MoveIt2 + TracIK 的快速轨迹生成，微秒级控制延迟
-- **实时反馈**: 事件驱动架构，实时电机状态监控，支持观察者模式和事件总线
-- **双臂支持**: 原生支持单臂/双臂协同控制
-- **工业级可靠性**: CAN-FD 高速通信，线程安全设计，CPU亲和性绑定
+- **多模式控制**: MoveJ、MoveL、MoveC、JointVelocity 等
+- **双臂支持**: 原生单臂/双臂协同控制
+- **高性能**: MoveIt2 + TracIK 快速规划，微秒级控制延迟
+- **实时安全**: 多层安全检查、限位保护、事件驱动监控
+- **模块化设计**: 清晰的分层架构，组件独立开发维护
+- **工业级可靠性**: CAN-FD 高速通信、线程安全、CPU 亲和性
 
-## 📦 系统组件
-
-本项目采用 **VCS 管理架构**，集成三个高性能的独立库：
-
-### 核心组件（内部维护）
-
-| 组件 | 功能 | 位置 |
-|------|------|------|
-| **arm_controller** | 运动控制核心 | `src/arm_controller/` |
-| **controller_interfaces** | ROS2 消息/服务定义 | `src/controller_interfaces/` |
-| **robotic_arm_bringup** | 系统启动和配置 | `src/robotic_arm_bringup/` |
-
-### 集成库（通过 deps.repos 获取）
-
-| 库 | 功能 | 仓库 |
-|-----|------|------|
-| **hardware_driver** | CAN-FD硬件控制 | [hardware-driver](https://github.com/Ding-Kaiyue/hardware-driver) |
-| **trajectory_interpolator** | 样条轨迹插值 | [trajectory-interpolator](https://github.com/Ding-Kaiyue/trajectory-interpolator) |
-| **trajectory_planning** | MoveIt2 规划集成 | [trajectory-planning](https://github.com/Ding-Kaiyue/trajectory-planning) |
-
-## ⚡ 快速开始
+## 📦 安装
 
 ### 系统要求
 
-- **Ubuntu 22.04** LTS 或更高版本
-- **ROS2 Humble** 或更高版本
-- **GCC 10+** (C++17 支持)
+- **OS**: Ubuntu 22.04 LTS+
+- **ROS**: ROS2 Humble+
+- **编译器**: GCC 10+ (C++17)
 - **工具**: colcon, vcstool
-
-### 前置准备
-
-安装 TracIK (唯一需要源码编译的依赖)：
-
-```bash
-mkdir -p ~/trac_ik_ws/src
-cd ~/trac_ik_ws/src
-git clone https://github.com/aprotyas/trac_ik.git
-cd ~/trac_ik_ws
-colcon build
-source install/setup.bash
-
-# 将 TracIK 环境写入系统配置（可选但推荐）
-echo "source ~/trac_ik_ws/install/setup.bash" >> ~/.bashrc
-```
 
 ### 快速安装
 
@@ -69,202 +31,104 @@ echo "source ~/trac_ik_ws/install/setup.bash" >> ~/.bashrc
 mkdir -p ~/robotic_arm_ws/src
 cd ~/robotic_arm_ws/src
 
-# 2. 克隆主仓库和依赖
+# 2. 克隆仓库与依赖
 git clone https://github.com/Ding-Kaiyue/universal-arm-controller.git
 cd universal-arm-controller/src
 sudo apt install python3-vcstool
 vcs import < ../deps.repos --recursive
 
-# 3. 更新依赖到最新版本
-vcs pull < ../deps.repos
-
-# 4. 编译和安装
+# 3. 编译
 cd ~/robotic_arm_ws
 rosdep install --from-paths src --ignore-src -r -y
-
-# Recommended: use the provided build wrapper which will automatically
-# handle an existing `install/` directory created with a different layout
-./build.sh --cmake-args -DCMAKE_BUILD_TYPE=Release
-
-# Alternatively, run colcon directly. If an incompatible `install/` exists,
-# delete or move the existing `install/` directory before running a plain
-# colcon build to avoid layout conflicts:
-#   rm -rf install build log
-#   colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
-
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 ```
+
+### 前置说明
+
+详见 [文档中心](docs/README.md) 中的配置与故障排除部分。
+
+## 🚀 快速开始
 
 ### 启动系统
 
 ```bash
-# 启动完整的机械臂控制系统
 ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 ```
 
-### 硬件配置
-
-编辑 `src/arm_controller/config/hardware_config.yaml`：
-
-```yaml
-hardware_interfaces:
-  single_arm:
-    robot_type: "arm620"
-    interface: can0
-    motors: [1, 2, 3, 4, 5, 6]
-    joint_names: ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
-    planning_group: "arm"
-    initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    start_position: [0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0]
-```
-
-## 📚 使用文档
-
-### 完整文档索引
-
-- **[arm_controller 使用指南](src/arm_controller/README.md)** - 核心控制器详细文档
-  - ✓ 多模式控制 (MoveJ/MoveL/MoveC)
-  - ✓ ROS2 接口详解
-  - ✓ 配置和参数管理
-  - ✓ 常见问题排查
-
-### 组件文档
-
-每个集成库都有完整的独立文档：
-
-| 组件 | 文档链接 | 功能 |
-|------|---------|------|
-| Hardware Driver | [📖 文档](https://github.com/Ding-Kaiyue/hardware-driver#readme) | CAN-FD 硬件控制、电机驱动 |
-| Trajectory Interpolator | [📖 文档](https://github.com/Ding-Kaiyue/trajectory-interpolator#readme) | 样条插值算法、实时轨迹生成 |
-| Trajectory Planning | [📖 文档](https://github.com/Ding-Kaiyue/trajectory-planning#readme) | MoveIt2 集成、运动规划策略 |
-
-## 🔧 开发指南
-
-### 依赖管理
+### 控制示例
 
 ```bash
-# 更新所有依赖
+# 切换控制模式
+ros2 service call /controller_api/controller_mode \
+  controller_interfaces/srv/WorkMode "{mode: 'MoveJ'}"
+
+# 发送关节空间目标
+ros2 topic pub /controller_api/movej_action sensor_msgs/msg/JointState \
+  "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+```
+
+## 📚 文档中心
+
+访问 **[文档中心](docs/README.md)** 了解详细信息。
+
+## 📦 核心组件
+
+| 组件 | 功能 | 来源 |
+|------|------|------|
+| **arm_controller** | 运动控制核心 | 本仓库 |
+| **controller_interfaces** | ROS2 消息/服务定义 | 本仓库 |
+| **robotic_arm_bringup** | 系统启动配置 | 本仓库 |
+| **hardware_driver** | CAN-FD 硬件驱动 | VCS 导入 |
+| **trajectory_interpolator** | 样条轨迹插值 | VCS 导入 |
+| **trajectory_planning** | MoveIt2 规划集成 | VCS 导入 |
+
+## 🔧 开发
+
+### 编译特定组件
+
+```bash
+colcon build --packages-select arm_controller
+```
+
+### 更新依赖
+
+```bash
 cd ~/robotic_arm_ws/src/universal-arm-controller/src
 vcs pull < ../deps.repos
-
-# 修改依赖版本：编辑 deps.repos，然后重新导入
-vcs import < ../deps.repos --force
 ```
 
-### 编译选项
-
-```bash
-# 编译特定组件
-colcon build --packages-select arm_controller
-
-# 查看编译详情
-colcon build --event-handlers console_direct+
-```
-
-### 项目架构
+### 项目结构
 
 ```
-┌──────────────────────────── Universal Arm Controller ────────────────────────────┐
-│                                                                                  │
-│  ┌─────────────────────┐          ┌──────────────────────┐                      │
-│  │   arm_controller    │          │ TrajectoryController │                      │
-│  │  (Control Manager)  │          │ (Planning & Exec)    │                      │
-│  └──────────┬──────────┘          └──────────┬───────────┘                      │
-│             └─────────────┬──────────────────┘                                  │
-│                           │                                                     │
-│            ┌──────────────▼──────────────┐                                      │
-│            │    HardwareManager          │                                      │
-│            │   (hardware_driver lib)     │                                      │
-│            └──────────────┬──────────────┘                                      │
-│                           │                                                     │
-│      ┌────────────────────┼────────────────────┐                                │
-│      │                    │                    │                                │
-│  ┌───▼────────┐   ┌──────▼────────┐   ┌──────▼──────┐                          │
-│  │ Trajectory │   │ Trajectory    │   │   CAN-FD    │                          │
-│  │ Planning   │   │ Interpolator  │   │   Driver    │                          │
-│  └────────────┘   └───────────────┘   └──────┬──────┘                          │
-└────────────────────────────────────────────────┼──────────────────────────────┘
-                                                 │
-                                          ┌──────▼───────┐
-                                          │   Hardware   │
-                                          │   (Motors)   │
-                                          └──────────────┘
+src/
+├── arm_controller/          # 控制核心
+├── controller_interfaces/   # 消息定义
+├── robotic_arm_bringup/     # 系统启动
+├── trajectory_planning/     # 规划库 (VCS)
+├── trajectory_interpolator/ # 插值库 (VCS)
+└── hardware_driver/         # 驱动库 (VCS)
 ```
 
-## 🔍 故障排除
+## 🔗 依赖库
 
-### vcs import 失败
-
-```bash
-# 确保已安装 vcstool
-sudo apt install python3-vcstool
-
-# 检查网络连接
-ping github.com
-```
-
-### 编译错误："找不到依赖"
-
-```bash
-# 重新导入依赖
-cd ~/robotic_arm_ws/src/universal-arm-controller/src
-vcs import < ../deps.repos --recursive
-
-# 安装 ROS 依赖
-cd ~/robotic_arm_ws
-rosdep install --from-paths src --ignore-src -r -y
-```
-
-### 只编译特定组件
-
-```bash
-colcon build --packages-select arm_controller
-```
-
-### 依赖组件位置
-
-通过 VCS 导入的依赖会被放在与 `arm_controller` 平级的目录：
-
-```
-src/universal_arm_controller/src/
-├── arm_controller/          # ✓ 本仓库维护
-├── controller_interfaces/   # ✓ 本仓库维护
-├── robotic_arm_bringup/     # ✓ 本仓库维护
-├── trajectory_planning/     # ◆ VCS 导入（可独立更新）
-├── trajectory_interpolator/ # ◆ VCS 导入（可独立更新）
-└── hardware_driver/         # ◆ VCS 导入（可独立更新）
-```
-
-## 💡 更多帮助
-
-### 获取帮助
-
-如在使用过程中遇到问题：
-
-- **GitHub Issues**: [提交问题](https://github.com/Ding-Kaiyue/universal-arm-controller/issues)
-- **Email**: kaiyue.ding@raysense.com
-
-### 贡献指南
-
-欢迎贡献代码！步骤如下：
-
-1. Fork 本仓库和相关依赖仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-对于外部依赖组件的修改，请向对应仓库提交 PR。
+- **[trajectory-planning](https://github.com/Ding-Kaiyue/trajectory-planning)** - 轨迹规划
+- **[trajectory-interpolator](https://github.com/Ding-Kaiyue/trajectory-interpolator)** - 轨迹插值
+- **[hardware-driver](https://github.com/Ding-Kaiyue/hardware-driver)** - 硬件驱动
 
 ## 📄 许可证
 
 MIT License - 详见 [LICENSE](LICENSE) 文件
 
-## 相关仓库
+## 📞 联系方式
 
-- [Hardware Driver](https://github.com/Ding-Kaiyue/hardware-driver) - CAN-FD 硬件驱动库
-- [Trajectory Interpolator](https://github.com/Ding-Kaiyue/trajectory-interpolator) - 轨迹插值库
-- [Trajectory Planning](https://github.com/Ding-Kaiyue/trajectory-planning) - 轨迹规划库
+- **GitHub Issues**: [提交问题](https://github.com/Ding-Kaiyue/universal-arm-controller/issues)
+  - 使用预定义的 Issue 模板报告 Bug、功能请求或安全问题
+- **Email**: kaiyue.ding@raysense.com
+
+## 🤝 贡献
+
+欢迎贡献！详见 [CONTRIBUTING.md](.github/CONTRIBUTING.md)
 
 ---
 
