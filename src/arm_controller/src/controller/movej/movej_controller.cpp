@@ -85,7 +85,8 @@ void MoveJController::initialize_planning_services() {
 
                 // 创建轨迹规划服务
                 auto motion_planning_service = std::make_shared<trajectory_planning::application::services::MotionPlanningService>(
-                    moveit_adapter, node_);
+                    moveit_adapter,
+                    node_);
 
                 if (!motion_planning_service) {
                     RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Failed to create MotionPlanningService", mapping.c_str());

@@ -20,6 +20,7 @@ endif()
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}
 )
 
 # find dependencies
@@ -43,6 +44,13 @@ find_package(rclcpp_action REQUIRED)
 find_package(trajectory_planning_v3 REQUIRED)
 find_package(trajectory_interpolator REQUIRED)
 find_package(hardware_driver REQUIRED)
+find_package(moveit_core REQUIRED)
+find_package(orocos_kdl REQUIRED)
+find_package(kdl_parser REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(OsqpEigen REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 
 
 include_directories(
@@ -70,8 +78,8 @@ add_library(arm_controller_lib
   src/controller/joint_velocity/joint_velocity_interface.cpp
   src/controller/hold_state/hold_state_controller.cpp
   # 其他控制器暂时屏蔽用于测试
-  # src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
-  # src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
+  src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
+  src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
   src/controller/move2initial/move2initial_controller.cpp
   src/controller/move2initial/move2initial_interface.cpp
   src/controller/move2start/move2start_controller.cpp
@@ -112,11 +120,19 @@ ament_target_dependencies(arm_controller_lib
   trajectory_interpolator
   trajectory_planning_v3
   hardware_driver
+  moveit_core
+  orocos_kdl
+  kdl_parser
+  Eigen3
+  OsqpEigen
+  tf2_ros
+  tf2_geometry_msgs
 )
 
-# 链接硬件驱动库到库
+# 链接硬件驱动库和 osqp 到库
 target_link_libraries(arm_controller_lib
   hardware_driver::hardware_driver_canfd
+  OsqpEigen::OsqpEigen
 )
 
 # Node
@@ -139,6 +155,8 @@ ament_target_dependencies(universial_arm_controller_node
   trajectory_interpolator
   hardware_driver
   controller_interfaces
+  tf2_ros
+  tf2_geometry_msgs
 )
 
 install(TARGETS

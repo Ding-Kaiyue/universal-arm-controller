@@ -6,7 +6,7 @@
 #include "joint_velocity/joint_velocity_controller.hpp"
 
 // 其他控制器暂时屏蔽用于测试
-// #include "cartesian_velocity/cartesian_velocity_controller.hpp"
+#include "cartesian_velocity/cartesian_velocity_controller.hpp"
 #include "move2initial/move2initial_controller.hpp"
 #include "move2start/move2start_controller.hpp"
 #include "ros2_action_control/ros2_action_control_controller.hpp"
@@ -29,8 +29,8 @@ std::unordered_map<std::string, ControllerInterface::Creator> get_available_cont
             return std::make_shared<JointVelocityController>(node); }},
 
         // 其他控制器暂时屏蔽用于测试
-        // {"CartesianVelocityController", [](rclcpp::Node::SharedPtr node) {
-        //     return std::make_shared<CartesianVelocityController>(node); }},
+        {"CartesianVelocityController", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<CartesianVelocityController>(node); }},
         {"Move2InitialController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<Move2InitialController>(node); }},
         {"Move2StartController", [](rclcpp::Node::SharedPtr node) {

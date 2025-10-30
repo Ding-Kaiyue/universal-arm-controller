@@ -194,20 +194,7 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
         return false;
     }
 
-    // 如果已经在目标模式，直接返回成功
-    if (current_mode_ == mode_name && !in_hook_state_) {
-        RCLCPP_INFO(this->get_logger(), "Already in mode %s", mode_name.c_str());
-        return true;
-    }
-
-    // 如果当前处于钩子状态，记录请求但不做任何处理，让持续检查机制自动处理转换
-    if (in_hook_state_) {
-        RCLCPP_INFO(this->get_logger(), "Currently in hook state, continous safety monitoring will handle transition to mode %s", 
-                    mode_name.c_str());
-        return true;
-    }
-
-    // 对于Disable和EmergencyStop模式，直接切换，无需安全检查
+    // 对于Disable和EmergencyStop模式，总是强制执行，即使已经在该模式（确保真正失能）
     if (mode_name == "Disable" || mode_name == "EmergencyStop") {
         // 强制停止当前控制器，不管需不需要钩子状态
         auto current_it = controller_map_.find(current_mode_);
@@ -216,6 +203,19 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
             RCLCPP_INFO(this->get_logger(), "Force stopped controller for mode: %s", current_mode_.c_str());
         }
         return switch_to_mode(mode_name, mapping);
+    }
+
+    // 如果已经在目标模式（且不是Disable/EmergencyStop），直接返回成功
+    if (current_mode_ == mode_name && !in_hook_state_) {
+        RCLCPP_INFO(this->get_logger(), "Already in mode %s", mode_name.c_str());
+        return true;
+    }
+
+    // 如果当前处于钩子状态，记录请求但不做任何处理，让持续检查机制自动处理转换
+    if (in_hook_state_) {
+        RCLCPP_INFO(this->get_logger(), "Currently in hook state, continous safety monitoring will handle transition to mode %s",
+                    mode_name.c_str());
+        return true;
     }
 
     // 停止当前控制器
@@ -313,10 +313,20 @@ bool ControllerManagerNode::exit_hook_state(const std::string& mapping) {
         return false;
     }
 
-    // 停止钩子状态控制器
-    auto hook_it = controller_map_.find("HoldState");
-    if (hook_it != controller_map_.end()) {
-        hook_it->second->stop(mapping);
+    // 检查目标模式是否有效
+    if (target_mode_.empty()) {
+        RCLCPP_ERROR(this->get_logger(), "Target mode is empty when exiting hook state");
+        return false;
+    }
+
+    // 如果目标模式不是HoldState，则停止当前的HoldState控制器
+    // 如果目标就是HoldState，则不需要停止（避免竞态条件）
+    if (target_mode_ != "HoldState") {
+        auto hook_it = controller_map_.find("HoldState");
+        if (hook_it != controller_map_.end()) {
+            RCLCPP_DEBUG(this->get_logger(), "Stopping HoldState controller before switching to %s", target_mode_.c_str());
+            hook_it->second->stop(mapping);
+        }
     }
 
     // 切换到目标模式
@@ -325,15 +335,28 @@ bool ControllerManagerNode::exit_hook_state(const std::string& mapping) {
         in_hook_state_ = false;
         RCLCPP_INFO(this->get_logger(), "Exited hook state, switched to %s", target_mode_.c_str());
         target_mode_.clear();
+    } else {
+        RCLCPP_ERROR(this->get_logger(), "Failed to switch to target mode: %s", target_mode_.c_str());
     }
 
     return success;
 }
 
 bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const std::string& mapping) {
+    // 检查输入参数
+    if (mode_name.empty()) {
+        RCLCPP_ERROR(this->get_logger(), "Mode name is empty");
+        return false;
+    }
+
     auto it = controller_map_.find(mode_name);
     if (it == controller_map_.end()) {
         RCLCPP_ERROR(this->get_logger(), "Controller not found for mode: %s", mode_name.c_str());
+        return false;
+    }
+
+    if (!it->second) {
+        RCLCPP_ERROR(this->get_logger(), "Controller pointer is null for mode: %s", mode_name.c_str());
         return false;
     }
 
@@ -342,8 +365,9 @@ bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const s
         if (mode_name == "HoldState") {
             auto hold_controller = std::dynamic_pointer_cast<HoldStateController>(it->second);
             if (hold_controller) {
-                hold_controller->set_previous_mode(current_mode_);
-                RCLCPP_DEBUG(this->get_logger(), "Set previous_mode to '%s' for HoldState", current_mode_.c_str());
+                std::string prev_mode = current_mode_;  // 创建本地副本，避免竞态条件
+                hold_controller->set_previous_mode(prev_mode);
+                RCLCPP_DEBUG(this->get_logger(), "Set previous_mode to '%s' for HoldState", prev_mode.c_str());
             }
         }
 
@@ -390,39 +414,61 @@ void ControllerManagerNode::init_action_event_listener() {
 }
 
 void ControllerManagerNode::handle_action_event(const std_msgs::msg::String::SharedPtr msg) {
-    std::string event_type = msg->data;
-    RCLCPP_INFO(this->get_logger(), "Received action event: %s", event_type.c_str());
+    // 安全检查
+    if (!msg) {
+        RCLCPP_WARN(this->get_logger(), "Received null action event message");
+        return;
+    }
+
+    // 解析事件消息格式: "event_type:mapping"
+    std::string event_data = msg->data;
+
+    if (event_data.empty()) {
+        RCLCPP_WARN(this->get_logger(), "Received empty action event message");
+        return;
+    }
+
+    size_t delimiter_pos = event_data.find(':');
+
+    std::string event_type = event_data;
+    std::string mapping = "single_arm";  // 默认mapping
+
+    if (delimiter_pos != std::string::npos) {
+        event_type = event_data.substr(0, delimiter_pos);
+        mapping = event_data.substr(delimiter_pos + 1);
+    }
+
+    RCLCPP_INFO(this->get_logger(), "Received action event: %s (mapping: %s)", event_type.c_str(), mapping.c_str());
 
     if (event_type == "action_goal_accepted") {
-        // 自动切换到ROS2ActionControl模式
-        RCLCPP_INFO(this->get_logger(), "Action goal accepted, switching to ROS2ActionControl mode");
-        start_working_controller("ROS2ActionControl");
+        // 自动切换到ROS2ActionControl模式（无论之前在哪个模式）
+        RCLCPP_INFO(this->get_logger(), "Action goal accepted for mapping: %s, switching to ROS2ActionControl mode", mapping.c_str());
+        start_working_controller("ROS2ActionControl", mapping);
     }
-    // 可以在这里添加其他事件处理逻辑
-    if (event_type == "action_goal_rejected") {
+    else if (event_type == "action_goal_rejected") {
         // 自动切换到HoldState模式
-        RCLCPP_INFO(this->get_logger(), "Action goal rejected, switching to HoldState mode");
-        start_working_controller("HoldState");
+        RCLCPP_INFO(this->get_logger(), "Action goal rejected for mapping: %s, switching to HoldState mode", mapping.c_str());
+        start_working_controller("HoldState", mapping);
     }
-    if (event_type == "action_cancelled") {
+    else if (event_type == "action_cancelled") {
         // 自动切换到HoldState模式
-        RCLCPP_INFO(this->get_logger(), "Action cancelled, switching to HoldState mode");
-        start_working_controller("HoldState");
+        RCLCPP_INFO(this->get_logger(), "Action cancelled for mapping: %s, switching to HoldState mode", mapping.c_str());
+        start_working_controller("HoldState", mapping);
     }
-    if (event_type == "action_aborted") {
+    else if (event_type == "action_aborted") {
         // 自动切换到HoldState模式
-        RCLCPP_INFO(this->get_logger(), "Action aborted, switching to HoldState mode");
-        start_working_controller("HoldState");
+        RCLCPP_INFO(this->get_logger(), "Action aborted for mapping: %s, switching to HoldState mode", mapping.c_str());
+        start_working_controller("HoldState", mapping);
     }
-    if (event_type == "action_succeeded") {
+    else if (event_type == "action_succeeded") {
         // 自动切换到HoldState模式
-        RCLCPP_INFO(this->get_logger(), "Action succeeded, switching to HoldState mode");
-        start_working_controller("HoldState");
+        RCLCPP_INFO(this->get_logger(), "Action succeeded for mapping: %s, switching to HoldState mode", mapping.c_str());
+        start_working_controller("HoldState", mapping);
     }
-    if (event_type == "action_failed") {
+    else if (event_type == "action_failed") {
         // 自动切换到HoldState模式
-        RCLCPP_INFO(this->get_logger(), "Action failed, switching to HoldState mode");
-        start_working_controller("HoldState");
+        RCLCPP_INFO(this->get_logger(), "Action failed for mapping: %s, switching to HoldState mode", mapping.c_str());
+        start_working_controller("HoldState", mapping);
     }
 }
 

@@ -11,10 +11,10 @@ common:
   
 
 controllers:
-  # - key: CartesianVelocity
-  #   class: CartesianVelocityController
-  #   input_topic: 
-  #     name: /controller_api/cartesian_velocity_action
+  - key: CartesianVelocity
+    class: CartesianVelocityController
+    input_topic: 
+      name: /controller_api/cartesian_velocity_action
   #     type: geometry_msgs/msg/Twist
   - key: Disable
     class: DisableController

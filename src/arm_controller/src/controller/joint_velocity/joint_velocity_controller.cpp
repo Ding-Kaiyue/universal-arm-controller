@@ -62,13 +62,13 @@ void JointVelocityController::velocity_callback(const sensor_msgs::msg::JointSta
 
 bool JointVelocityController::send_joint_velocities(const std::vector<double>& joint_velocities) {
     if (!hardware_manager_) {
-        RCLCPP_ERROR(node_->get_logger(), "Hardware manager not initialized");
+        RCLCPP_ERROR(node_->get_logger(), "❎ Hardware manager not initialized");
         return false;
     }
 
     auto hardware_driver = hardware_manager_->get_hardware_driver();
     if (!hardware_driver) {
-        RCLCPP_ERROR(node_->get_logger(), "Hardware driver not initialized");
+        RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
         return false;
     }
 
