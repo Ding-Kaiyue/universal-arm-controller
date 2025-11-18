@@ -67,6 +67,28 @@ jobs:
           fi
 
 
+      - name: Build and install OSQP
+        run: |
+          mkdir -p /tmp/osqp-build
+          cd /tmp/osqp-build
+          git clone https://github.com/osqp/osqp.git
+          cd osqp
+          mkdir build && cd build
+          cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
+          make -j$(nproc)
+          sudo make install
+
+      - name: Build and install OsqpEigen
+        run: |
+          mkdir -p /tmp/osqp-eigen-build
+          cd /tmp/osqp-eigen-build
+          git clone https://github.com/robotology/osqp-eigen.git
+          cd osqp-eigen
+          mkdir build && cd build
+          cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
+          make -j$(nproc)
+          sudo make install
+
       - name: Install ROS dependencies
         run: |
           source /opt/ros/humble/setup.bash
@@ -77,9 +99,6 @@ jobs:
           # Install dependencies from all packages in src (including those from deps.repos)
           # Skip warehouse_ros_mongo as it's not available in ROS 2 Humble (removed upstream)
           rosdep install --from-paths src --ignore-src -r -y --skip-keys warehouse_ros_mongo
-          # Install OsqpEigen for CartesianVelocityController
-          sudo apt-get install -y libeigen3-dev libosqp-dev
-          pip install osqp-eigen
       - name: Ensure clean install layout
         run: |
           # Remove any existing install/ directory created with a different layout
