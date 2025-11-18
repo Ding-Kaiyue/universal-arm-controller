@@ -85,6 +85,7 @@ logs/
 
 # === Local Test Data ===
 test_results/
+coverage_report/
 data/
 recordings/
 captures/

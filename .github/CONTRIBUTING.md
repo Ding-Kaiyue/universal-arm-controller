@@ -76,19 +76,55 @@ git add .
 git commit -m "feat: add your feature description"
 ```
 
-### 第4步：编写测试
+### 第4步：编写和运行单元测试
 
-**测试覆盖率要求：≥ 95%**
+**单元测试覆盖率要求：≥ 95%**
 
 ```bash
-# 为新功能编写单元测试
-# 为关键路径编写集成测试
-# 运行测试
-colcon test
-
-# 检查覆盖率
-colcon test --coverage
+# 自动编译所有包并运行所有单元测试
+./run_tests.sh
 ```
+
+这个脚本会自动：
+1. ✅ 编译所有包（启用测试）
+2. ✅ 运行所有单元测试
+3. ✅ 编译或测试失败时立即停止并报告错误
+4. ✅ 通过后显示提交前的检查清单
+
+#### 4.2 检查代码覆盖率
+
+```bash
+# 生成详细的覆盖率报告
+./coverage_report.sh
+```
+
+这个脚本会：
+1. 清除之前的覆盖率数据
+2. 编译所有包（启用覆盖率统计）
+3. 运行所有单元测试
+4. 生成 HTML 覆盖率报告（如果安装了 lcov）
+
+**安装覆盖率工具（可选，用于生成详细HTML报告）：**
+```bash
+sudo apt-get install lcov
+```
+
+**覆盖率报告位置：**
+```
+coverage_report/html/index.html
+```
+
+在浏览器中打开 HTML 报告可以查看整体覆盖率百分比、每个文件的覆盖率和未覆盖的代码行。
+
+**测试文件位置：**
+- 轨迹控制器单元测试：`src/arm_controller/test/test_topic_subscription_lifecycle.cpp`
+- 速度控制器单元测试：`src/arm_controller/test/test_velocity_controller_subscriptions.cpp`
+- 控制器节点单元测试：`src/arm_controller/test/test_arm_controller_node.cpp`
+
+**提交 Pull Request 前必须：**
+- ✅ 所有单元测试通过（运行 `./run_tests.sh`）
+- ✅ 为新功能编写对应的单元测试
+- ✅ 单元测试覆盖率 ≥ 95%（可用 `./coverage_report.sh` 验证）
 
 ### 第5步：代码风格检查
 
