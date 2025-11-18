@@ -1,74 +1,246 @@
 #include <gtest/gtest.h>
-#include "controller_node.hpp" 
-#include "arm_controller/controller_base/mode_controller_base.hpp"
+#include <rclcpp/rclcpp.hpp>
+#include <memory>
+#include "arm_controller/controller_base/trajectory_controller_base.hpp"
+#include "arm_controller/controller_base/velocity_controller_base.hpp"
+#include <sensor_msgs/msg/joint_state.hpp>
+#include <geometry_msgs/msg/pose.hpp>
 
-// Mock class for ModeControllerBase
-// class MockModeControllerBase : public ModeControllerBase {
-// public:
-//     MOCK_METHOD(void, start, (), (override));
-//     MOCK_METHOD(void, stop, (), (override));
-// };
+// Mock implementations for testing
+class MockTrajectoryController : public TrajectoryControllerImpl<sensor_msgs::msg::JointState>
+{
+public:
+  MockTrajectoryController(const rclcpp::Node::SharedPtr & node)
+  : TrajectoryControllerImpl<sensor_msgs::msg::JointState>("MockTrajectory", node) {}
 
-// // Test fixture for ControllerNode
-// class ControllerNodeTest : public ::testing::Test {
-// protected:
-//     ControllerNode controller_node;
+  void plan_and_execute(const std::string &, const sensor_msgs::msg::JointState::SharedPtr) override
+  {
+  }
+  void trajectory_callback(const sensor_msgs::msg::JointState::SharedPtr) override {}
+  void start(const std::string &) override {}
+  bool stop(const std::string &) override {return true;}
 
-//     void SetUp() override {
-//         // Initialize with some mock controllers
-//         MockModeControllerBase* mock_controller1 = new MockModeControllerBase();
-//         MockModeControllerBase* mock_controller2 = new MockModeControllerBase();
+  // Expose protected members for testing
+  auto & get_subscriptions() {return subscriptions_;}
+  using TrajectoryControllerImpl<sensor_msgs::msg::JointState>::cleanup_subscriptions;
+};
 
-//         controller_node.controller_map_[ModeControllerBase::ControllerMode::MODE_1] = std::shared_ptr<ModeControllerBase>(mock_controller1);
-//         controller_node.controller_map_[ModeControllerBase::ControllerMode::MODE_2] = std::shared_ptr<ModeControllerBase>(mock_controller2);
+class MockVelocityController : public VelocityControllerImpl<sensor_msgs::msg::JointState>
+{
+public:
+  MockVelocityController(const rclcpp::Node::SharedPtr & node)
+  : VelocityControllerImpl<sensor_msgs::msg::JointState>("MockVelocity", node) {}
 
-//         controller_node.work_to_controller_map_[ModeControllerBase::WorkMode::WORK_MODE_1] = ModeControllerBase::ControllerMode::MODE_1;
-//         controller_node.work_to_controller_map_[ModeControllerBase::WorkMode::WORK_MODE_2] = ModeControllerBase::ControllerMode::MODE_2;
-//     }
-// };
+  void velocity_callback(const sensor_msgs::msg::JointState::SharedPtr) override {}
+  void start(const std::string &) override {}
+  bool stop(const std::string &) override {return true;}
 
-// // Test case 1: Start a valid controller mode
-// TEST_F(ControllerNodeTest, StartValidControllerMode) {
-//     EXPECT_CALL(*controller_node.controller_map_[ModeControllerBase::ControllerMode::MODE_1], start()).Times(1);
+  // Expose protected members for testing
+  auto & get_subscriptions() {return subscriptions_;}
+  using VelocityControllerImpl<sensor_msgs::msg::JointState>::cleanup_subscriptions;
+};
 
-//     bool result = controller_node.start_working_controller(static_cast<uint8_t>(ModeControllerBase::WorkMode::WORK_MODE_1));
-//     EXPECT_TRUE(result);
-// }
+// Test Fixture
+class TopicLifecycleTest : public ::testing::Test
+{
+protected:
+  void SetUp() override
+  {
+    // Initialize ROS2
+    if (!rclcpp::ok()) {
+      rclcpp::init(0, nullptr);
+    }
+    node = std::make_shared<rclcpp::Node>("test_node");
+  }
 
-// // Test case 2: Start an invalid controller mode
-// TEST_F(ControllerNodeTest, StartInvalidControllerMode) {
-//     bool result = controller_node.start_working_controller(99); // Assuming 99 is an invalid mode
-//     EXPECT_FALSE(result);
-// }
+  void TearDown() override
+  {
+    node.reset();
+  }
 
-// // Test case 3: Start a controller mode that is already active
-// TEST_F(ControllerNodeTest, StartAlreadyActiveControllerMode) {
-//     controller_node.current_mode_ = static_cast<uint8_t>(ModeControllerBase::WorkMode::WORK_MODE_1);
+  rclcpp::Node::SharedPtr node;
+};
 
-//     bool result = controller_node.start_working_controller(static_cast<uint8_t>(ModeControllerBase::WorkMode::WORK_MODE_1));
-//     EXPECT_TRUE(result);
-// }
+// ============================================================================
+// Test: init_subscriptions creates subscription with correct topic name
+// ============================================================================
+TEST_F(TopicLifecycleTest, InitSubscriptionsCreatesSubscription) {
+  auto controller = std::make_shared<MockTrajectoryController>(node);
 
-// // Test case 4: Stop a controller mode that is active
-// TEST_F(ControllerNodeTest, StopActiveControllerMode) {
-//     controller_node.current_mode_ = static_cast<uint8_t>(ModeControllerBase::WorkMode::WORK_MODE_1);
-//     EXPECT_CALL(*controller_node.controller_map_[ModeControllerBase::ControllerMode::MODE_1], stop()).Times(1);
+  // Configure topic parameter
+  node->declare_parameter(
+    "controllers.MockTrajectory.input_topic",
+    "/test_topic/{mapping}");
 
-//     controller_node.stop_working_controller();
-// }
+  // Call init_subscriptions
+  controller->init_subscriptions("test_arm");
 
-// // Test case 5: Stop a controller mode that is not active
-// TEST_F(ControllerNodeTest, StopInactiveControllerMode) {
-//     controller_node.current_mode_ = static_cast<uint8_t>(ModeControllerBase::WorkMode::WORK_MODE_2);
+  // Verify subscription was created (subscriptions_ should contain entry)
+  EXPECT_TRUE(controller->get_subscriptions().count("test_arm") > 0);
+}
 
-//     controller_node.stop_working_controller();
-// }
+// ============================================================================
+// Test: cleanup_subscriptions removes subscription
+// ============================================================================
+TEST_F(TopicLifecycleTest, CleanupSubscriptionsRemovesSubscription) {
+  auto controller = std::make_shared<MockTrajectoryController>(node);
 
-// // Test case 6: Start a controller mode with a null controller pointer
-// TEST_F(ControllerNodeTest, StartControllerModeWithNullPointer) {
-//     controller_node.controller_map_[ModeControllerBase::ControllerMode::MODE_3] = nullptr;
-//     controller_node.work_to_controller_map_[ModeControllerBase::WorkMode::WORK_MODE_3] = ModeControllerBase::ControllerMode::MODE_3;
+  // Configure topic parameter
+  node->declare_parameter(
+    "controllers.MockTrajectory.input_topic",
+    "/test_topic/{mapping}");
 
-//     bool result = controller_node.start_working_controller(static_cast<uint8_t>(ModeControllerBase::WorkMode::WORK_MODE_3));
-//     EXPECT_FALSE(result);
-// }
+  // Create subscription
+  controller->init_subscriptions("test_arm");
+  EXPECT_TRUE(controller->get_subscriptions().count("test_arm") > 0);
+
+  // Clean up subscription
+  controller->cleanup_subscriptions("test_arm");
+
+  // Verify subscription was removed
+  EXPECT_TRUE(controller->get_subscriptions().count("test_arm") == 0);
+}
+
+// ============================================================================
+// Test: multiple mappings can have independent subscriptions
+// ============================================================================
+TEST_F(TopicLifecycleTest, MultipleMappingsIndependentSubscriptions) {
+  auto controller = std::make_shared<MockTrajectoryController>(node);
+
+  // Configure topic parameter
+  node->declare_parameter(
+    "controllers.MockTrajectory.input_topic",
+    "/test_topic/{mapping}");
+
+  // Create subscriptions for multiple mappings
+  controller->init_subscriptions("left_arm");
+  controller->init_subscriptions("right_arm");
+
+  // Verify both subscriptions exist
+  EXPECT_TRUE(controller->get_subscriptions().count("left_arm") > 0);
+  EXPECT_TRUE(controller->get_subscriptions().count("right_arm") > 0);
+
+  // Clean up one mapping
+  controller->cleanup_subscriptions("left_arm");
+
+  // Verify only left_arm was removed, right_arm still exists
+  EXPECT_TRUE(controller->get_subscriptions().count("left_arm") == 0);
+  EXPECT_TRUE(controller->get_subscriptions().count("right_arm") > 0);
+}
+
+// ============================================================================
+// Test: mapping placeholder substitution
+// ============================================================================
+TEST_F(TopicLifecycleTest, MappingPlaceholderSubstitution) {
+  auto controller = std::make_shared<MockTrajectoryController>(node);
+
+  // Configure topic parameter with {mapping} placeholder
+  node->declare_parameter(
+    "controllers.MockTrajectory.input_topic",
+    "/controller_api/test_action/{mapping}");
+
+  // Create subscription
+  controller->init_subscriptions("single_arm");
+
+  // Verify subscription was created with correct mapping
+  EXPECT_TRUE(controller->get_subscriptions().count("single_arm") > 0);
+
+  // Create with different mapping
+  controller->init_subscriptions("dual_arm");
+  EXPECT_TRUE(controller->get_subscriptions().count("dual_arm") > 0);
+}
+
+// ============================================================================
+// Test: init_subscriptions called multiple times for same mapping doesn't create duplicate
+// ============================================================================
+TEST_F(TopicLifecycleTest, InitSubscriptionsIdempotent) {
+  auto controller = std::make_shared<MockTrajectoryController>(node);
+
+  // Configure topic parameter
+  node->declare_parameter(
+    "controllers.MockTrajectory.input_topic",
+    "/test_topic/{mapping}");
+
+  // Create subscription
+  controller->init_subscriptions("test_arm");
+  auto first_subscription = controller->get_subscriptions()["test_arm"];
+
+  // Call again with same mapping
+  controller->init_subscriptions("test_arm");
+  auto second_subscription = controller->get_subscriptions()["test_arm"];
+
+  // Verify new subscription was created (pointer should be different)
+  EXPECT_NE(first_subscription, second_subscription);
+}
+
+// ============================================================================
+// Test: cleanup_subscriptions on non-existent mapping doesn't crash
+// ============================================================================
+TEST_F(TopicLifecycleTest, CleanupNonExistentSubscription) {
+  auto controller = std::make_shared<MockTrajectoryController>(node);
+
+  // Try to cleanup subscription that doesn't exist
+  EXPECT_NO_THROW(controller->cleanup_subscriptions("non_existent"));
+
+  // Verify no subscriptions exist
+  EXPECT_TRUE(controller->get_subscriptions().empty());
+}
+
+// ============================================================================
+// Test: VelocityController also supports subscription management
+// ============================================================================
+TEST_F(TopicLifecycleTest, VelocityControllerSubscriptionManagement) {
+  auto controller = std::make_shared<MockVelocityController>(node);
+
+  // Configure topic parameter
+  node->declare_parameter(
+    "controllers.MockVelocity.input_topic",
+    "/velocity_topic/{mapping}");
+
+  // Create subscription
+  controller->init_subscriptions("test_arm");
+  EXPECT_TRUE(controller->get_subscriptions().count("test_arm") > 0);
+
+  // Clean up
+  controller->cleanup_subscriptions("test_arm");
+  EXPECT_TRUE(controller->get_subscriptions().count("test_arm") == 0);
+}
+
+// ============================================================================
+// Test: empty mapping doesn't create subscription
+// ============================================================================
+TEST_F(TopicLifecycleTest, EmptyMappingNotSubscribed) {
+  auto controller = std::make_shared<MockTrajectoryController>(node);
+
+  // Configure topic parameter
+  node->declare_parameter(
+    "controllers.MockTrajectory.input_topic",
+    "/test_topic/{mapping}");
+
+  // Try to create subscription with empty mapping
+  controller->init_subscriptions("");
+
+  // Verify no subscription was created
+  EXPECT_TRUE(controller->get_subscriptions().empty());
+}
+
+// ============================================================================
+// Test: missing input_topic parameter doesn't cause crash
+// ============================================================================
+TEST_F(TopicLifecycleTest, MissingInputTopicParameter) {
+  auto controller = std::make_shared<MockTrajectoryController>(node);
+
+  // Don't set input_topic parameter
+
+  // Should not crash
+  EXPECT_NO_THROW(controller->init_subscriptions("test_arm"));
+
+  // Subscription should not be created
+  EXPECT_TRUE(controller->get_subscriptions().empty());
+}
+
+int main(int argc, char ** argv)
+{
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
