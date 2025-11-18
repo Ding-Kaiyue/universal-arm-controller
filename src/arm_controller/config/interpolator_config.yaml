@@ -1,0 +1,11 @@
+interpolation:
+  default:
+    target_dt: 0.01           # 10ms插值间隔
+    max_velocity: 180.0       # 最大速度 (度/秒)
+    max_acceleration: 360.0   # 最大加速度 (度/秒^2)
+    max_jerk: 720.0           # 最大加加速度 (度/秒^3)
+
+  # 特定控制器的插值配置覆盖
+  # Move2Initial:
+  #   target_dt: 0.005
+  #   velocity_scale: 0.15

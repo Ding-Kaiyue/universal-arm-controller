@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Issues
+    url: https://github.com/Ding-Kaiyue/universal-arm-controller/issues
+    about: 请使用下面的模板来报告问题或提出建议 

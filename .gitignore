@@ -1,0 +1,124 @@
+# ==========================================
+# 🌟 Universal Arm Controller - Git Ignore
+# ==========================================
+
+# === ROS 2 / Colcon Build ===
+src/hardware_driver/
+src/trajectory_interpolator/
+src/trajectory_planning/
+install/
+build/
+log/
+.colcon/
+*.log
+
+# === CMake / Make ===
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+
+# === VSCode ===
+.vscode/
+.history/
+*.code-workspace
+
+# === Python Cache (if any tools/scripts) ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pycache/
+
+# === System Files ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# === IDE / Editor ===
+.idea/
+*.iml
+*.user
+*.sublime-project
+*.sublime-workspace
+
+# === Dependency / External ===
+*.so
+*.a
+*.o
+*.out
+*.obj
+*.exe
+*.dll
+
+# === Generated Artifacts ===
+*.pdf
+*.docx
+*.pptx
+*.xlsx
+*.rtf
+*.zip
+*.tar
+*.gz
+*.7z
+
+# === Launch / Config Caches ===
+**/*.yaml~
+**/*.launch.py~
+**/*.launch~
+params/
+temp/
+tmp/
+
+# === ROS2 Workspace ===
+ros2_ws/
+dev_ws/
+install_isolated/
+devel/
+logs/
+
+# === Local Test Data ===
+test_results/
+data/
+recordings/
+captures/
+datasets/
+
+# === Tools / Simulation ===
+gazebo_log/
+*.world~
+*.urdf~
+*.xacro~
+*.rviz
+*.bag
+*.db3
+
+# === Platform Specific ===
+*.exe
+*.dll
+*.bat
+*.sh~
+*.command
+*.app
+
+# === Git / Metadata ===
+.gitignore~
+*.orig
+*.rej
+
+# === Docs ===
+*.puml
+
+# === Blog Posts (个人博客) ===
+blog_series_plan.md
+code_review.md
+从硬编码到插件化（上篇）：脏架构的问题诊断.md
+从硬编码到插件化（下篇）：清洁架构的设计与实现.md
+控制器体系的演进（上篇）：为什么需要分层继承.md
+控制器体系的演进（下篇）：分层继承的代码设计与扩展.md

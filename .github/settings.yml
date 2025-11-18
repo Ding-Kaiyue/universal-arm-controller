@@ -1,0 +1,73 @@
+# GitHub 仓库设置
+# 用于分支保护和源码管理策略
+
+# 启用 Issues
+issues:
+  enabled: true
+  allowed_labels:
+    - bug
+    - enhancement
+    - question
+    - documentation
+    - good first issue
+    - help wanted
+
+# 启用 Pull Request（欢迎社区贡献）
+pull_requests:
+  enabled: true
+
+# 禁用 Wiki
+wiki:
+  enabled: false
+
+# 禁用 Projects
+projects:
+  enabled: false
+
+# 禁用 Discussions
+discussions:
+  enabled: false
+
+# ========== 分支保护规则 ==========
+# 这些规则通过 GitHub CLI 脚本自动应用
+# 脚本位置: .github/protect-branches.sh
+
+branches:
+  # master 分支保护 (生产就绪)
+  - name: master
+    protection:
+      required_status_checks:
+        strict: true
+        contexts: []
+      enforce_admins: true
+      required_pull_request_reviews:
+        required_approving_review_count: 2
+        dismiss_stale_reviews: true
+        require_code_owner_reviews: true
+      allow_force_pushes: false
+      allow_deletions: false
+      restrictions: null
+
+  # develop 分支保护 (开发集成)
+  - name: develop
+    protection:
+      required_status_checks:
+        strict: true
+        contexts: []
+      enforce_admins: true
+      required_pull_request_reviews:
+        required_approving_review_count: 2
+        dismiss_stale_reviews: true
+        require_code_owner_reviews: true
+      allow_force_pushes: false
+      allow_deletions: false
+      restrictions: null
+
+# ========== 代码所有者 ==========
+code_owners:
+  - path: "*"
+    owner: "Ding-Kaiyue"
+  - path: "/src/arm_controller/"
+    owner: "Ding-Kaiyue"
+  - path: "/.github/"
+    owner: "Ding-Kaiyue" 
