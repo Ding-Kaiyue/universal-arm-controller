@@ -46,18 +46,18 @@ controllers:
   - key: MoveC
     class: MoveCController
     input_topic:
-      name: /controller_api/movec_action
-      # type: geometry_msgs/msg/PoseArray
+      name: /controller_api/movec_action/{mapping}
+      type: geometry_msgs/msg/PoseArray
   - key: MoveJ
     class: MoveJController
     input_topic:
-      name: /controller_api/movej_action
-      # type: sensor_msgs/msg/JointState
+      name: /controller_api/movej_action/{mapping}
+      type: sensor_msgs/msg/JointState
   - key: MoveL
     class: MoveLController
     input_topic:
-      name: /controller_api/movel_action
-      # type: geometry_msgs/msg/Pose
+      name: /controller_api/movel_action/{mapping}
+      type: geometry_msgs/msg/Pose
 
   # - key: PointRecord
   #   class: PointRecordController

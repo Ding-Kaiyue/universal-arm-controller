@@ -22,18 +22,10 @@ MoveCController::MoveCController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹插值器
     trajectory_interpolator_ = std::make_unique<TrajectoryInterpolator>();
 
-    // 从配置读取输入话题名称
-    std::string input_topic;
-    node_->get_parameter("controllers.MoveC.input_topic", input_topic);
-
-    // 创建全局话题订阅（生命周期与 ControllerManagerNode 一致）
-    sub_ = node_->create_subscription<geometry_msgs::msg::PoseArray>(
-        input_topic, rclcpp::QoS(10).reliable(),
-        std::bind(&MoveCController::trajectory_callback, this, std::placeholders::_1)
-    );
-
     // 初始化轨迹规划服务
     initialize_planning_services();
+
+    // 注意：话题订阅在 init_subscriptions() 中创建，以支持 {mapping} 占位符
 }
 
 void MoveCController::start(const std::string& mapping) {
@@ -48,6 +40,11 @@ void MoveCController::start(const std::string& mapping) {
     // 保存当前激活的 mapping
     active_mapping_ = mapping;
     is_active_ = true;
+
+    // 在激活时创建话题订阅（如果还没创建的话）
+    if (subscriptions_.find(mapping) == subscriptions_.end()) {
+        init_subscriptions(mapping);
+    }
 
     // 同步 MoveIt 状态到当前机械臂位置，防止规划从错误的起始位置开始
     if (moveit_adapters_.find(mapping) != moveit_adapters_.end() && moveit_adapters_[mapping]) {
@@ -69,6 +66,9 @@ bool MoveCController::stop(const std::string& mapping) {
 
     // 清理资源
     active_mapping_.clear();
+
+    // 清理该 mapping 的话题订阅
+    cleanup_subscriptions(mapping);
 
     // 注意：轨迹执行是在 ROS2 callback 中同步进行的
     // execute_trajectory 是阻塞调用，stop() 被调用时表示上一个轨迹已执行完毕

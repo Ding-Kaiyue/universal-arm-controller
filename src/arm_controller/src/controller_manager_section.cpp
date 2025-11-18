@@ -131,6 +131,9 @@ void ControllerManagerNode::init_controllers() {
         }
         auto available = get_available_controllers();
 
+        // 获取所有 mapping
+        auto all_mappings = hardware_manager_->get_all_mappings();
+
         for (const auto& entry : yaml_config_["controllers"]) {
             std::string key = entry["key"].as<std::string>();
             std::string class_name = entry["class"].as<std::string>();
@@ -154,17 +157,24 @@ void ControllerManagerNode::init_controllers() {
             auto it = available.find(class_name);
             if (it != available.end()) {
                 ControllerInterface::instance().register_class(key, it->second);
-                auto controller = it->second(this->shared_from_this());
-                controller_map_[key] = controller;
-                RCLCPP_INFO(this->get_logger(), "[controllers] Registered controller: %s (class: %s)",
-                            key.c_str(), class_name.c_str());
+
+                // 为每个 mapping 创建一个 controller 实例
+                for (const auto& mapping : all_mappings) {
+                    auto controller = it->second(this->shared_from_this());
+                    auto key_pair = std::make_pair(key, mapping);
+                    controller_map_[key_pair] = controller;
+                    RCLCPP_DEBUG(this->get_logger(), "[controllers] Created controller: %s for mapping: %s (class: %s)",
+                                key.c_str(), mapping.c_str(), class_name.c_str());
+                }
+                RCLCPP_INFO(this->get_logger(), "[controllers] Registered controller: %s (class: %s) for %zu mappings",
+                            key.c_str(), class_name.c_str(), all_mappings.size());
             } else {
                 RCLCPP_WARN(this->get_logger(), "[controllers] Controller class '%s' not found for key '%s'",
                             class_name.c_str(), key.c_str());
             }
         }
 
-        RCLCPP_INFO(this->get_logger(), "Initialized %zu controllers", controller_map_.size());
+        RCLCPP_INFO(this->get_logger(), "Initialized %zu controller instances", controller_map_.size());
     } catch (const std::exception& e) {
         RCLCPP_FATAL(this->get_logger(), "Failed to initialize controllers: %s", e.what());
         rclcpp::shutdown();
@@ -194,9 +204,11 @@ void ControllerManagerNode::handle_work_mode(
 }
 
 bool ControllerManagerNode::start_working_controller(const std::string& mode_name, const std::string& mapping) {
-    auto it = controller_map_.find(mode_name);
+    // 使用 (mode_name, mapping) 对查找 controller 实例
+    auto key_pair = std::make_pair(mode_name, mapping);
+    auto it = controller_map_.find(key_pair);
     if (it == controller_map_.end()) {
-        RCLCPP_ERROR(this->get_logger(), "Invalid work mode %s", mode_name.c_str());
+        RCLCPP_ERROR(this->get_logger(), "Invalid work mode %s for mapping %s", mode_name.c_str(), mapping.c_str());
         return false;
     }
 
@@ -205,7 +217,8 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
         // 强制停止当前控制器，不管需不需要钩子状态
         auto current_mode_it = mapping_to_mode_.find(mapping);
         if (current_mode_it != mapping_to_mode_.end()) {
-            auto current_it = controller_map_.find(current_mode_it->second);
+            auto current_key_pair = std::make_pair(current_mode_it->second, mapping);
+            auto current_it = controller_map_.find(current_key_pair);
             if (current_it != controller_map_.end()) {
                 current_it->second->stop(mapping);
                 RCLCPP_INFO(this->get_logger(), "[%s] Force stopped controller for mode: %s", mapping.c_str(), current_mode_it->second.c_str());
@@ -257,12 +270,14 @@ bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::
         return true;  // 没有活跃模式，无需停止
     }
 
-    auto it = controller_map_.find(current_mode_it->second);
+    // 使用 (mode, mapping) 对查找 controller 实例
+    auto key_pair = std::make_pair(current_mode_it->second, mapping);
+    auto it = controller_map_.find(key_pair);
     if (it != controller_map_.end()) {
         need_hook = it->second->needs_hook_state();
         it->second->stop(mapping);
 
-        // 注意：话题订阅由控制器在构造函数中创建，由控制器的生命周期管理
+        // 注意：话题订阅由控制器在 start() 中动态创建
         // 当 stop() 调用时，控制器会停止处理消息（通过 is_active_ 标志）
 
         RCLCPP_INFO(this->get_logger(), "[%s] Stopped controller for mode: %s, needs_hook: %s",
@@ -277,7 +292,8 @@ bool ControllerManagerNode::enter_hook_state(const std::string& target_mode, con
     target_mode_ = target_mode;
     in_hook_state_ = true;
 
-    auto hook_it = controller_map_.find("HoldState");
+    auto hook_key = std::make_pair("HoldState", mapping);
+    auto hook_it = controller_map_.find(hook_key);
     if (hook_it != controller_map_.end()) {
         auto hold_controller = std::dynamic_pointer_cast<HoldStateController>(hook_it->second);
         if (hold_controller) {
@@ -347,7 +363,8 @@ bool ControllerManagerNode::exit_hook_state(const std::string& mapping) {
     // 如果目标模式不是HoldState，则停止当前的HoldState控制器
     // 如果目标就是HoldState，则不需要停止（避免竞态条件）
     if (target_mode_ != "HoldState") {
-        auto hook_it = controller_map_.find("HoldState");
+        auto hook_key = std::make_pair("HoldState", mapping);
+        auto hook_it = controller_map_.find(hook_key);
         if (hook_it != controller_map_.end()) {
             RCLCPP_DEBUG(this->get_logger(), "Stopping HoldState controller before switching to %s", target_mode_.c_str());
             hook_it->second->stop(mapping);
@@ -374,14 +391,16 @@ bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const s
         return false;
     }
 
-    auto it = controller_map_.find(mode_name);
+    // 使用 (mode_name, mapping) 对查找 controller 实例
+    auto key_pair = std::make_pair(mode_name, mapping);
+    auto it = controller_map_.find(key_pair);
     if (it == controller_map_.end()) {
-        RCLCPP_ERROR(this->get_logger(), "Controller not found for mode: %s", mode_name.c_str());
+        RCLCPP_ERROR(this->get_logger(), "Controller not found for mode: %s, mapping: %s", mode_name.c_str(), mapping.c_str());
         return false;
     }
 
     if (!it->second) {
-        RCLCPP_ERROR(this->get_logger(), "Controller pointer is null for mode: %s", mode_name.c_str());
+        RCLCPP_ERROR(this->get_logger(), "Controller pointer is null for mode: %s, mapping: %s", mode_name.c_str(), mapping.c_str());
         return false;
     }
 
@@ -398,7 +417,7 @@ bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const s
         }
 
         // 启动新控制器
-       it->second->start(mapping);
+        it->second->start(mapping);
         mapping_to_mode_[mapping] = mode_name;
 
         // 清空缓存的消息（避免切换控制器时执行旧消息导致意外运动）

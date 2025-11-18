@@ -23,15 +23,7 @@ CartesianVelocityController::CartesianVelocityController(const rclcpp::Node::Sha
     node_->get_parameter("controllers.CartesianVelocity.base_frame", base_frame_);
     RCLCPP_INFO(node_->get_logger(), "[CartesianVelocity] Base frame: %s", base_frame_.c_str());
 
-    // 从配置读取输入话题名称
-    std::string input_topic;
-    node_->get_parameter("controllers.CartesianVelocity.input_topic", input_topic);
-
-    // 创建全局话题订阅（生命周期与 ControllerManagerNode 一致）
-    sub_ = node_->create_subscription<geometry_msgs::msg::TwistStamped>(
-        input_topic, rclcpp::QoS(10).reliable(),
-        std::bind(&CartesianVelocityController::velocity_callback, this, std::placeholders::_1)
-    );
+    // 注意：话题订阅在 init_subscriptions() 中创建，当 controller 被激活时调用
 
     // 预初始化所有mapping的moveit服务
     initialize_moveit_service();
@@ -56,6 +48,11 @@ void CartesianVelocityController::start(const std::string& mapping) {
     // 保存当前激活的 mapping
     active_mapping_ = mapping;
     is_active_ = true;
+
+    // 在激活时创建话题订阅（如果还没创建的话）
+    if (subscriptions_.find(mapping) == subscriptions_.end()) {
+        init_subscriptions(mapping);
+    }
 
     // ════════════════════════════════════════════════════════════════════════════════
     // 在启动时将世界坐标系（world）设置为参考坐标系
@@ -98,6 +95,9 @@ bool CartesianVelocityController::stop(const std::string& mapping) {
         std::vector<double> zero_velocities(joint_names.size(), 0.0);
         send_joint_velocities(mapping, zero_velocities);
     }
+
+    // 清理该 mapping 的话题订阅
+    cleanup_subscriptions(mapping);
 
     RCLCPP_INFO(node_->get_logger(), "[%s] CartesianVelocityController deactivated", mapping.c_str());
     return true;  // 需要钩子状态来安全停止

@@ -12,16 +12,7 @@ JointVelocityController::JointVelocityController(const rclcpp::Node::SharedPtr& 
     // 获取HardwareManager实例
     hardware_manager_ = HardwareManager::getInstance();
 
-    // 从配置读取输入话题名称
-    std::string input_topic;
-    node_->get_parameter("controllers.JointVelocity.input_topic", input_topic);
-
-    // 创建全局话题订阅（生命周期与 ControllerManagerNode 一致）
-    sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
-        input_topic, rclcpp::QoS(10).reliable(),
-        std::bind(&JointVelocityController::velocity_callback, this, std::placeholders::_1)
-    );
-
+    // 注意：话题订阅在 init_subscriptions() 中创建，当 controller 被激活时调用
     RCLCPP_INFO(node_->get_logger(), "JointVelocityController initialized");
 }
 
@@ -40,12 +31,21 @@ void JointVelocityController::start(const std::string& mapping) {
     active_mapping_ = mapping;
     is_active_ = true;
 
+    // 在激活时创建话题订阅（如果还没创建的话）
+    if (subscriptions_.find(mapping) == subscriptions_.end()) {
+        init_subscriptions(mapping);
+    }
+
     RCLCPP_INFO(node_->get_logger(), "[%s] JointVelocityController activated", mapping.c_str());
 }
 
 bool JointVelocityController::stop(const std::string& mapping) {
     // 停止处理消息
     is_active_ = false;
+
+    // 清理该 mapping 的话题订阅
+    cleanup_subscriptions(mapping);
+
     RCLCPP_INFO(node_->get_logger(), "[%s] JointVelocityController deactivated", mapping.c_str());
     return true;  // 需要钩子状态来安全停止
 }

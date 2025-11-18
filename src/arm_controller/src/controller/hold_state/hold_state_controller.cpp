@@ -195,13 +195,16 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
         // 检查是否可以安全转换到目标状态
         if (can_transition_to_target(normalized_mapping)) {
             RCLCPP_INFO(node_->get_logger(), "Safety conditions satisfied, triggering transition to %s", target_mode_.c_str());
-            transition_ready_callback_();
 
-            // 转换完成后停止定时器，避免重复触发
+            // 关键：在调用回调前停止定时器，避免从回调内部（即从stop()）取消定时器导致的竞态条件
+            // 定时器自身会在回调执行期间安全地被取消
             if (ctx.safety_timer) {
                 ctx.safety_timer->cancel();
                 ctx.safety_timer.reset();
             }
+
+            // 现在调用回调 - 此时定时器已被安全取消，不会发生竞态条件
+            transition_ready_callback_();
         }
         // 如果条件不满足，继续等待下一次检查
     }

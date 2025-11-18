@@ -70,7 +70,9 @@ private:
     void handle_action_event(const std_msgs::msg::String::SharedPtr msg);
 
     // 成员变量
-    std::map<std::string, std::shared_ptr<ModeControllerBase>> controller_map_;
+    // 控制器映射：(key, mapping) -> controller 实例
+    // 每个 (控制器类型, 硬件映射) 对都有独立的 controller 实例
+    std::map<std::pair<std::string, std::string>, std::shared_ptr<ModeControllerBase>> controller_map_;
     std::map<std::string, std::string> mapping_to_mode_;  // 每个 mapping 的当前模式
     std::string target_mode_;
     bool in_hook_state_;
