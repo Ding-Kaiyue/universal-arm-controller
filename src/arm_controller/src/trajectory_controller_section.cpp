@@ -238,9 +238,6 @@ void TrajectoryControllerNode::execute_trajectory(const std::shared_ptr<GoalHand
                         final_trajectory.points.size(), goal->trajectory.points.size());
         }
 
-        // 使用传入的mapping获取对应的interface
-        // std::string interface = hardware_manager_->get_interface(mapping);
-
         // 执行轨迹
         if (!hardware_manager_->executeTrajectory(interface, final_trajectory)) {
             RCLCPP_ERROR(this->get_logger(), "❎ Failed to execute trajectory on interface: %s (mapping: %s)",

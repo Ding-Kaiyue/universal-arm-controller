@@ -4,7 +4,7 @@
 #include <set>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveL', mapping: 'single_arm'}"
-// ros2 topic pub --once /controller_api/movel_action geometry_msgs/msg/Pose "{position: {x: 0.19, y: 0.0, z: 0.63}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}}"
+// ros2 topic pub --once /controller_api/movel_action/single_arm geometry_msgs/msg/Pose "{position: {x: 0.19, y: 0.0, z: 0.63}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}}"
 
 MoveLController::MoveLController(const rclcpp::Node::SharedPtr& node)
     : TrajectoryControllerImpl<geometry_msgs::msg::Pose>("MoveL", node)

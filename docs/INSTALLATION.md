@@ -62,8 +62,6 @@ sudo apt install ros-humble-moveit ros-humble-moveit-servo
 
 ### 3. 安装 TracIK（必选）
 
-如果需要使用 IK 规划，安装 TracIK：
-
 ```bash
 # 创建工作空间
 mkdir -p ~/trac_ik_ws/src
@@ -79,6 +77,39 @@ source install/setup.bash
 
 # 添加到 bashrc
 echo "source ~/trac_ik_ws/install/setup.bash" >> ~/.bashrc
+```
+
+### 4. 安装 QP 求解器（必选）
+
+安装 OSQP 和 OsqpEigen（用于二次规划优化求解）：
+
+```bash
+# 创建临时工作目录
+mkdir -p ~/osqp_build
+
+# 编译 OSQP
+cd ~/osqp_build
+git clone https://github.com/osqp/osqp.git
+cd osqp
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+sudo ldconfig
+
+# 编译 OsqpEigen
+cd ~/osqp_build
+git clone https://github.com/robotology/osqp-eigen.git
+cd osqp-eigen
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+sudo ldconfig
+
+# 验证安装
+pkg-config --modversion osqp
+pkg-config --modversion osqp-eigen
 ```
 
 ---

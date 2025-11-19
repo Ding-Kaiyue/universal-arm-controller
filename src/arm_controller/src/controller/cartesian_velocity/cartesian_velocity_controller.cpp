@@ -6,7 +6,7 @@
 #include <chrono>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'CartesianVelocity', mapping: 'single_arm'}"
-// ros2 topic pub --once /controller_api/cartesian_velocity_action geometry_msgs/msg/TwistStamped "{header: {stamp: {sec: 0, nanosec: 0}, frame_id: 'base_link'}, twist: {linear: {x: 0.03, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}}"
+// ros2 topic pub --once /controller_api/cartesian_velocity_action/single_arm geometry_msgs/msg/TwistStamped "{header: {stamp: {sec: 0, nanosec: 0}, frame_id: 'base_link'}, twist: {linear: {x: 0.03, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}}"
 
 CartesianVelocityController::CartesianVelocityController(const rclcpp::Node::SharedPtr& node)
     : VelocityControllerImpl<geometry_msgs::msg::TwistStamped>("CartesianVelocity", node),

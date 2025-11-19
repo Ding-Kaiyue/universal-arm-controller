@@ -4,7 +4,7 @@
 #include <set>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
-// ros2 topic pub --once /controller_api/movej_action sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+// ros2 topic pub --once /controller_api/movej_action/single_arm sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 
 MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
     : TrajectoryControllerImpl<sensor_msgs::msg::JointState>("MoveJ", node)

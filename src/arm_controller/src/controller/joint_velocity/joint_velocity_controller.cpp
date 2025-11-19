@@ -4,7 +4,7 @@
 #include <algorithm>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'JointVelocity', mapping: 'single_arm'}"
-// ros2 topic pub --once /controller_api/joint_velocity_action sensor_msgs/msg/JointState "{velocity: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+// ros2 topic pub --once /controller_api/joint_velocity_action/single_arm sensor_msgs/msg/JointState "{velocity: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 
 JointVelocityController::JointVelocityController(const rclcpp::Node::SharedPtr& node)
     : VelocityControllerImpl<sensor_msgs::msg::JointState>("JointVelocity", node)

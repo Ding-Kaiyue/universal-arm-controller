@@ -8,7 +8,7 @@
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveC', mapping: 'single_arm'}"
 
 // 注意: planArcMotion 会自动使用当前位置作为起点，所以只需要提供 via_point 和 goal_point
-/* ros2 topic pub --once /controller_api/movec_action geometry_msgs/msg/PoseArray "{poses: [
+/* ros2 topic pub --once /controller_api/movec_action/single_arm geometry_msgs/msg/PoseArray "{poses: [
    {position: {x: 0.30, y: 0.0, z: 0.55}, orientation: {x: -0.5, y: 0.5, z: -0.5, w: 0.5}},
    {position: {x: 0.25, y: 0.0, z: 0.60}, orientation: {x: -0.4777, y: 0.4777, z: -0.5213, w: 0.5213}}
    ]}"
