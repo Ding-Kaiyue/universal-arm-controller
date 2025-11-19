@@ -5,7 +5,7 @@
 ## 前提条件
 
 - ✅ Ubuntu 22.04 LTS 或更高版本
-- ✅ ROS2 Humble 已安装
+- ✅ 根据 [安装指南](INSTALLATION.md) 配置好环境
 - ✅ 网络连接正常
 
 ## 第一步：安装
