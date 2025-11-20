@@ -57,7 +57,7 @@ ros2 service call /controller_api/controller_mode \
   controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
 
 # 发送关节目标位置
-ros2 topic pub /controller_api/movej_action sensor_msgs/msg/JointState \
+ros2 topic pub /controller_api/movej_action/single_arm sensor_msgs/msg/JointState \
   "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 ```
 

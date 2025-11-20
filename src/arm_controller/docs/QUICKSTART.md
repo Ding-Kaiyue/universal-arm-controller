@@ -42,11 +42,29 @@ ros2 service call /controller_api/controller_mode controller_interfaces/srv/Work
   "{mode: 'MoveJ', mapping: 'single_arm'}"
 
 # 发送目标位置
-ros2 topic pub --once /controller_api/movej_action sensor_msgs/msg/JointState \
+ros2 topic pub --once /controller_api/movej_action/single_arm sensor_msgs/msg/JointState \
   "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 ```
 
-### 3. MoveL 测试
+### 3. 轨迹控制测试
+
+在轨迹执行过程中，可以实时暂停、恢复或取消:
+
+```bash
+# 暂停轨迹
+ros2 topic pub --once /trajectory_control controller_interfaces/msg/TrajectoryControl \
+  "{mapping: 'single_arm', action: 'Pause'}"
+
+# 恢复轨迹
+ros2 topic pub --once /trajectory_control controller_interfaces/msg/TrajectoryControl \
+  "{mapping: 'single_arm', action: 'Resume'}"
+
+# 取消轨迹
+ros2 topic pub --once /trajectory_control controller_interfaces/msg/TrajectoryControl \
+  "{mapping: 'single_arm', action: 'Cancel'}"
+```
+
+### 4. MoveL 测试
 
 ```bash
 # 切换到 MoveL 模式
@@ -54,7 +72,7 @@ ros2 service call /controller_api/controller_mode controller_interfaces/srv/Work
   "{mode: 'MoveL', mapping: 'single_arm'}"
 
 # 发送目标位姿
-ros2 topic pub --once /controller_api/movel_action geometry_msgs/msg/Pose \
+ros2 topic pub --once /controller_api/movel_action/single_arm geometry_msgs/msg/Pose \
   "{position: {x: 0.19, y: 0.0, z: 0.63}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}}"
 ```
 

@@ -120,6 +120,11 @@ common:
     type: controller_interfaces/srv/WorkMode
     kind: service
 
+  - key: motor_control_service
+    name: /controller_api/motor_control
+    type: controller_interfaces/srv/MotorControl
+    kind: service
+
   - key: running_status
     name: /controller_api/running_status
     type: std_msgs/msg/String
@@ -137,8 +142,8 @@ common:
 
 ```yaml
 controllers:
-  - key: Disable
-    class: DisableController
+  - key: SystemStart
+    class: SystemStartController
 
   - key: HoldState
     class: HoldStateController
@@ -146,7 +151,14 @@ controllers:
   - key: JointVelocity
     class: JointVelocityController
     input_topic:
-      name: /controller_api/joint_velocity_action
+      name: /controller_api/joint_velocity_action/{mapping}
+      type: sensor_msgs/msg/JointState
+
+  - key: CartesianVelocity
+    class: CartesianVelocityController
+    input_topic:
+      name: /controller_api/cartesian_velocity_action/{mapping}
+      type: geometry_msgs/msg/Twist
 
   - key: Move2Initial
     class: Move2InitialController
@@ -159,38 +171,69 @@ controllers:
 
   - key: MoveC
     class: MoveCController
-    input_topic: 
-      name: /controller_api/movec_action
+    input_topic:
+      name: /controller_api/movec_action/{mapping}
+      type: geometry_msgs/msg/PoseArray
 
   - key: MoveJ
     class: MoveJController
-    input_topic: 
-      name: /controller_api/movej_action
+    input_topic:
+      name: /controller_api/movej_action/{mapping}
+      type: sensor_msgs/msg/JointState
 
   - key: MoveL
     class: MoveLController
-    input_topic: 
-      name: /controller_api/movel_action
+    input_topic:
+      name: /controller_api/movel_action/{mapping}
+      type: geometry_msgs/msg/Pose
 ```
 | 参数 | 类型 | 说明 | 示例 | 
 | --- | --- | --- | --- |
 | key | string | 控制器唯一标识符 | MoveJ |
 | class | string | 控制器类名(需在注册宏中定义) | MoveJController |
-| input_topic.name | string | 控制器订阅的ROS话题名称 | /controller_api/movej_action |
+| input_topic.name | string | 控制器订阅的ROS话题名称 | /controller_api/movej_action/{mapping} |
 
 
 #### 已注册的控制器一览
 | 控制器Key | 控制器类名 | 输入话题 | 消息类型 | 说明 |
 | --- | --- | --- | --- | --- |
+| SystemStart | SystemStartController | - | - | 系统启动 |
 | Disable | DisableController | - | - | 整机失能 |
 | HoldState | HoldStateController | - | - | 保持当前姿态 |
-| JointVelocity | JointVelocityController | /controller_api/joint_velocity_action | sensor_msgs/msg/JointState | 关节速度控制 |
+| JointVelocity | JointVelocityController | /controller_api/joint_velocity_action/{mapping} | sensor_msgs/msg/JointState | 关节速度控制 |
+| CartesianVelocity | CartesianVelocityController | /controller_api/cartesian_velocity_action/{mapping} | geometry_msgs/msg/Twist | 笛卡尔速度控制 |
 | Move2Initial | Move2InitialController | - | - | 移动到初始位置 |
-| Move2Start | Move2StartController | - | - | 移动到启动位置
-| ROS2ActionControl | ROS2ActionController | - | - | ROS2Action控制层 |
-| MoveC | MoveCController | /controller_api/movec_action | geometry_msgs/msg/PoseArray | 圆弧运动控制 |
-| MoveJ | MoveJController | /controller_api/movej_action | sensor_msgs/msg/JointState | 关节空间运动控制 |
-| MoveL | MoveLController | /controller_api/movel_action | geometry_msgs/msg/Pose | 笛卡尔空间直线运动控制(支持智能回退) |
+| Move2Start | Move2StartController | - | - | 移动到启动位置 |
+| ROS2ActionControl | ROS2ActionControlController | - | - | ROS2Action控制层 |
+| MoveC | MoveCController | /controller_api/movec_action/{mapping} | geometry_msgs/msg/PoseArray | 圆弧运动控制 |
+| MoveJ | MoveJController | /controller_api/movej_action/{mapping} | sensor_msgs/msg/JointState | 关节空间运动控制 |
+| MoveL | MoveLController | /controller_api/movel_action/{mapping} | geometry_msgs/msg/Pose | 笛卡尔空间直线运动控制 |
+
+#### 轨迹控制
+
+在轨迹执行过程中，可以通过以下话题实时控制轨迹的暂停、恢复和取消：
+
+| 话题名 | 消息类型 | 说明 |
+| --- | --- | --- |
+| /trajectory_control | controller_interfaces/msg/TrajectoryControl | 实时轨迹控制命令 |
+
+**TrajectoryControl 消息格式：**
+```
+string mapping     # 机械臂映射标识（single_arm/left_arm/right_arm）
+string action      # 控制指令（Pause/Resume/Cancel）
+```
+
+**使用示例：**
+```bash
+# 暂停轨迹
+ros2 topic pub /trajectory_control controller_interfaces/msg/TrajectoryControl "{mapping: 'single_arm', action: 'Pause'}"
+
+# 恢复轨迹
+ros2 topic pub /trajectory_control controller_interfaces/msg/TrajectoryControl "{mapping: 'single_arm', action: 'Resume'}"
+
+# 取消轨迹
+ros2 topic pub /trajectory_control controller_interfaces/msg/TrajectoryControl "{mapping: 'single_arm', action: 'Cancel'}"
+```
 ---
 
 #### 扩展控制器配置示例
@@ -199,6 +242,7 @@ controllers:
   class: TrajectoryReplayController
   input_topic:
     name: /controller_api/trajectory_replay_action
+    type: std_msgs/msg/String
 ```
 
 ## 插值配置

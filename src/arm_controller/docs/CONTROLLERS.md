@@ -7,10 +7,12 @@
 - [控制器总览](#控制器总览)
   - [控制器分类](#控制器分类)
   - [模式切换](#模式切换)
-- [轨迹控制器](#轨迹控制器)
-  - [MoveJ - 关节空间运动](#movej---关节空间运动)
-  - [MoveL - 直线运动](#movel---笛卡尔直线运动)
-  - [MoveC - 圆弧运动](#movec---圆弧运动)
+- [轨迹执行与控制](#轨迹执行与控制)
+  - [轨迹控制器](#轨迹控制器)
+    - [MoveJ - 关节空间运动](#movej---关节空间运动)
+    - [MoveL - 直线运动](#movel---笛卡尔直线运动)
+    - [MoveC - 圆弧运动](#movec---圆弧运动)
+  - [实时轨迹控制](#实时轨迹控制)
 - [速度控制器](#速度控制器)
   - [JointVelocity - 关节速度控制](#jointvelocity---关节速度控制)
   - [CartesianVelocity - 笛卡尔速度控制](#cartesianvelocity---笛卡尔速度控制)
@@ -58,9 +60,11 @@ ros2 service call /controller_api/controller_mode controller_interfaces/srv/Work
 
 ---
 
-## 轨迹控制器
+## 轨迹执行与控制
 
-### MoveJ - 关节空间运动
+### 轨迹控制器
+
+#### MoveJ - 关节空间运动
 
 #### 功能描述
 
@@ -81,13 +85,13 @@ ros2 service call /controller_api/controller_mode controller_interfaces/srv/Work
   "{mode: 'MoveJ', mapping: 'single_arm'}"
 
 # 2. 发送目标关节位置
-ros2 topic pub --once /controller_api/movej_action sensor_msgs/msg/JointState \
+ros2 topic pub --once /controller_api/movej_action/single_arm sensor_msgs/msg/JointState \
   "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 ```
 
 #### 消息格式
 
-**订阅话题**: `/controller_api/movej_action`
+**订阅话题**: `/controller_api/movej_action/{mapping}`
 **消息类型**: `sensor_msgs/msg/JointState`
 
 ```yaml
@@ -122,7 +126,7 @@ A: 🚧 **开发中** - 当前版本 MoveJ 自动根据轨迹特性计算最优�
 
 ---
 
-### MoveL - 笛卡尔直线运动
+#### MoveL - 笛卡尔直线运动
 
 #### 功能描述
 
@@ -143,13 +147,13 @@ ros2 service call /controller_api/controller_mode controller_interfaces/srv/Work
   "{mode: 'MoveL', mapping: 'single_arm'}"
 
 # 2. 发送目标位姿
-ros2 topic pub --once /controller_api/movel_action geometry_msgs/msg/Pose \
+ros2 topic pub --once /controller_api/movel_action/single_arm geometry_msgs/msg/Pose \
   "{position: {x: 0.19, y: 0.0, z: 0.63}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}}"
 ```
 
 #### 消息格式
 
-**订阅话题**: `/controller_api/movel_action`
+**订阅话题**: `/controller_api/movel_action/{mapping}`
 **消息类型**: `geometry_msgs/msg/Pose`
 
 ```yaml
@@ -194,7 +198,7 @@ A: 目标位置可能超出工作空间或导致碰撞。使用 RViz 可视化�
 
 ---
 
-### MoveC - 圆弧运动
+#### MoveC - 圆弧运动
 
 #### 功能描述
 
@@ -216,7 +220,7 @@ ros2 service call /controller_api/controller_mode controller_interfaces/srv/Work
   "{mode: 'MoveC', mapping: 'single_arm'}"
 
 # 2. 发送圆弧轨迹(通过途径点)
-ros2 topic pub --once /controller_api/movec_action geometry_msgs/msg/PoseArray \
+ros2 topic pub --once /controller_api/movec_action/single_arm geometry_msgs/msg/PoseArray \
   "{poses: [
      {position: {x: 0.30, y: 0.0, z: 0.55}, orientation: {x: -0.5, y: 0.5, z: -0.5, w: 0.5}},
      {position: {x: 0.25, y: 0.0, z: 0.60}, orientation: {x: -0.4777, y: 0.4777, z: -0.5213, w: 0.5213}}
@@ -225,7 +229,7 @@ ros2 topic pub --once /controller_api/movec_action geometry_msgs/msg/PoseArray \
 
 #### 消息格式
 
-**订阅话题**: `/controller_api/movec_action`
+**订阅话题**: `/controller_api/movec_action/{mapping}`
 **消息类型**: `geometry_msgs/msg/PoseArray`
 
 ```yaml
@@ -281,17 +285,17 @@ ros2 service call /controller_api/controller_mode controller_interfaces/srv/Work
   "{mode: 'JointVelocity', mapping: 'single_arm'}"
 
 # 2. 发送关节速度命令
-ros2 topic pub --rate 10 /controller_api/joint_velocity_action sensor_msgs/msg/JointState \
+ros2 topic pub --rate 10 /controller_api/joint_velocity_action/single_arm sensor_msgs/msg/JointState \
   "{velocity: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 
 # 3. 停止运动
-ros2 topic pub --once /controller_api/joint_velocity_action sensor_msgs/msg/JointState \
+ros2 topic pub --once /controller_api/joint_velocity_action/single_arm sensor_msgs/msg/JointState \
   "{velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 ```
 
 #### 消息格式
 
-**订阅话题**: `/controller_api/joint_velocity_action`
+**订阅话题**: `/controller_api/joint_velocity_action/{mapping}`
 **消息类型**: `sensor_msgs/msg/JointState`
 
 ```yaml
@@ -504,13 +508,13 @@ ros2 service call /controller_api/controller_mode controller_interfaces/srv/Work
 # 左臂 MoveJ
 ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode \
   "{mode: 'MoveJ', mapping: 'left_arm'}"
-ros2 topic pub --once /controller_api/movej_action sensor_msgs/msg/JointState \
+ros2 topic pub --once /controller_api/movej_action/left_arm sensor_msgs/msg/JointState \
   "{position: [...]}"
 
 # 右臂 MoveL
 ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode \
   "{mode: 'MoveL', mapping: 'right_arm'}"
-ros2 topic pub --once /controller_api/movel_action geometry_msgs/msg/Pose \
+ros2 topic pub --once /controller_api/movel_action/right_arm geometry_msgs/msg/Pose \
   "{position: {...}, orientation: {...}}"
 ```
 

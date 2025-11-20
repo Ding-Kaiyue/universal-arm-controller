@@ -86,10 +86,11 @@ Arm Controller 基于以下设计理念:
 
 // 话题
 /controller_api/running_status (std_msgs/msg/String)                 // 当前工作模式
-/controller_api/movej_action (sensor_msgs/msg/JointState)            // movej目标点
-/controller_api/movel_action (geometry_msgs/msg/Pose)                // movel目标点
-/controller_api/movec_action (geometry_msgs/msg/PoseArray)           // movec目标点
-/controller_api/joint_velocity_action (sensor_msgs/msg/JointState)   // 关节速度控制目标速度
+/controller_api/motor_control (controller_interfaces/msg/MotorControl) // 电机控制指令 Enable/Disable
+/controller_api/movej_action/single_arm (sensor_msgs/msg/JointState)            // movej目标点
+/controller_api/movel_action/single_arm (geometry_msgs/msg/Pose)                // movel目标点
+/controller_api/movec_action/single_arm (geometry_msgs/msg/PoseArray)           // movec目标点
+/controller_api/joint_velocity_action/single_arm (sensor_msgs/msg/JointState)   // 关节速度控制目标速度
 ```
 
 **核心功能** - 见 [controller_manager_section.hpp](../include/arm_controller/controller_manager_section.hpp):
