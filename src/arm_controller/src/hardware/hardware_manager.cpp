@@ -258,6 +258,20 @@ std::vector<double> HardwareManager::get_current_joint_positions(const std::stri
     return std::vector<double>{};
 }
 
+std::vector<double> HardwareManager::get_current_joint_velocities(const std::string& mapping) const {
+    std::lock_guard<std::mutex> lock(joint_state_mutex_);
+
+    auto it = mapping_joint_states_.find(mapping);
+    if (it != mapping_joint_states_.end()) {
+        return it->second.velocity;
+    }
+
+    RCLCPP_WARN(node_->get_logger(),
+                "[%s] Joint state not found, returning empty velocity vector",
+                mapping.c_str());
+    return std::vector<double>{};
+}
+
 bool HardwareManager::send_hold_state_command(const std::string& mapping,
                                                   const std::vector<double>& positions) {
     if (!hardware_driver_) {
@@ -944,7 +958,6 @@ bool HardwareManager::cancel_trajectory(const std::string& mapping) {
             std::lock_guard<std::mutex> lock(execution_mutex_);
             auto it = mapping_to_execution_id_.find(mapping);
             if (it == mapping_to_execution_id_.end()) {
-                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping", mapping.c_str());
                 return false;
             }
             execution_id = it->second;

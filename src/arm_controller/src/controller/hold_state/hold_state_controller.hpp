@@ -23,9 +23,6 @@ public:
     void set_target_mode(const std::string& target_mode) { target_mode_ = target_mode; }
     std::string get_target_state() const { return target_mode_; }
 
-    // 设置前一个模式，用于选择合适的保持策略
-    void set_previous_mode(const std::string& previous_mode) { previous_mode_ = previous_mode; }
-
     // 设置转换就绪回调函数
     void set_transition_ready_callback(TransitionReadyCallback callback) {
         transition_ready_callback_ = callback;
@@ -36,14 +33,13 @@ public:
 
 private:
     struct MappingContext {
-        rclcpp::TimerBase::SharedPtr safety_timer;
+        rclcpp::TimerBase::SharedPtr safety_timer;  // 定时器：仅用于安全检查，不发送保持命令
         bool transition_ready = false;
         bool system_health_check_paused = false;
         std::vector<double> hold_positions;  // 记录当前关节位置以保持状态
     };
 
     std::string target_mode_;
-    std::string previous_mode_;  // 前一个模式，用于选择保持策略
     std::unordered_map<std::string, MappingContext> mapping_contexts_;
     std::shared_ptr<HardwareManager> hardware_manager_;
 

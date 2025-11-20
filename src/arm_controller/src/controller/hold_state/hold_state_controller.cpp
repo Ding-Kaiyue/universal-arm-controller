@@ -24,22 +24,30 @@ void HoldStateController::start(const std::string& mapping) {
     ctx.transition_ready = true;
     ctx.system_health_check_paused = false;
 
-    // ========== 关键：获取当前位置并维持状态 ==========
+    // ========== 关键：检查速度，如果不为0则发送保持命令 ==========
     if (hardware_manager_) {
-        // 添加延迟，等待最新的电机状态更新到达
-        // 这是必要的，因为 mapping_joint_states_ 可能需要一些时间才能被最新的电机状态填充
-        // std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-        // 获取当前关节位置作为保持目标
+        // 获取当前关节位置和速度
         ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
+        auto current_velocities = hardware_manager_->get_current_joint_velocities(normalized_mapping);
 
         if (!ctx.hold_positions.empty()) {
-            RCLCPP_INFO(node_->get_logger(),
-                       "[%s] HoldState using MIT mode to hold current state with %zu joints (previous mode: %s)",
-                       normalized_mapping.c_str(), ctx.hold_positions.size(), previous_mode_.c_str());
+            // 检查是否所有关节速度都接近0（阈值：0.01 rad/s）
+            bool all_velocities_zero = true;
+            const double VELOCITY_THRESHOLD = 0.01;
+            for (const auto& vel : current_velocities) {
+                if (std::abs(vel) > VELOCITY_THRESHOLD) {
+                    all_velocities_zero = false;
+                    break;
+                }
+            }
 
-            // 立即发送一次保持状态命令（MIT模式，维持当前位置，速度为0）
-            hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
+            // 如果速度不为0，发送保持命令来停止电机；否则不需要做任何处理
+            if (!all_velocities_zero) {
+                RCLCPP_INFO(node_->get_logger(),
+                           "[%s] Robot is moving, sending hold command to stop at current position",
+                           normalized_mapping.c_str());
+                hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
+            }
         } else {
             RCLCPP_WARN(node_->get_logger(),
                        "[%s] Failed to get current joint positions for hold state",
@@ -53,7 +61,7 @@ void HoldStateController::start(const std::string& mapping) {
         hardware_manager_->reset_system_health(normalized_mapping);
     }
 
-    // // 为该 mapping 创建定时器（捕获 mapping 的副本）
+    // 为该 mapping 创建定时器（仅用于安全检查，不发送保持命令）
     ctx.safety_timer = node_->create_wall_timer(
         std::chrono::milliseconds(100),
         [this, normalized_mapping]() { this->safety_check_timer_callback(normalized_mapping); }
@@ -74,11 +82,13 @@ bool HoldStateController::stop(const std::string& mapping) {
         return false;
     }
 
-    // 取消该 mapping 的定时器并移除上下文
+    // 取消该 mapping 的定时器
     if (it->second.safety_timer) {
         it->second.safety_timer->cancel();
         it->second.safety_timer.reset();
     }
+
+    // 移除上下文
     mapping_contexts_.erase(it);
 
     RCLCPP_INFO(node_->get_logger(), "HoldStateController stopped for mapping '%s'", normalized_mapping.c_str());
@@ -170,15 +180,7 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
         return;
     }
 
-    // ========== 持续发送保持命令 ==========
-    if (hardware_manager_) {
-        // 持续发送保持状态命令（MIT模式，维持当前位置，速度为0）
-        if (!ctx.hold_positions.empty()) {
-            hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
-        }
-    }
-    // ===========================================================
-
+    // ========== 仅进行安全检查，不发送保持命令 ==========
     // 如果健康检查被暂停，检查系统是否恢复健康
     if (ctx.system_health_check_paused) {
         if (hardware_manager_ && hardware_manager_->is_system_healthy(normalized_mapping)) {
@@ -196,17 +198,16 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
         if (can_transition_to_target(normalized_mapping)) {
             RCLCPP_INFO(node_->get_logger(), "Safety conditions satisfied, triggering transition to %s", target_mode_.c_str());
 
-            // 关键：在调用回调前停止定时器，避免从回调内部（即从stop()）取消定时器导致的竞态条件
-            // 定时器自身会在回调执行期间安全地被取消
+            // 关键：在调用回调前停止定时器，避免竞态条件
             if (ctx.safety_timer) {
                 ctx.safety_timer->cancel();
                 ctx.safety_timer.reset();
             }
 
-            // 现在调用回调 - 此时定时器已被安全取消，不会发生竞态条件
+            // 调用回调 - 执行实际的转换
             transition_ready_callback_();
         }
         // 如果条件不满足，继续等待下一次检查
     }
-    // 如果没有目标模式，说明这是终止状态（如轨迹执行完成后），只保持位置，不尝试转换
-} 
+    // 如果没有目标模式，说明这是 HoldState 终止状态，保持等待
+}

@@ -205,6 +205,11 @@ void ControllerManagerNode::handle_work_mode(
 }
 
 bool ControllerManagerNode::start_working_controller(const std::string& mode_name, const std::string& mapping) {
+    // 立即取消任何正在执行的轨迹（所有模式切换都需要这样做）
+    if (hardware_manager_) {
+        hardware_manager_->cancel_trajectory(mapping);
+    }
+
     // 使用 (mode_name, mapping) 对查找 controller 实例
     auto key_pair = std::make_pair(mode_name, mapping);
     auto it = controller_map_.find(key_pair);
@@ -235,10 +240,12 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
         return true;
     }
 
-    // 如果当前处于钩子状态，记录请求但不做任何处理，让持续检查机制自动处理转换
+    // 如果当前处于钩子状态，记录请求
     if (in_hook_state_) {
-        RCLCPP_INFO(this->get_logger(), "[%s] Currently in hook state, continous safety monitoring will handle transition to mode %s",
+        RCLCPP_INFO(this->get_logger(), "[%s] Currently in hook state, updating target mode to %s",
                     mapping.c_str(), mode_name.c_str());
+        // 轨迹已在上面取消，更新目标模式，让持续检查机制自动处理转换
+        target_mode_ = mode_name;
         return true;
     }
 
@@ -298,12 +305,6 @@ bool ControllerManagerNode::enter_hook_state(const std::string& target_mode, con
     if (hook_it != controller_map_.end()) {
         auto hold_controller = std::dynamic_pointer_cast<HoldStateController>(hook_it->second);
         if (hold_controller) {
-            // 设置前一个模式（从当前模式切换到 HoldState）
-            auto current_mode_it = mapping_to_mode_.find(mapping);
-            std::string previous_mode = (current_mode_it != mapping_to_mode_.end()) ? current_mode_it->second : "HoldState";
-            hold_controller->set_previous_mode(previous_mode);
-            RCLCPP_DEBUG(this->get_logger(), "Set previous_mode to '%s' for HoldState [%s]", previous_mode.c_str(), mapping.c_str());
-
             // 设置目标状态
             hold_controller->set_target_mode(target_mode);
 
@@ -406,17 +407,6 @@ bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const s
     }
 
     try {
-        // 如果切换到 HoldState，传递前一个模式
-        if (mode_name == "HoldState") {
-            auto hold_controller = std::dynamic_pointer_cast<HoldStateController>(it->second);
-            if (hold_controller) {
-                auto current_mode_it = mapping_to_mode_.find(mapping);
-                std::string prev_mode = (current_mode_it != mapping_to_mode_.end()) ? current_mode_it->second : "HoldState";
-                hold_controller->set_previous_mode(prev_mode);
-                RCLCPP_DEBUG(this->get_logger(), "Set previous_mode to '%s' for HoldState [%s]", prev_mode.c_str(), mapping.c_str());
-            }
-        }
-
         // 启动新控制器
         it->second->start(mapping);
         mapping_to_mode_[mapping] = mode_name;
@@ -511,6 +501,11 @@ void ControllerManagerNode::handle_action_event(const std_msgs::msg::String::Sha
     }
 
     RCLCPP_INFO(this->get_logger(), "Received action event: %s (mapping: %s)", event_type.c_str(), mapping.c_str());
+
+    // 如果已经在钩子状态中（用户已主动请求切换到某个模式），不应该被action事件改变
+    if (in_hook_state_) {
+        return;
+    }
 
     if (event_type == "action_goal_accepted") {
         // 自动切换到ROS2ActionControl模式（无论之前在哪个模式）

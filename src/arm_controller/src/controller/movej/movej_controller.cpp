@@ -64,7 +64,6 @@ bool MoveJController::stop(const std::string& mapping) {
 void MoveJController::trajectory_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
     // 只在激活时才处理消息
     if (!is_active_) return;
-    RCLCPP_INFO(node_->get_logger(), "------------------MoveJController received trajectory------------------");
     // 使用保存的 mapping 进行规划和执行
     plan_and_execute(active_mapping_, msg);
 }
