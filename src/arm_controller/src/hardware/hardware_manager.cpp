@@ -831,3 +831,175 @@ bool HardwareManager::disable_motors(const std::string& mapping, uint8_t mode) {
         return false;
     }
 }
+
+// ============= 异步轨迹执行和控制接口实现 =============
+
+std::string HardwareManager::execute_trajectory_async(
+    const std::string& mapping,
+    const Trajectory& trajectory,
+    bool show_progress) {
+    try {
+        if (mapping_to_interface_.find(mapping) == mapping_to_interface_.end()) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Mapping '%s' not found", mapping.c_str());
+            return "";
+        }
+
+        const std::string& interface = mapping_to_interface_.at(mapping);
+
+        // 调用硬件驱动的异步执行方法
+        std::string execution_id = hardware_driver_->execute_trajectory_async(interface, trajectory, show_progress);
+
+        if (!execution_id.empty()) {
+            // 记录 mapping -> execution_id 的对应关系
+            {
+                std::lock_guard<std::mutex> lock(execution_mutex_);
+                mapping_to_execution_id_[mapping] = execution_id;
+            }
+            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Trajectory execution started (ID: %s)", mapping.c_str(), execution_id.c_str());
+        } else {
+            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to start trajectory execution", mapping.c_str());
+        }
+
+        return execution_id;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception during trajectory execution: %s", mapping.c_str(), e.what());
+        return "";
+    }
+}
+
+bool HardwareManager::pause_trajectory(const std::string& mapping) {
+    try {
+        if (!hardware_driver_) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+            return false;
+        }
+
+        // 获取该 mapping 当前的 execution_id
+        std::string execution_id;
+        {
+            std::lock_guard<std::mutex> lock(execution_mutex_);
+            auto it = mapping_to_execution_id_.find(mapping);
+            if (it == mapping_to_execution_id_.end()) {
+                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping", mapping.c_str());
+                return false;
+            }
+            execution_id = it->second;
+        }
+
+        bool success = hardware_driver_->pause_trajectory(execution_id);
+        if (success) {
+            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Trajectory paused (ID: %s)", mapping.c_str(), execution_id.c_str());
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Failed to pause trajectory (ID: %s)", mapping.c_str(), execution_id.c_str());
+        }
+        return success;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception during trajectory pause: %s", mapping.c_str(), e.what());
+        return false;
+    }
+}
+
+bool HardwareManager::resume_trajectory(const std::string& mapping) {
+    try {
+        if (!hardware_driver_) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+            return false;
+        }
+
+        // 获取该 mapping 当前的 execution_id
+        std::string execution_id;
+        {
+            std::lock_guard<std::mutex> lock(execution_mutex_);
+            auto it = mapping_to_execution_id_.find(mapping);
+            if (it == mapping_to_execution_id_.end()) {
+                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping", mapping.c_str());
+                return false;
+            }
+            execution_id = it->second;
+        }
+
+        bool success = hardware_driver_->resume_trajectory(execution_id);
+        if (success) {
+            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Trajectory resumed (ID: %s)", mapping.c_str(), execution_id.c_str());
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Failed to resume trajectory (ID: %s)", mapping.c_str(), execution_id.c_str());
+        }
+        return success;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception during trajectory resume: %s", mapping.c_str(), e.what());
+        return false;
+    }
+}
+
+bool HardwareManager::cancel_trajectory(const std::string& mapping) {
+    try {
+        if (!hardware_driver_) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+            return false;
+        }
+
+        // 获取该 mapping 当前的 execution_id
+        std::string execution_id;
+        {
+            std::lock_guard<std::mutex> lock(execution_mutex_);
+            auto it = mapping_to_execution_id_.find(mapping);
+            if (it == mapping_to_execution_id_.end()) {
+                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping", mapping.c_str());
+                return false;
+            }
+            execution_id = it->second;
+        }
+
+        bool success = hardware_driver_->cancel_trajectory(execution_id);
+        if (success) {
+            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Trajectory cancelled (ID: %s)", mapping.c_str(), execution_id.c_str());
+
+            // 清理执行ID映射
+            {
+                std::lock_guard<std::mutex> lock(execution_mutex_);
+                mapping_to_execution_id_.erase(mapping);
+            }
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Failed to cancel trajectory (ID: %s)", mapping.c_str(), execution_id.c_str());
+        }
+        return success;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception during trajectory cancel: %s", mapping.c_str(), e.what());
+        return false;
+    }
+}
+
+bool HardwareManager::wait_for_trajectory_completion(const std::string& mapping, int timeout_ms) {
+    try {
+        if (!hardware_driver_) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+            return false;
+        }
+
+        // 获取该 mapping 当前的 execution_id
+        std::string execution_id;
+        {
+            std::lock_guard<std::mutex> lock(execution_mutex_);
+            auto it = mapping_to_execution_id_.find(mapping);
+            if (it == mapping_to_execution_id_.end()) {
+                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping", mapping.c_str());
+                return false;
+            }
+            execution_id = it->second;
+        }
+
+        // 等待轨迹执行完成
+        bool completed = hardware_driver_->wait_for_completion(execution_id, timeout_ms);
+
+        if (completed) {
+            // 清理执行ID映射
+            std::lock_guard<std::mutex> lock(execution_mutex_);
+            mapping_to_execution_id_.erase(mapping);
+        }
+
+        return completed;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "❎ Exception waiting for trajectory completion: %s", e.what());
+        return false;
+    }
+}

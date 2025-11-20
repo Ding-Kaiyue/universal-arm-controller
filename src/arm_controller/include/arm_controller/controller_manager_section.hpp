@@ -10,6 +10,7 @@
 #include <any>
 #include <controller_interfaces/srv/work_mode.hpp>
 #include <controller_interfaces/srv/motor_control.hpp>
+#include <controller_interfaces/msg/trajectory_control.hpp>
 #include <std_msgs/msg/string.hpp>
 #include "arm_controller/controller_base/mode_controller_base.hpp"
 #include "arm_controller/hardware/hardware_manager.hpp"
@@ -69,6 +70,9 @@ private:
     void init_action_event_listener();
     void handle_action_event(const std_msgs::msg::String::SharedPtr msg);
 
+    // 轨迹控制事件处理
+    void handle_trajectory_control(const controller_interfaces::msg::TrajectoryControl::SharedPtr msg);
+
     // 成员变量
     // 控制器映射：(key, mapping) -> controller 实例
     // 每个 (控制器类型, 硬件映射) 对都有独立的 controller 实例
@@ -99,6 +103,7 @@ private:
 
     // 动作事件监听器
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr action_event_subscriber_;
+    rclcpp::Subscription<controller_interfaces::msg::TrajectoryControl>::SharedPtr trajectory_control_subscriber_;
 
     // 硬件管理
     std::shared_ptr<HardwareManager> hardware_manager_;

@@ -76,6 +76,25 @@ public:
     // ============= 轨迹执行接口 =============
     bool executeTrajectory(const std::string& interface, const trajectory_interpolator::Trajectory& trajectory);
 
+    // ============= 异步轨迹执行和控制接口 =============
+    // 异步执行轨迹，返回执行ID用于后续控制
+    std::string execute_trajectory_async(
+        const std::string& mapping,
+        const Trajectory& trajectory,
+        bool show_progress = true);
+
+    // 暂停指定mapping的轨迹执行（每个mapping同时只能执行一个轨迹）
+    bool pause_trajectory(const std::string& mapping);
+
+    // 恢复指定mapping的轨迹执行
+    bool resume_trajectory(const std::string& mapping);
+
+    // 取消指定mapping的轨迹执行
+    bool cancel_trajectory(const std::string& mapping);
+
+    // 等待指定mapping的轨迹执行完成（阻塞）
+    bool wait_for_trajectory_completion(const std::string& mapping, int timeout_ms = 0);
+
     // ============= 电机使能/失能接口 =============
     bool enable_motors(const std::string& mapping, uint8_t mode);
     bool disable_motors(const std::string& mapping, uint8_t mode);
@@ -132,8 +151,12 @@ private:
     // 安全保护相关
     static constexpr double POSITION_MARGIN = 0.1;  // 位置安全边界 (弧度) - 约5.7度
     bool safety_enabled_ = true;
-    
+
     std::atomic<int> health_check_counter_{0};  // 健康检查计数器
+
+    // ============= 轨迹执行管理 =============
+    mutable std::mutex execution_mutex_;
+    std::map<std::string, std::string> mapping_to_execution_id_;  // mapping -> 当前执行ID（同一时间每个mapping只有一个轨迹执行）
 
     // ============= 内部方法 =============
     void update_joint_state(const std::string& interface, uint32_t motor_id,

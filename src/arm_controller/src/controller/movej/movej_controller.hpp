@@ -39,7 +39,6 @@ private:
 
     // 话题订阅 - 全局订阅
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_;
-    bool is_active_ = false;
     std::string active_mapping_;
 
     // 轨迹规划相关 - 支持多臂mapping

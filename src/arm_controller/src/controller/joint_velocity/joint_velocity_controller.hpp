@@ -21,7 +21,6 @@ protected:
 private:
     std::shared_ptr<HardwareManager> hardware_manager_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_;
-    bool is_active_ = false;
     std::string active_mapping_;
 };
 

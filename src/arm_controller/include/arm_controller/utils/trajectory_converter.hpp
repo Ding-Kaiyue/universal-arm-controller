@@ -4,6 +4,7 @@
 #include "trajectory_planning_v3/domain/entities/trajectory.hpp"
 #include "trajectory_interpolator/moveit_spline_adapter.hpp"
 #include "trajectory_msgs/msg/joint_trajectory.hpp"
+#include "hardware_driver/interface/robot_hardware.hpp"
 #include <vector>
 #include <string>
 
@@ -50,6 +51,14 @@ public:
      */
     static trajectory_interpolator::Trajectory convertRosToInterpolator(
         const trajectory_msgs::msg::JointTrajectory& ros_trajectory);
+
+    /**
+     * @brief 将trajectory_interpolator的轨迹转换为hardware_driver的轨迹格式
+     * @param interpolator_trajectory trajectory_interpolator的轨迹
+     * @return hardware_driver的轨迹格式
+     */
+    static Trajectory convertInterpolatorToHardwareDriver(
+        const trajectory_interpolator::Trajectory& interpolator_trajectory);
 
     /**
      * @brief 分析轨迹的动力学参数

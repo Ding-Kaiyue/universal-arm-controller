@@ -1,10 +1,12 @@
 #include "movej_controller.hpp"
 #include "controller_interface.hpp"
 #include "hardware/hardware_manager.hpp"
+#include "arm_controller/utils/trajectory_converter.hpp"
 #include <set>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
 // ros2 topic pub --once /controller_api/movej_action/single_arm sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+// ros2 topic pub --once /trajectory_control controller_interfaces/msg/TrajectoryControl "{mapping: 'single_arm', action: 'Cancel'}"
 
 MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
     : TrajectoryControllerImpl<sensor_msgs::msg::JointState>("MoveJ", node)
@@ -62,7 +64,7 @@ bool MoveJController::stop(const std::string& mapping) {
 void MoveJController::trajectory_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
     // 只在激活时才处理消息
     if (!is_active_) return;
-
+    RCLCPP_INFO(node_->get_logger(), "------------------MoveJController received trajectory------------------");
     // 使用保存的 mapping 进行规划和执行
     plan_and_execute(active_mapping_, msg);
 }
@@ -208,20 +210,19 @@ void MoveJController::execute_trajectory(
     const trajectory_interpolator::Trajectory& trajectory,
     const std::string& mapping) {
     try {
-        // 获取对应的interface
-        std::string interface = hardware_manager_->get_interface(mapping);
-        if (interface.empty()) {
-            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: No interface found for mapping", mapping.c_str());
+        // 使用转换工具将轨迹转换为硬件驱动格式
+        Trajectory hw_trajectory = arm_controller::utils::TrajectoryConverter::convertInterpolatorToHardwareDriver(trajectory);
+
+        // 使用异步执行轨迹（不阻塞，并保存 execution_id 以支持暂停/恢复/取消）
+        std::string execution_id = hardware_manager_->execute_trajectory_async(mapping, hw_trajectory, true);
+        if (execution_id.empty()) {
+            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Failed to execute trajectory on mapping: %s",
+                        mapping.c_str(), mapping.c_str());
             return;
         }
 
-        // 执行轨迹
-        if (!hardware_manager_->executeTrajectory(interface, trajectory)) {
-            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Failed to execute trajectory on interface: %s",
-                        mapping.c_str(), interface.c_str());
-            return;
-        }
-
+        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveJ: Trajectory execution started (ID: %s)",
+                   mapping.c_str(), execution_id.c_str());
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Exception during trajectory execution: %s",
                     mapping.c_str(), e.what());

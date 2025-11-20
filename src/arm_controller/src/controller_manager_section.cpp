@@ -5,6 +5,7 @@
 #include "controller_base/velocity_controller_base.hpp"
 #include "controller/controller_registry.hpp"
 #include "controller_interface.hpp"
+#include <algorithm>
 // #include "controller/move2start/move2start_controller.hpp"
 // #include "controller/move2initial/move2initial_controller.hpp"
 
@@ -476,7 +477,12 @@ void ControllerManagerNode::init_action_event_listener() {
         "/action_controller_events", rclcpp::QoS(10).reliable(),
         std::bind(&ControllerManagerNode::handle_action_event, this, std::placeholders::_1));
 
-    RCLCPP_INFO(this->get_logger(), "Action event listener initialized");
+    // 创建轨迹控制命令订阅器
+    trajectory_control_subscriber_ = this->create_subscription<controller_interfaces::msg::TrajectoryControl>(
+        "/trajectory_control", rclcpp::QoS(10).reliable(),
+        std::bind(&ControllerManagerNode::handle_trajectory_control, this, std::placeholders::_1));
+
+    RCLCPP_INFO(this->get_logger(), "Action event listener and trajectory control listener initialized");
 }
 
 void ControllerManagerNode::handle_action_event(const std_msgs::msg::String::SharedPtr msg) {
@@ -568,6 +574,50 @@ void ControllerManagerNode::handle_motor_control(
     } else {
         response->success = false;
         response->message = "Invalid action: " + action + ". Use 'Enable' or 'Disable'";
+    }
+}
+
+void ControllerManagerNode::handle_trajectory_control(const controller_interfaces::msg::TrajectoryControl::SharedPtr msg) {
+    // 安全检查
+    if (!msg) {
+        RCLCPP_WARN(this->get_logger(), "Received null trajectory control message");
+        return;
+    }
+
+    if (!hardware_manager_) {
+        RCLCPP_ERROR(this->get_logger(), "Hardware manager not initialized");
+        return;
+    }
+
+    std::string action = msg->action;
+    std::string mapping = msg->mapping.empty() ? "single_arm" : msg->mapping;
+
+    RCLCPP_INFO(this->get_logger(), "Received trajectory control command: action=%s, mapping=%s",
+                action.c_str(), mapping.c_str());
+
+    if (action == "Pause") {
+        if (hardware_manager_->pause_trajectory(mapping)) {
+            RCLCPP_INFO(this->get_logger(), "✅ Trajectory paused successfully for mapping: %s", mapping.c_str());
+        } else {
+            RCLCPP_WARN(this->get_logger(), "⚠️  Failed to pause trajectory for mapping: %s", mapping.c_str());
+        }
+    }
+    else if (action == "Resume") {
+        if (hardware_manager_->resume_trajectory(mapping)) {
+            RCLCPP_INFO(this->get_logger(), "✅ Trajectory resumed successfully for mapping: %s", mapping.c_str());
+        } else {
+            RCLCPP_WARN(this->get_logger(), "⚠️  Failed to resume trajectory for mapping: %s", mapping.c_str());
+        }
+    }
+    else if (action == "Cancel") {
+        if (hardware_manager_->cancel_trajectory(mapping)) {
+            RCLCPP_INFO(this->get_logger(), "✅ Trajectory cancelled successfully for mapping: %s", mapping.c_str());
+        } else {
+            RCLCPP_WARN(this->get_logger(), "⚠️  Failed to cancel trajectory for mapping: %s", mapping.c_str());
+        }
+    }
+    else {
+        RCLCPP_WARN(this->get_logger(), "⚠️  Unknown trajectory control action: %s", action.c_str());
     }
 }
 
