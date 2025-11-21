@@ -33,7 +33,13 @@ void ControllerManagerNode::post_init() {
     init_controllers();
 
     // 启动默认控制器
-    start_working_controller("SystemStart", "single_arm");
+    auto mappings = hardware_manager_->get_all_mappings();
+    for (const auto& mapping : mappings) {
+        start_working_controller("SystemStart", mapping);
+        RCLCPP_INFO(this->get_logger(), 
+            "✅ Starting default controller for mapping: %s", mapping.c_str());
+
+    }
 
     RCLCPP_INFO(this->get_logger(), "Controller Manager Node post-initialization complete");
 }
