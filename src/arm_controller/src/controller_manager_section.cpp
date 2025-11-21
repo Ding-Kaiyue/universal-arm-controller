@@ -33,7 +33,8 @@ void ControllerManagerNode::post_init() {
     init_controllers();
 
     // 启动默认控制器
-    start_working_controller("SystemStart", "single_arm");
+    start_working_controller("SystemStart", "left_arm");
+    start_working_controller("SystemStart", "right_arm");
 
     RCLCPP_INFO(this->get_logger(), "Controller Manager Node post-initialization complete");
 }
