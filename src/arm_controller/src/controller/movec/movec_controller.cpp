@@ -39,7 +39,7 @@ void MoveCController::start(const std::string& mapping) {
 
     // 保存当前激活的 mapping
     active_mapping_ = mapping;
-    is_active_ = true;
+    // is_active_[mapping] = true; // 由基类 start() 设置
 
     // 在激活时创建话题订阅（如果还没创建的话）
     if (subscriptions_.find(mapping) == subscriptions_.end()) {
@@ -58,11 +58,12 @@ void MoveCController::start(const std::string& mapping) {
     }
 
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveCController activated", mapping.c_str());
+    TrajectoryControllerImpl::start(mapping);
 }
 
 bool MoveCController::stop(const std::string& mapping) {
     // 停止处理消息
-    is_active_ = false;
+    // is_active_[mapping] = false; // 由基类 stop() 设置
 
     // 清理资源
     active_mapping_.clear();
@@ -76,15 +77,9 @@ bool MoveCController::stop(const std::string& mapping) {
 
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveCController deactivated", mapping.c_str());
     return true;
+    TrajectoryControllerImpl::stop(mapping);
 }
 
-void MoveCController::trajectory_callback(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
-    // 只在激活时才处理消息
-    if (!is_active_) return;
-
-    // 使用保存的 mapping 进行规划和执行
-    plan_and_execute(active_mapping_, msg);
-}
 
 void MoveCController::initialize_planning_services() {
     try {

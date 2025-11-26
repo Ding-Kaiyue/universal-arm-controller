@@ -19,7 +19,6 @@ public:
 private:
     // 初始化轨迹规划服务
     void initialize_planning_services();
-    void trajectory_callback(const sensor_msgs::msg::JointState::SharedPtr msg) override;
     void plan_and_execute(const std::string& mapping, const sensor_msgs::msg::JointState::SharedPtr msg) override;
 
     // 辅助函数

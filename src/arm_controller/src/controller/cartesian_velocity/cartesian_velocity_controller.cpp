@@ -47,7 +47,7 @@ void CartesianVelocityController::start(const std::string& mapping) {
 
     // 保存当前激活的 mapping
     active_mapping_ = mapping;
-    is_active_ = true;
+    // is_active_[mapping] = true; // 由基类 start() 设置
 
     // 在激活时创建话题订阅（如果还没创建的话）
     if (subscriptions_.find(mapping) == subscriptions_.end()) {
@@ -81,12 +81,13 @@ void CartesianVelocityController::start(const std::string& mapping) {
     }
 
     RCLCPP_INFO(node_->get_logger(), "[%s] CartesianVelocityController activated", mapping.c_str());
+    VelocityControllerImpl::start(mapping);
 }
 
 
 bool CartesianVelocityController::stop(const std::string& mapping) {
     // 停止处理消息
-    is_active_ = false;
+    // is_active_[mapping] = false; // 由基类 stop() 设置
     has_reference_frame_ = false;
 
     // 发送零速度命令停止机械臂
@@ -99,8 +100,11 @@ bool CartesianVelocityController::stop(const std::string& mapping) {
     // 清理该 mapping 的话题订阅
     cleanup_subscriptions(mapping);
 
+    // 调用基类 stop() 设置 per-mapping 的 is_active_[mapping] = false
+    VelocityControllerImpl::stop(mapping);
+
     RCLCPP_INFO(node_->get_logger(), "[%s] CartesianVelocityController deactivated", mapping.c_str());
-    return true;  // 需要钩子状态来安全停止
+    return true;
 }
 
 void CartesianVelocityController::initialize_moveit_service() {
@@ -142,7 +146,7 @@ void CartesianVelocityController::initialize_moveit_service() {
 }
 void CartesianVelocityController::velocity_callback(const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
     // 只在激活时才处理消息
-    if (!is_active_) return;
+    // 检查已在 Lambda 中通过 is_active(mapping) 完成
 
     auto joint_positions = hardware_manager_->get_current_joint_positions(active_mapping_);
     auto joint_names = hardware_manager_->get_joint_names(active_mapping_);

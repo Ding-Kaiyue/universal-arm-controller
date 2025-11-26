@@ -15,19 +15,21 @@ TrajectoryReplayController::TrajectoryReplayController(const rclcpp::Node::Share
 }
 
 void TrajectoryReplayController::start() {
-    is_active_ = true;
+    // is_active_[mapping] = true; // 由基类 start() 设置
     RCLCPP_INFO(node_->get_logger(), "TrajectoryReplayController activated");
+    TrajectoryControllerImpl::start(mapping);
 }
 
 bool TrajectoryReplayController::stop() {
     // sub_.reset();
-    is_active_ = false;
+    // is_active_[mapping] = false; // 由基类 stop() 设置
     RCLCPP_INFO(node_->get_logger(), "TrajectoryReplayController deactivated");
     return true;
+    TrajectoryControllerImpl::stop(mapping);
 }
 
 void TrajectoryReplayController::trajectory_replay_callback(const std_msgs::msg::String::SharedPtr msg) {
-    if (!is_active_) return;
+    // 检查已在 Lambda 中通过 is_active(mapping) 完成
     if (msg->data == "") return;
     RCLCPP_INFO(node_->get_logger(), "Received trajectory replay command: '%s'", msg->data.c_str());
     publish_trajectory_replay_name(msg->data);

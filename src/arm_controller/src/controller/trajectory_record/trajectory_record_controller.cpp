@@ -16,18 +16,17 @@ TrajectoryRecordController::TrajectoryRecordController(const rclcpp::Node::Share
 
 
 void TrajectoryRecordController::start() {
-    is_active_ = true;
+    ModeControllerBase::start("");
     RCLCPP_INFO(node_->get_logger(), "TrajectoryRecordController activated");
 }
 
 bool TrajectoryRecordController::stop() {
-    is_active_ = false;
     RCLCPP_INFO(node_->get_logger(), "TrajectoryRecordController deactivated");
-    return true;
+    return ModeControllerBase::stop("");
 }
 
 void TrajectoryRecordController::trajectory_record_callback(const std_msgs::msg::String::SharedPtr msg) {
-    if (!is_active_) return;
+    // is_active(mapping) 检查已在 Lambda 中完成
     if (msg->data == "") return;
     RCLCPP_INFO(node_->get_logger(), "Received trajectory record command: '%s'", msg->data.c_str());
     publish_trajectory_record_name(msg->data);

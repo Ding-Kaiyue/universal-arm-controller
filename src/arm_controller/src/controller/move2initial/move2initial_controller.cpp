@@ -33,13 +33,15 @@ void Move2InitialController::start(const std::string& mapping) {
         );
     }
 
-    is_active_ = true;
+    // is_active_[mapping] = true; // 由基类 start() 设置
+    UtilityControllerBase::start(mapping);
 }
 
 bool Move2InitialController::stop(const std::string& mapping) {
-    is_active_ = false;
+    // is_active_[mapping] = false; // 由基类 stop() 设置
     RCLCPP_INFO(node_->get_logger(), "[%s] Move2InitialController deactivated", mapping.c_str());
     return true;
+    UtilityControllerBase::stop(mapping);
 }
 
 void Move2InitialController::initialize_planning_services() {

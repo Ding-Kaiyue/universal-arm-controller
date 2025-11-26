@@ -32,13 +32,15 @@ void Move2StartController::start(const std::string& mapping) {
         );
     }
 
-    is_active_ = true;
+    // is_active_[mapping] = true; // 由基类 start() 设置
+    UtilityControllerBase::start(mapping);
 }
 
 bool Move2StartController::stop(const std::string& mapping) {
-    is_active_ = false;
+    // is_active_[mapping] = false; // 由基类 stop() 设置
     RCLCPP_INFO(node_->get_logger(), "[%s] Move2StartController deactivated", mapping.c_str());
     return true;
+    UtilityControllerBase::stop(mapping);
 }
 
 void Move2StartController::initialize_planning_services() {

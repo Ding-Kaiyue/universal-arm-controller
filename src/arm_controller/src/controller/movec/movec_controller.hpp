@@ -19,7 +19,6 @@ public:
 private:
     // 初始化轨迹规划服务
     void initialize_planning_services();
-    void trajectory_callback(const geometry_msgs::msg::PoseArray::SharedPtr msg) override;
     void plan_and_execute(const std::string& mapping, const geometry_msgs::msg::PoseArray::SharedPtr msg) override;
 
     // 辅助函数

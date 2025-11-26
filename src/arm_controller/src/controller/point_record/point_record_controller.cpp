@@ -15,19 +15,21 @@ PointRecordController::PointRecordController(const rclcpp::Node::SharedPtr & nod
 }
 
 void PointRecordController::start() {
-    is_active_ = true;
+    // is_active_[mapping] = true; // 由基类 start() 设置
     RCLCPP_INFO(node_->get_logger(), "PointRecordController activated");
+    UtilityControllerBase::start(mapping);
 }
 
 bool PointRecordController::stop() {
     // sub_.reset();
-    is_active_ = false;
+    // is_active_[mapping] = false; // 由基类 stop() 设置
     RCLCPP_INFO(node_->get_logger(), "PointRecordController deactivated");
     return true;
+    UtilityControllerBase::stop(mapping);
 }
 
 void PointRecordController::point_record_callback(const std_msgs::msg::String::SharedPtr msg) {
-    if (!is_active_) return;
+    // 检查已在 Lambda 中通过 is_active(mapping) 完成
     if (msg->data == "") return;
     RCLCPP_INFO(node_->get_logger(), "Received point record command: '%s'", msg->data.c_str());
     publish_point_record_name(msg->data);

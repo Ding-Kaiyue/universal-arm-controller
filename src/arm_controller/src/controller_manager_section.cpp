@@ -6,6 +6,7 @@
 #include "controller/controller_registry.hpp"
 #include "controller_interface.hpp"
 #include <algorithm>
+#include <thread>
 // #include "controller/move2start/move2start_controller.hpp"
 // #include "controller/move2initial/move2initial_controller.hpp"
 
@@ -177,6 +178,25 @@ void ControllerManagerNode::init_controllers() {
         }
 
         RCLCPP_INFO(this->get_logger(), "Initialized %zu controller instances", controller_map_.size());
+
+        // 为所有控制器提前创建订阅者（所有 mapping）
+        // 这样即使控制器还未激活，消息也会被接收（不会被 --once 错过）
+        std::set<std::string> initialized_subscriptions;
+
+        for (const auto& [key_pair, controller] : controller_map_) {
+            const auto& controller_name = key_pair.first;
+            const auto& mapping = key_pair.second;
+
+            // 每个 controller-mapping 对只需初始化一次
+            std::string sub_key = controller_name + ":" + mapping;
+            if (controller && initialized_subscriptions.find(sub_key) == initialized_subscriptions.end()) {
+                controller->init_subscriptions(mapping);
+                initialized_subscriptions.insert(sub_key);
+                RCLCPP_DEBUG(this->get_logger(), "[init_controllers] Pre-created subscription for %s, mapping: %s",
+                            controller_name.c_str(), mapping.c_str());
+            }
+        }
+        RCLCPP_INFO(this->get_logger(), "Pre-created subscriptions for all controller-mapping pairs");
     } catch (const std::exception& e) {
         RCLCPP_FATAL(this->get_logger(), "Failed to initialize controllers: %s", e.what());
         rclcpp::shutdown();
@@ -220,33 +240,37 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
     }
 
     // 对于Disable和EmergencyStop模式，总是强制执行，即使已经在该模式（确保真正失能）
-    if (mode_name == "Disable" || mode_name == "EmergencyStop") {
-        // 强制停止当前控制器，不管需不需要钩子状态
-        auto current_mode_it = mapping_to_mode_.find(mapping);
-        if (current_mode_it != mapping_to_mode_.end()) {
-            auto current_key_pair = std::make_pair(current_mode_it->second, mapping);
-            auto current_it = controller_map_.find(current_key_pair);
-            if (current_it != controller_map_.end()) {
-                current_it->second->stop(mapping);
-                RCLCPP_INFO(this->get_logger(), "[%s] Force stopped controller for mode: %s", mapping.c_str(), current_mode_it->second.c_str());
-            }
-        }
-        return switch_to_mode(mode_name, mapping);
-    }
+    // if (mode_name == "Disable" || mode_name == "EmergencyStop") {
+    //     // 强制停止当前控制器，不管需不需要钩子状态
+    //     auto current_mode_it = mapping_to_mode_.find(mapping);
+    //     if (current_mode_it != mapping_to_mode_.end()) {
+    //         auto current_key_pair = std::make_pair(current_mode_it->second, mapping);
+    //         auto current_it = controller_map_.find(current_key_pair);
+    //         if (current_it != controller_map_.end()) {
+    //             current_it->second->stop(mapping);
+    //             RCLCPP_INFO(this->get_logger(), "[%s] Force stopped controller for mode: %s", mapping.c_str(), current_mode_it->second.c_str());
+    //         }
+    //     }
+    //     return switch_to_mode(mode_name, mapping);
+    // }
 
     // 如果该 mapping 已经在目标模式（且不是Disable/EmergencyStop），直接返回成功
     auto current_mode_it = mapping_to_mode_.find(mapping);
-    if (current_mode_it != mapping_to_mode_.end() && current_mode_it->second == mode_name && !in_hook_state_) {
+    RCLCPP_INFO(this->get_logger(), "[%s] 📋 start_working_controller: mode=%s, in_hook=%d, current=%s",
+                mapping.c_str(), mode_name.c_str(), in_hook_state_[mapping] ? 1 : 0,
+                current_mode_it != mapping_to_mode_.end() ? current_mode_it->second.c_str() : "NONE");
+
+    if (current_mode_it != mapping_to_mode_.end() && current_mode_it->second == mode_name && !in_hook_state_[mapping]) {
         RCLCPP_INFO(this->get_logger(), "[%s] Already in mode %s", mapping.c_str(), mode_name.c_str());
         return true;
     }
 
-    // 如果当前处于钩子状态，记录请求
-    if (in_hook_state_) {
+    // 如果当前处于钩子状态，记录请求（改成 per-mapping 检查）
+    if (in_hook_state_[mapping]) {
         RCLCPP_INFO(this->get_logger(), "[%s] Currently in hook state, updating target mode to %s",
                     mapping.c_str(), mode_name.c_str());
         // 轨迹已在上面取消，更新目标模式，让持续检查机制自动处理转换
-        target_mode_ = mode_name;
+        target_mode_[mapping] = mode_name;
         return true;
     }
 
@@ -297,9 +321,9 @@ bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::
 }
 
 bool ControllerManagerNode::enter_hook_state(const std::string& target_mode, const std::string& mapping) {
-    // 设置目标模式
-    target_mode_ = target_mode;
-    in_hook_state_ = true;
+    // 设置目标模式（改成 per-mapping）
+    target_mode_[mapping] = target_mode;
+    in_hook_state_[mapping] = true;
 
     auto hook_key = std::make_pair("HoldState", mapping);
     auto hook_it = controller_map_.find(hook_key);
@@ -323,24 +347,24 @@ bool ControllerManagerNode::enter_hook_state(const std::string& target_mode, con
             return true;
         } else {
             RCLCPP_ERROR(this->get_logger(), "Failed to cast HoldState controller");
-            in_hook_state_ = false;
+            in_hook_state_[mapping] = false;
             return false;
         }
     } else {
         RCLCPP_ERROR(this->get_logger(), "HoldState controller not found in controller map");
-        in_hook_state_ = false;
+        in_hook_state_[mapping] = false;
         return false;
     }
 }
 
 void ControllerManagerNode::on_transition_ready(const std::string& mapping) {
-    if (!in_hook_state_) {
-        RCLCPP_WARN(this->get_logger(), "Transition ready callback called but not in hook state");
+    if (!in_hook_state_[mapping]) {
+        RCLCPP_WARN(this->get_logger(), "Transition ready callback called but not in hook state for mapping: %s", mapping.c_str());
         return;
     }
 
-    // 保存目标模式，因为exit_hook_state会清空它
-    std::string target = target_mode_;
+    // 保存目标模式，因为exit_hook_state会清空它（改成 per-mapping）
+    std::string target = target_mode_[mapping];
 
     // 执行实际的状态转换
     if (exit_hook_state(mapping)) {
@@ -352,36 +376,37 @@ void ControllerManagerNode::on_transition_ready(const std::string& mapping) {
 
 
 bool ControllerManagerNode::exit_hook_state(const std::string& mapping) {
-    if (!in_hook_state_) {
-        RCLCPP_WARN(this->get_logger(), "Not in hook state");
+    if (!in_hook_state_[mapping]) {
+        RCLCPP_WARN(this->get_logger(), "Not in hook state for mapping: %s", mapping.c_str());
         return false;
     }
 
-    // 检查目标模式是否有效
-    if (target_mode_.empty()) {
-        RCLCPP_ERROR(this->get_logger(), "Target mode is empty when exiting hook state");
+    // 检查目标模式是否有效（改成 per-mapping）
+    if (target_mode_[mapping].empty()) {
+        RCLCPP_ERROR(this->get_logger(), "Target mode is empty when exiting hook state for mapping: %s", mapping.c_str());
         return false;
     }
 
     // 如果目标模式不是HoldState，则停止当前的HoldState控制器
     // 如果目标就是HoldState，则不需要停止（避免竞态条件）
-    if (target_mode_ != "HoldState") {
+    if (target_mode_[mapping] != "HoldState") {
         auto hook_key = std::make_pair("HoldState", mapping);
         auto hook_it = controller_map_.find(hook_key);
         if (hook_it != controller_map_.end()) {
-            RCLCPP_DEBUG(this->get_logger(), "Stopping HoldState controller before switching to %s", target_mode_.c_str());
+            RCLCPP_DEBUG(this->get_logger(), "Stopping HoldState controller before switching to %s", target_mode_[mapping].c_str());
             hook_it->second->stop(mapping);
         }
     }
 
-    // 切换到目标模式
-    bool success = switch_to_mode(target_mode_, mapping);
+    // 切换到目标模式（改成 per-mapping）
+    std::string target = target_mode_[mapping];
+    bool success = switch_to_mode(target, mapping);
     if (success) {
-        in_hook_state_ = false;
-        RCLCPP_INFO(this->get_logger(), "Exited hook state, switched to %s", target_mode_.c_str());
-        target_mode_.clear();
+        in_hook_state_[mapping] = false;
+        RCLCPP_INFO(this->get_logger(), "Exited hook state, switched to %s", target.c_str());
+        target_mode_.erase(mapping);
     } else {
-        RCLCPP_ERROR(this->get_logger(), "Failed to switch to target mode: %s", target_mode_.c_str());
+        RCLCPP_ERROR(this->get_logger(), "Failed to switch to target mode: %s", target.c_str());
     }
 
     return success;
@@ -504,7 +529,7 @@ void ControllerManagerNode::handle_action_event(const std_msgs::msg::String::Sha
     RCLCPP_INFO(this->get_logger(), "Received action event: %s (mapping: %s)", event_type.c_str(), mapping.c_str());
 
     // 如果已经在钩子状态中（用户已主动请求切换到某个模式），不应该被action事件改变
-    if (in_hook_state_) {
+    if (in_hook_state_[mapping]) {
         return;
     }
 

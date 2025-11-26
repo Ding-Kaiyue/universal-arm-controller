@@ -40,10 +40,11 @@ public:
         }
 
         // 创建订阅
+        // 使用 BEST_EFFORT + VOLATILE 匹配 ros2 topic pub 的默认 QoS
         subscriptions_[mapping] = node_->create_subscription<T>(
-            input_topic, rclcpp::QoS(10).reliable(),
-            [this](const typename T::SharedPtr msg) {
-                if (!is_active_) return;
+            input_topic, rclcpp::QoS(10).best_effort(),
+            [this, mapping](const typename T::SharedPtr msg) {
+                // if (!is_active(mapping)) return;
                 velocity_callback(msg);
             }
         );
@@ -62,9 +63,6 @@ public:
             RCLCPP_ERROR_STREAM(rclcpp::get_logger("VelocityControllerImpl"), "Failed to cast message to type " << typeid(T).name());
         }
     }
-
-    void start(const std::string& mapping) override = 0;
-    bool stop(const std::string& mapping) override = 0;
 
     // 速度控制器通常需要钩子状态来安全停止
     bool needs_hook_state() const override { return true; }

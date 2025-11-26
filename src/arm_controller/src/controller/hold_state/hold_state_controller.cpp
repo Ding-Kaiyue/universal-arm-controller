@@ -68,7 +68,9 @@ void HoldStateController::start(const std::string& mapping) {
     );
 
     mapping_contexts_.emplace(normalized_mapping, std::move(ctx));
-    is_active_ = true;
+
+    // 调用基类方法设置 per-mapping 的 is_active_[mapping] = true
+    UtilityControllerBase::start(normalized_mapping);
 
     RCLCPP_INFO(node_->get_logger(), "HoldStateController activated for mapping '%s'", normalized_mapping.c_str());
 }
@@ -91,13 +93,10 @@ bool HoldStateController::stop(const std::string& mapping) {
     // 移除上下文
     mapping_contexts_.erase(it);
 
-    RCLCPP_INFO(node_->get_logger(), "HoldStateController stopped for mapping '%s'", normalized_mapping.c_str());
+    // 调用基类方法设置 per-mapping 的 is_active_[mapping] = false
+    UtilityControllerBase::stop(normalized_mapping);
 
-    // 如果没有任何 mapping 在运行，则整体设置 inactive
-    if (mapping_contexts_.empty()) {
-        is_active_ = false;
-        RCLCPP_INFO(node_->get_logger(), "HoldStateController fully deactivated (no active mappings)");
-    }
+    RCLCPP_INFO(node_->get_logger(), "HoldStateController stopped for mapping '%s'", normalized_mapping.c_str());
 
     return true;
 }
@@ -175,8 +174,8 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
     }
 
     auto& ctx = it->second;
-    // 只有在激活状态下才进行检查
-    if (!is_active_) {
+    // 只有在该 mapping 激活时才进行检查
+    if (!is_active(normalized_mapping)) {
         return;
     }
 

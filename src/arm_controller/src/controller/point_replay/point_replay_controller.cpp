@@ -15,19 +15,21 @@ PointReplayController::PointReplayController(const rclcpp::Node::SharedPtr & nod
 }
 
 void PointReplayController::start() {
-    is_active_ = true;
+    // is_active_[mapping] = true; // 由基类 start() 设置
     RCLCPP_INFO(node_->get_logger(), "PointReplayController activated");
+    UtilityControllerBase::start(mapping);
 }
 
 bool PointReplayController::stop() {
     // sub_.reset();
-    is_active_ = false;
+    // is_active_[mapping] = false; // 由基类 stop() 设置
     RCLCPP_INFO(node_->get_logger(), "PointReplayController deactivated");
     return true;
+    UtilityControllerBase::stop(mapping);
 }
 
 void PointReplayController::point_replay_callback(const std_msgs::msg::String::SharedPtr msg) {
-    if (!is_active_) return;
+    // 检查已在 Lambda 中通过 is_active(mapping) 完成
     if (msg->data == "") return;
     RCLCPP_INFO(node_->get_logger(), "Received point replay command: '%s'", msg->data.c_str());
     publish_point_replay_name(msg->data);

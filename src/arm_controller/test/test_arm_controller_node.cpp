@@ -16,7 +16,6 @@ public:
   void plan_and_execute(const std::string &, const sensor_msgs::msg::JointState::SharedPtr) override
   {
   }
-  void trajectory_callback(const sensor_msgs::msg::JointState::SharedPtr) override {}
   void start(const std::string &) override {}
   bool stop(const std::string &) override {return true;}
 

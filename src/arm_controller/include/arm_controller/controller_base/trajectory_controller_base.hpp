@@ -44,33 +44,35 @@ public:
         }
 
         // 创建订阅（使用映射作为键存储多个订阅）
+        // 使用 BEST_EFFORT + VOLATILE 匹配 ros2 topic pub 的默认 QoS
         subscriptions_[mapping] = node_->create_subscription<T>(
-            input_topic, rclcpp::QoS(10).reliable(),
-            [this](const typename T::SharedPtr msg) {
-                if (!is_active_) return;
-                trajectory_callback(msg);
+            input_topic, rclcpp::QoS(10).best_effort(),
+            [this, mapping](const typename T::SharedPtr msg) {
+                RCLCPP_INFO(node_->get_logger(), "[%s] Lambda triggered for mapping: %s, is_active: %d",
+                           get_mode().c_str(), mapping.c_str(), is_active(mapping) ? 1 : 0);
+                if (!is_active(mapping)) {
+                    RCLCPP_WARN(node_->get_logger(), "[%s] Mapping %s not active, skipping message",
+                               get_mode().c_str(), mapping.c_str());
+                    return;
+                }
+                // 直接调用 plan_and_execute，传入捕获的 mapping 参数
+                RCLCPP_INFO(node_->get_logger(), "[%s] Calling plan_and_execute for mapping: %s",
+                           get_mode().c_str(), mapping.c_str());
+                plan_and_execute(mapping, msg);
             }
         );
 
-        RCLCPP_INFO(node_->get_logger(), "[%s] Subscribed to topic: %s (mapping: %s)",
+        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Subscribed to topic: %s (mapping: %s)",
                    get_mode().c_str(), input_topic.c_str(), mapping.c_str());
     }
 
     virtual void plan_and_execute(const std::string& mapping, const typename T::SharedPtr msg) = 0;
 
-    virtual void trajectory_callback(const typename T::SharedPtr msg) = 0;
-
     void handle_message(std::any msg) override final{
-        try {
-            auto typed_msg = std::any_cast<typename T::SharedPtr>(msg);
-            trajectory_callback(typed_msg);
-        } catch (const std::bad_any_cast& e) {
-            RCLCPP_ERROR_STREAM(rclcpp::get_logger("TrajectoryControllerImpl"), "Failed to cast message to type " << typeid(T).name());
-        }
+        // handle_message 已过时，Lambda 会直接调用 plan_and_execute
+        // 保留此实现以兼容旧代码（如果有其他地方调用此方法）
+        (void)msg;
     }
-
-    virtual void start(const std::string& mapping) override = 0;
-    virtual bool stop(const std::string& mapping) override = 0;
 
     // 轨迹控制器通常需要钩子状态来安全停止
     bool needs_hook_state() const override { return true; }

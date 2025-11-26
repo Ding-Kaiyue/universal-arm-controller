@@ -78,8 +78,8 @@ private:
     // 每个 (控制器类型, 硬件映射) 对都有独立的 controller 实例
     std::map<std::pair<std::string, std::string>, std::shared_ptr<ModeControllerBase>> controller_map_;
     std::map<std::string, std::string> mapping_to_mode_;  // 每个 mapping 的当前模式
-    std::string target_mode_;
-    bool in_hook_state_;
+    std::unordered_map<std::string, std::string> target_mode_;  // 改成 per-mapping
+    std::unordered_map<std::string, bool> in_hook_state_;  // 改成 per-mapping
     bool emergency_stop_active_;
     bool safety_zone_violation_;
 

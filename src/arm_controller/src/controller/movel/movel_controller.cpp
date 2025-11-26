@@ -29,14 +29,13 @@ void MoveLController::start(const std::string& mapping) {
         );
     }
 
-    // 保存当前激活的 mapping
+    // 保存当前激活的 mapping，供 trajectory_callback 使用
     active_mapping_ = mapping;
-    is_active_ = true;
 
     // 在激活时创建话题订阅（如果还没创建的话）
-    if (subscriptions_.find(mapping) == subscriptions_.end()) {
-        init_subscriptions(mapping);
-    }
+    // if (subscriptions_.find(mapping) == subscriptions_.end()) {
+    //     init_subscriptions(mapping);
+    // }
 
     // 同步 MoveIt 状态到当前机械臂位置，防止规划从错误的起始位置开始
     if (moveit_adapters_.find(mapping) != moveit_adapters_.end() && moveit_adapters_[mapping]) {
@@ -49,18 +48,18 @@ void MoveLController::start(const std::string& mapping) {
         }
     }
 
+    // 调用基类 start() 设置 per-mapping 的 is_active_[mapping] = true
+    TrajectoryControllerImpl::start(mapping);
+
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveLController activated", mapping.c_str());
 }
 
 bool MoveLController::stop(const std::string& mapping) {
-    // 停止处理消息
-    is_active_ = false;
-
-    // 清理资源
-    active_mapping_.clear();
-
     // 清理该 mapping 的话题订阅
-    cleanup_subscriptions(mapping);
+    // cleanup_subscriptions(mapping);
+
+    // 调用基类 stop() 设置 per-mapping 的 is_active_[mapping] = false
+    TrajectoryControllerImpl::stop(mapping);
 
     // 注意：轨迹执行是在 ROS2 callback 中同步进行的
     // execute_trajectory 是阻塞调用，stop() 被调用时表示上一个轨迹已执行完毕
@@ -70,13 +69,6 @@ bool MoveLController::stop(const std::string& mapping) {
     return true;
 }
 
-void MoveLController::trajectory_callback(const geometry_msgs::msg::Pose::SharedPtr msg) {
-    // 只在激活时才处理消息
-    if (!is_active_) return;
-
-    // 使用保存的 mapping 进行规划和执行
-    plan_and_execute(active_mapping_, msg);
-}
 
 void MoveLController::initialize_planning_services() {
     try {

@@ -7,13 +7,11 @@
 
 class UtilityControllerBase : public ModeControllerBase {
 public:
-    explicit UtilityControllerBase(std::string mode, rclcpp::Node::SharedPtr node) 
+    explicit UtilityControllerBase(std::string mode, rclcpp::Node::SharedPtr node)
         : ModeControllerBase(mode), node_(node) {}
     virtual ~UtilityControllerBase() = default;
     void handle_message(std::any /*msg*/) override final {}
 
-    virtual void start(const std::string& mapping) override = 0;
-    virtual bool stop(const std::string& mapping) override = 0;
 protected:
     rclcpp::Node::SharedPtr node_;
 };

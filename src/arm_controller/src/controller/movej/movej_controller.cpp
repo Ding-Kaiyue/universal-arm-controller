@@ -5,7 +5,8 @@
 #include <set>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
-// ros2 topic pub --once /controller_api/movej_action/single_arm sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+// ros2 topic pub --once --w 1 /controller_api/movej_action/left_arm sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+// ros2 topic pub --rate 1 /controller_api/movej_action/left_arm sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 // ros2 topic pub --once /trajectory_control controller_interfaces/msg/TrajectoryControl "{mapping: 'single_arm', action: 'Cancel'}"
 
 MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
@@ -31,27 +32,19 @@ void MoveJController::start(const std::string& mapping) {
         );
     }
 
-    // 保存当前激活的 mapping
-    active_mapping_ = mapping;
-    is_active_ = true;
-
-    // 在激活时创建话题订阅（如果还没创建的话）
-    if (subscriptions_.find(mapping) == subscriptions_.end()) {
-        init_subscriptions(mapping);
-    }
+    // 调用基类 start() 设置 per-mapping 的 is_active_[mapping] = true
+    // 订阅已在 ControllerNode::init_controllers() 时提前创建，Lambda 会直接调用 plan_and_execute
+    TrajectoryControllerImpl::start(mapping);
 
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveJController activated", mapping.c_str());
 }
 
 bool MoveJController::stop(const std::string& mapping) {
-    // 停止处理消息
-    is_active_ = false;
-
-    // 清理资源
-    active_mapping_.clear();
-
     // 清理该 mapping 的话题订阅
-    cleanup_subscriptions(mapping);
+    // cleanup_subscriptions(mapping);
+
+    // 调用基类 stop() 设置 per-mapping 的 is_active_[mapping] = false
+    TrajectoryControllerImpl::stop(mapping);
 
     // 注意：轨迹执行是在 ROS2 callback 中同步进行的
     // execute_trajectory 是阻塞调用，stop() 被调用时表示上一个轨迹已执行完毕
@@ -61,12 +54,6 @@ bool MoveJController::stop(const std::string& mapping) {
     return true;
 }
 
-void MoveJController::trajectory_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
-    // 只在激活时才处理消息
-    if (!is_active_) return;
-    // 使用保存的 mapping 进行规划和执行
-    plan_and_execute(active_mapping_, msg);
-}
 
 void MoveJController::initialize_planning_services() {
     try {
