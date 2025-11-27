@@ -16,6 +16,7 @@ public:
   }
   void start(const std::string &) override {}
   bool stop(const std::string &) override {return true;}
+  bool move(const std::string &, const std::vector<double>&) override {return true;}
 
   auto & get_subscriptions() {return subscriptions_;}
   using TrajectoryControllerImpl<sensor_msgs::msg::JointState>::cleanup_subscriptions;

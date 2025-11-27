@@ -22,13 +22,13 @@ hardware:
       planning_group: "left_arm"         # MoveIt规划组名称
       initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # 初始位置
       start_position: [0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0]  # 启动位置
-#   right_arm:
-#       robot_type: "arm620"
-#       interface: can1
-#       motors: [1, 2, 3, 4, 5, 6]    # 电机ID列表
-#       joint_names: ["right_joint1", "right_joint2", "right_joint3", "right_joint4", "right_joint5", "right_joint6"]
-#       frame_id: "right_base_link"
-#       controller_name: "right_arm_controller"  # 对应的控制器名称
-#       planning_group: "right_arm"         # MoveIt规划组名称
-#       initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # 初始位置
-#       start_position: [0.0, 0.5236, 0.7854, 0.0, -0.5236, 0.0]  # 启动位置
+  right_arm:
+      robot_type: "arm620"
+      interface: can1
+      motors: [1, 2, 3, 4, 5, 6]    # 电机ID列表
+      joint_names: ["right_joint1", "right_joint2", "right_joint3", "right_joint4", "right_joint5", "right_joint6"]
+      frame_id: "right_base_link"
+      controller_name: "right_arm_controller"  # 对应的控制器名称
+      planning_group: "right_arm"         # MoveIt规划组名称
+      initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # 初始位置
+      start_position: [0.0, 0.5236, 0.7854, 0.0, -0.5236, 0.0]  # 启动位置

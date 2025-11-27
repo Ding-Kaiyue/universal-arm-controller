@@ -7,6 +7,9 @@
 #include "trajectory_planning_v3/infrastructure/integration/moveit_adapter.hpp"
 #include "trajectory_interpolator/trajectory_interpolator.hpp"
 #include "arm_controller/utils/trajectory_converter.hpp"
+#include "arm_controller/command_queue_ipc.hpp"
+#include <thread>
+#include <atomic>
 
 class MoveJController final : public TrajectoryControllerImpl<sensor_msgs::msg::JointState> {
 public:
@@ -15,6 +18,9 @@ public:
 
     void start(const std::string& mapping = "") override;
     bool stop(const std::string& mapping = "") override;
+
+    // 直接执行轨迹命令（C++ API）
+    bool move(const std::string& mapping, const std::vector<double>& parameters) override;
 
 private:
     // 初始化轨迹规划服务
@@ -32,7 +38,10 @@ private:
     void execute_trajectory(
         const trajectory_interpolator::Trajectory& trajectory,
         const std::string& mapping);
-    
+
+    // 队列消费线程 - 后台处理来自C++ API的命令
+    void command_queue_consumer_thread();
+
     // 硬件接口
     std::shared_ptr<HardwareManager> hardware_manager_;
 
@@ -47,6 +56,10 @@ private:
 
     // 轨迹插值器
     std::unique_ptr<TrajectoryInterpolator> trajectory_interpolator_;
+
+    // 队列消费者线程
+    std::unique_ptr<std::thread> queue_consumer_;
+    std::atomic<bool> consumer_running_{false};
 };
 
 #endif  // __MOVEJ_CONTROLLER_HPP__

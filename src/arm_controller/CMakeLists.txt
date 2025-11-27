@@ -79,6 +79,7 @@ add_library(arm_controller_lib
   src/hardware/hardware_manager.cpp
   src/controller/controller_registry.cpp
   src/utils/trajectory_converter.cpp
+  src/arm_controller_api.cpp
   # 只保留测试需要的控制器
   src/controller/joint_velocity/joint_velocity_controller.cpp
   src/controller/joint_velocity/joint_velocity_interface.cpp
@@ -177,6 +178,27 @@ install(TARGETS
   universal_arm_controller_node
   DESTINATION lib/${PROJECT_NAME}
 )
+
+# === Build Examples ===
+file(GLOB EXAMPLE_SOURCES example/example_*.cpp)
+if(EXAMPLE_SOURCES)
+  foreach(EXAMPLE_FILE ${EXAMPLE_SOURCES})
+    get_filename_component(EXAMPLE_NAME ${EXAMPLE_FILE} NAME_WE)
+    add_executable(${EXAMPLE_NAME} ${EXAMPLE_FILE})
+    target_link_libraries(${EXAMPLE_NAME}
+      arm_controller_lib
+    )
+    ament_target_dependencies(${EXAMPLE_NAME}
+      rclcpp
+      std_msgs
+      sensor_msgs
+      geometry_msgs
+    )
+    install(TARGETS ${EXAMPLE_NAME}
+      DESTINATION bin
+    )
+  endforeach()
+endif()
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

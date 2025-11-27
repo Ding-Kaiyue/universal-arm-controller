@@ -223,6 +223,59 @@ trajectory_interpolator::Trajectory MoveCController::interpolate_trajectory(
     }
 }
 
+
+bool MoveCController::move(const std::string& mapping, const std::vector<double>& parameters) {
+    // 检查mapping和规划服务
+    if (motion_planning_services_.find(mapping) == motion_planning_services_.end() ||
+        !motion_planning_services_[mapping]) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveC: Planning service not found", mapping.c_str());
+        return false;
+    }
+
+    // 获取期望的关节数
+    int expected_joint_count = hardware_manager_->get_joint_count(mapping);
+
+    // MoveC 参数为 PoseArray：多个 Pose，每个 Pose 占 7 个数值（x,y,z,qx,qy,qz,qw）
+    // 参数长度应该是 7 的倍数，不足则填充，过多则截取
+    std::vector<double> pose_params = parameters;
+    int num_poses = (pose_params.size() + 6) / 7;  // 向上取整
+    int expected_size = num_poses * 7;
+
+    if (pose_params.size() < expected_size) {
+        pose_params.resize(expected_size, 0.0);
+        RCLCPP_WARN(node_->get_logger(), "[%s] MoveC: Parameters padded to %d poses (%zu values)",
+                   mapping.c_str(), num_poses, pose_params.size());
+    } else if (pose_params.size() > expected_size) {
+        pose_params.resize(expected_size);
+        RCLCPP_WARN(node_->get_logger(), "[%s] MoveC: Parameters truncated to %d poses (%zu values)",
+                   mapping.c_str(), num_poses, pose_params.size());
+    }
+
+    // 构建 PoseArray 消息
+    auto pose_array = std::make_shared<geometry_msgs::msg::PoseArray>();
+    for (int i = 0; i < num_poses; ++i) {
+        geometry_msgs::msg::Pose pose;
+        int offset = i * 7;
+
+        // 位置 (x, y, z)
+        pose.position.x = pose_params[offset + 0];
+        pose.position.y = pose_params[offset + 1];
+        pose.position.z = pose_params[offset + 2];
+
+        // 方向 (qx, qy, qz, qw)
+        pose.orientation.x = pose_params[offset + 3];
+        pose.orientation.y = pose_params[offset + 4];
+        pose.orientation.z = pose_params[offset + 5];
+        pose.orientation.w = pose_params[offset + 6];
+
+        pose_array->poses.push_back(pose);
+    }
+
+    // 调用原有的 plan_and_execute
+    plan_and_execute(mapping, pose_array);
+    return true;
+}
+
 void MoveCController::execute_trajectory(
     const trajectory_interpolator::Trajectory& trajectory,
     const std::string& mapping) {

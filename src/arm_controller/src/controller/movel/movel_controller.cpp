@@ -203,6 +203,43 @@ trajectory_interpolator::Trajectory MoveLController::interpolate_trajectory(
     }
 }
 
+bool MoveLController::move(const std::string& mapping, const std::vector<double>& parameters) {
+    // 检查mapping和规划服务
+    if (motion_planning_services_.find(mapping) == motion_planning_services_.end() ||
+        !motion_planning_services_[mapping]) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Planning service not found", mapping.c_str());
+        return false;
+    }
+
+    // 处理参数长度：自动填充或裁短
+    std::vector<double> pose = parameters;
+    if (pose.size() < 7) {
+        // 用0填充不足的部分
+        pose.resize(7, 0.0);
+        RCLCPP_WARN(node_->get_logger(), "[%s] MoveL: Parameters padded to %d pose parameters: x, y, z, qx, qy, qz, qw",
+                   mapping.c_str(), 7);
+    } else if (pose.size() > 7) {
+        // 裁短多余的部分
+        pose.resize(7);
+        RCLCPP_WARN(node_->get_logger(), "[%s] MoveL: Parameters truncated to %d pose parameters: x, y, z, qx, qy, qz, qw",
+                   mapping.c_str(), 7);
+    }
+
+    // 构建 JointState 消息
+    auto pose_state = std::make_shared<geometry_msgs::msg::Pose>();
+    pose_state->position.x = pose[0];
+    pose_state->position.y = pose[1];
+    pose_state->position.z = pose[2];
+    pose_state->orientation.x = pose[3];
+    pose_state->orientation.y = pose[4];
+    pose_state->orientation.z = pose[5];
+    pose_state->orientation.w = pose[6];
+
+    // 调用原有的 plan_and_execute
+    plan_and_execute(mapping, pose_state);
+    return true;
+}
+
 void MoveLController::execute_trajectory(
     const trajectory_interpolator::Trajectory& trajectory,
     const std::string& mapping) {

@@ -2,6 +2,7 @@
 #include "controller_interface.hpp"
 #include "hardware/hardware_manager.hpp"
 #include "arm_controller/utils/trajectory_converter.hpp"
+#include <controller_interfaces/srv/work_mode.hpp>
 #include <set>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
@@ -20,6 +21,13 @@ MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹规划服务
     initialize_planning_services();
 
+    // 启动IPC命令队列消费线程（早期启动以接收API发送的命令）
+    if (!consumer_running_) {
+        consumer_running_ = true;
+        queue_consumer_ = std::make_unique<std::thread>(&MoveJController::command_queue_consumer_thread, this);
+        RCLCPP_INFO(node_->get_logger(), "✅ MoveJ: IPC queue consumer thread started early");
+    }
+
     // 注意：话题订阅在 init_subscriptions() 中创建，以支持 {mapping} 占位符
 }
 
@@ -30,6 +38,13 @@ void MoveJController::start(const std::string& mapping) {
         throw std::runtime_error(
             "❎ [" + mapping + "] MoveJ: not found in hardware configuration."
         );
+    }
+
+    // 仅在首次启动时创建队列消费线程
+    if (!consumer_running_) {
+        consumer_running_ = true;
+        queue_consumer_ = std::make_unique<std::thread>(&MoveJController::command_queue_consumer_thread, this);
+        RCLCPP_INFO(node_->get_logger(), "✅ MoveJ: Command queue consumer thread started");
     }
 
     // 调用基类 start() 设置 per-mapping 的 is_active_[mapping] = true
@@ -192,6 +207,40 @@ trajectory_interpolator::Trajectory MoveJController::interpolate_trajectory(
     }
 }
 
+bool MoveJController::move(const std::string& mapping, const std::vector<double>& parameters) {
+    // 检查mapping和规划服务
+    if (motion_planning_services_.find(mapping) == motion_planning_services_.end() ||
+        !motion_planning_services_[mapping]) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Planning service not found", mapping.c_str());
+        return false;
+    }
+
+    // 获取期望的关节数
+    size_t expected_joint_count = hardware_manager_->get_joint_count(mapping);
+
+    // 处理参数长度：自动填充或裁短
+    std::vector<double> joint_positions = parameters;
+    if (joint_positions.size() < expected_joint_count) {
+        // 用0填充不足的部分
+        joint_positions.resize(expected_joint_count, 0.0);
+        RCLCPP_WARN(node_->get_logger(), "[%s] MoveJ: Parameters padded to %zu joints",
+                   mapping.c_str(), expected_joint_count);
+    } else if (joint_positions.size() > expected_joint_count) {
+        // 裁短多余的部分
+        joint_positions.resize(expected_joint_count);
+        RCLCPP_WARN(node_->get_logger(), "[%s] MoveJ: Parameters truncated to %zu joints",
+                   mapping.c_str(), expected_joint_count);
+    }
+
+    // 构建 JointState 消息
+    auto joint_state = std::make_shared<sensor_msgs::msg::JointState>();
+    joint_state->position = joint_positions;
+
+    // 调用原有的 plan_and_execute
+    plan_and_execute(mapping, joint_state);
+    return true;
+}
+
 void MoveJController::execute_trajectory(
     const trajectory_interpolator::Trajectory& trajectory,
     const std::string& mapping) {
@@ -214,4 +263,88 @@ void MoveJController::execute_trajectory(
                     mapping.c_str(), e.what());
         return;
     }
+}
+
+void MoveJController::command_queue_consumer_thread() {
+    RCLCPP_INFO(node_->get_logger(), "🔄 MoveJ: IPC queue consumer thread running");
+
+    arm_controller::TrajectoryCommandIPC cmd;
+    std::map<std::string, std::string> current_mode;  // Track current mode per mapping
+
+    while (consumer_running_) {
+        if (!arm_controller::CommandQueueIPC::getInstance().pop(cmd, 1000)) {
+            continue;
+        }
+
+        std::string mode = cmd.get_mode();
+        std::string mapping = cmd.get_mapping();
+        std::string cmd_id = cmd.get_command_id();
+
+        RCLCPP_INFO(node_->get_logger(), "📥 MoveJ: Received IPC command (ID: %s, mode: %s, mapping: %s)",
+                   cmd_id.c_str(), mode.c_str(), mapping.c_str());
+
+        // Auto-switch mode if needed
+        if (mode != "MoveJ" && mode != "__MODE_SWITCH__") {
+            std::string current = current_mode[mapping];
+            if (current != mode) {
+                RCLCPP_INFO(node_->get_logger(), "[%s] 🔄 Auto-switching mode from %s to %s",
+                           mapping.c_str(), current.empty() ? "unknown" : current.c_str(), mode.c_str());
+
+                try {
+                    auto client = node_->create_client<controller_interfaces::srv::WorkMode>("/controller_api/controller_mode");
+                    if (client->wait_for_service(std::chrono::seconds(1))) {
+                        auto request = std::make_shared<controller_interfaces::srv::WorkMode::Request>();
+                        request->mode = mode;
+                        request->mapping = mapping;
+
+                        auto future = client->async_send_request(request);
+                        if (rclcpp::spin_until_future_complete(node_, future) == rclcpp::FutureReturnCode::SUCCESS) {
+                            auto response = future.get();
+                            if (response->success) {
+                                current_mode[mapping] = mode;
+                                RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Auto-mode switch to %s successful",
+                                           mapping.c_str(), mode.c_str());
+                            } else {
+                                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Auto-mode switch failed: %s",
+                                           mapping.c_str(), response->message.c_str());
+                                continue;
+                            }
+                        } else {
+                            RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Auto-mode switch timeout", mapping.c_str());
+                            continue;
+                        }
+                    } else {
+                        RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Mode switch service not available", mapping.c_str());
+                        continue;
+                    }
+                } catch (const std::exception& e) {
+                    RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in auto-mode switch: %s",
+                                mapping.c_str(), e.what());
+                    continue;
+                }
+            }
+        }
+
+        // Now execute the command
+        try {
+            RCLCPP_INFO(node_->get_logger(), "[%s] 🚀 Executing command (ID: %s, mode: %s)",
+                       mapping.c_str(), cmd_id.c_str(), mode.c_str());
+
+            auto params = cmd.get_parameters();
+            bool success = move(mapping, params);
+
+            if (success) {
+                RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Command executed successfully (ID: %s)",
+                           mapping.c_str(), cmd_id.c_str());
+            } else {
+                RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Command execution failed (ID: %s)",
+                           mapping.c_str(), cmd_id.c_str());
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in command execution: %s",
+                        mapping.c_str(), e.what());
+        }
+    }
+
+    RCLCPP_INFO(node_->get_logger(), "🔄 MoveJ: IPC queue consumer thread stopped");
 }

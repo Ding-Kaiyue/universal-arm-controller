@@ -18,6 +18,7 @@ public:
   }
   void start(const std::string &) override {}
   bool stop(const std::string &) override {return true;}
+  bool move(const std::string &, const std::vector<double>&) override {return true;}
 
   // Expose protected members for testing
   auto & get_subscriptions() {return subscriptions_;}

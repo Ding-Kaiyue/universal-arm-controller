@@ -16,6 +16,9 @@ public:
     void start(const std::string& mapping = "") override;
     bool stop(const std::string& mapping = "") override;
 
+    // 直接执行轨迹命令（C++ API）
+    bool move(const std::string& mapping, const std::vector<double>& parameters) override;
+
 private:
     // 初始化轨迹规划服务
     void initialize_planning_services();

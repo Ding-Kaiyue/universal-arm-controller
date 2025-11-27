@@ -68,6 +68,10 @@ public:
 
     virtual void plan_and_execute(const std::string& mapping, const typename T::SharedPtr msg) = 0;
 
+    // 直接执行轨迹命令（确保可靠执行）
+    // 参数会自动填充/裁短以匹配控制器要求的数据格式
+    virtual bool move(const std::string& mapping, const std::vector<double>& parameters) = 0;
+
     void handle_message(std::any msg) override final{
         // handle_message 已过时，Lambda 会直接调用 plan_and_execute
         // 保留此实现以兼容旧代码（如果有其他地方调用此方法）

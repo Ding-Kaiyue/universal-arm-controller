@@ -2,6 +2,7 @@
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include "controller_manager_section.hpp"
 #include "trajectory_controller_section.hpp"
+#include "arm_controller/command_queue_ipc.hpp"
 #include <thread>
 #include <chrono>
 
@@ -9,9 +10,17 @@ int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
 
     try {
+        // 初始化IPC命令队列
+        arm_controller::CommandQueueIPC::cleanup();
+        if (!arm_controller::CommandQueueIPC::getInstance().initialize()) {
+            RCLCPP_FATAL(rclcpp::get_logger("main"), "Failed to initialize IPC command queue");
+            return 1;
+        }
+        RCLCPP_INFO(rclcpp::get_logger("main"), "✅ IPC command queue initialized");
+
         // 创建多线程执行器
         rclcpp::executors::MultiThreadedExecutor executor;
-        
+
         // 1. 首先创建并初始化 ControllerManagerNode（负责硬件初始化）
         auto controller_manager = std::make_shared<ControllerManagerNode>();
         RCLCPP_INFO(rclcpp::get_logger("main"), "Initializing Controller Manager Node...");
