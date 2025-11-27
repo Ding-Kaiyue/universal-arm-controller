@@ -27,14 +27,14 @@ int main() {
         std::cout << "  结果: 失败 - " << api.getLastError() << "\n\n";
     }
 
-    // // 示例 3: 另一个MoveJ位置
-    // std::cout << "[示例 3] MoveJ - 其他位置\n";
-    // std::cout << "  执行: api.moveJ({0.5, 1.0, 0.5, 0.1, 0.2, 0.3}, \"left_arm\")\n";
-    // if (api.moveJ({0.5, 1.0, 0.5, 0.1, 0.2, 0.3}, "left_arm")) {
-    //     std::cout << "  结果: 成功\n\n";
-    // } else {
-    //     std::cout << "  结果: 失败 - " << api.getLastError() << "\n\n";
-    // }
+    // 示例 2: 另一个MoveJ位置
+    std::cout << "[示例 2] MoveJ - 其他位置\n";
+    std::cout << "  执行: api.moveJ({0.5, 1.0, 0.5, 0.1, 0.2, 0.3}, \"right_arm\")\n";
+    if (api.moveJ({0.5, 1.0, 0.5, 0.1, 0.2, 0.3}, "right_arm")) {
+        std::cout << "  结果: 成功\n\n";
+    } else {
+        std::cout << "  结果: 失败 - " << api.getLastError() << "\n\n";
+    }
 
     // // 示例 4: 切换到 MoveL 模式
     // std::cout << "[示例 4] 切换到 MoveL 模式\n";

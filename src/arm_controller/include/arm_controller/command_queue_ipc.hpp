@@ -1,16 +1,14 @@
 #ifndef __COMMAND_QUEUE_IPC_HPP__
 #define __COMMAND_QUEUE_IPC_HPP__
 
-#include <boost/interprocess/managed_shared_memory.hpp>
-#include <boost/interprocess/allocators/allocator.hpp>
-#include <boost/interprocess/containers/deque.hpp>
-#include <boost/interprocess/sync/named_mutex.hpp>
-#include <boost/interprocess/sync/named_condition.hpp>
+#include "arm_controller/ipc/shm_manager.hpp"
+#include "arm_controller/ipc/ipc_types.hpp"
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <string>
 #include <vector>
 #include <cstring>
 #include <iostream>
+#include <memory>
 
 namespace arm_controller {
 
@@ -67,16 +65,6 @@ struct TrajectoryCommandIPC {
 
 class CommandQueueIPC {
 public:
-    static constexpr const char* SEGMENT_NAME = "arm_controller_ipc_segment";
-    static constexpr const char* QUEUE_NAME = "arm_controller_command_queue";
-    static constexpr const char* MUTEX_NAME = "arm_controller_queue_mutex";
-    static constexpr const char* COND_NAME = "arm_controller_queue_cond";
-    static constexpr size_t SEGMENT_SIZE = 65536;
-
-    using ShmAllocator = boost::interprocess::allocator<TrajectoryCommandIPC,
-        boost::interprocess::managed_shared_memory::segment_manager>;
-    using CommandDeque = boost::interprocess::deque<TrajectoryCommandIPC, ShmAllocator>;
-
     static CommandQueueIPC& getInstance() {
         static CommandQueueIPC instance;
         return instance;
@@ -84,21 +72,11 @@ public:
 
     bool initialize() {
         try {
-            boost::interprocess::shared_memory_object::remove(SEGMENT_NAME);
-        } catch (...) {}
-
-        try {
-            segment_ = std::make_shared<boost::interprocess::managed_shared_memory>(
-                boost::interprocess::create_only, SEGMENT_NAME, SEGMENT_SIZE);
-
-            const ShmAllocator alloc(segment_->get_segment_manager());
-            queue_ = segment_->construct<CommandDeque>(QUEUE_NAME)(alloc);
-
-            mutex_ = std::make_shared<boost::interprocess::named_mutex>(
-                boost::interprocess::open_or_create, MUTEX_NAME);
-            cond_ = std::make_shared<boost::interprocess::named_condition>(
-                boost::interprocess::open_or_create, COND_NAME);
-
+            shm_manager_ = std::make_shared<ipc::SharedMemoryManager>();
+            if (!shm_manager_->initialize()) {
+                std::cerr << "CommandQueueIPC::initialize() failed to create shared memory" << std::endl;
+                return false;
+            }
             return true;
         } catch (const std::exception& e) {
             std::cerr << "CommandQueueIPC::initialize() failed: " << e.what() << std::endl;
@@ -108,20 +86,11 @@ public:
 
     bool open() {
         try {
-            segment_ = std::make_shared<boost::interprocess::managed_shared_memory>(
-                boost::interprocess::open_only, SEGMENT_NAME);
-
-            queue_ = segment_->find<CommandDeque>(QUEUE_NAME).first;
-            if (!queue_) {
-                std::cerr << "CommandQueueIPC: queue not found" << std::endl;
+            shm_manager_ = std::make_shared<ipc::SharedMemoryManager>();
+            if (!shm_manager_->open()) {
+                std::cerr << "CommandQueueIPC::open() failed to open shared memory" << std::endl;
                 return false;
             }
-
-            mutex_ = std::make_shared<boost::interprocess::named_mutex>(
-                boost::interprocess::open_only, MUTEX_NAME);
-            cond_ = std::make_shared<boost::interprocess::named_condition>(
-                boost::interprocess::open_only, COND_NAME);
-
             return true;
         } catch (const std::exception& e) {
             std::cerr << "CommandQueueIPC::open() failed: " << e.what() << std::endl;
@@ -131,11 +100,32 @@ public:
 
     void push(const TrajectoryCommandIPC& cmd) {
         try {
-            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex_);
-            if (queue_) {
-                queue_->push_back(cmd);
-                cond_->notify_one();
+            if (!shm_manager_ || !shm_manager_->isValid()) {
+                if (!open()) {
+                    std::cerr << "CommandQueueIPC::push() failed to access shared memory" << std::endl;
+                    return;
+                }
             }
+
+            auto queue = shm_manager_->getQueue();
+            auto mutex = shm_manager_->getMutex();
+            auto cond = shm_manager_->getCondition();
+
+            if (!queue || !mutex || !cond) {
+                std::cerr << "CommandQueueIPC::push() invalid queue or sync primitives" << std::endl;
+                return;
+            }
+
+            ipc::TrajectoryCommand new_cmd;
+            new_cmd.set_mode(cmd.get_mode());
+            new_cmd.set_mapping(cmd.get_mapping());
+            new_cmd.set_command_id(cmd.get_command_id());
+            new_cmd.set_parameters(cmd.get_parameters());
+
+            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
+            queue->push_back(new_cmd);
+            cond->notify_one();
+
         } catch (const std::exception& e) {
             std::cerr << "CommandQueueIPC::push() failed: " << e.what() << std::endl;
         }
@@ -143,21 +133,39 @@ public:
 
     bool pop(TrajectoryCommandIPC& cmd, int timeout_ms = 0) {
         try {
-            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex_);
-
-            if (!queue_ || queue_->empty()) {
-                if (timeout_ms <= 0) return false;
-
-                auto deadline = boost::posix_time::microsec_clock::universal_time() +
-                    boost::posix_time::milliseconds(timeout_ms);
-                if (!cond_->timed_wait(lock, deadline)) {
+            if (!shm_manager_ || !shm_manager_->isValid()) {
+                if (!open()) {
                     return false;
                 }
             }
 
-            if (queue_ && !queue_->empty()) {
-                cmd = queue_->front();
-                queue_->pop_front();
+            auto queue = shm_manager_->getQueue();
+            auto mutex = shm_manager_->getMutex();
+            auto cond = shm_manager_->getCondition();
+
+            if (!queue || !mutex || !cond) {
+                return false;
+            }
+
+            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
+
+            if (queue->empty()) {
+                if (timeout_ms <= 0) return false;
+
+                auto deadline = boost::posix_time::microsec_clock::universal_time() +
+                    boost::posix_time::milliseconds(timeout_ms);
+                if (!cond->timed_wait(lock, deadline)) {
+                    return false;
+                }
+            }
+
+            if (!queue->empty()) {
+                const auto& ipc_cmd = queue->front();
+                cmd.set_mode(ipc_cmd.get_mode());
+                cmd.set_mapping(ipc_cmd.get_mapping());
+                cmd.set_command_id(ipc_cmd.get_command_id());
+                cmd.set_parameters(ipc_cmd.get_parameters());
+                queue->pop_front();
                 return true;
             }
             return false;
@@ -169,8 +177,14 @@ public:
 
     bool empty() {
         try {
-            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex_);
-            return !queue_ || queue_->empty();
+            if (!shm_manager_ || !shm_manager_->isValid()) {
+                return true;
+            }
+            auto queue = shm_manager_->getQueue();
+            if (!queue) return true;
+
+            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*shm_manager_->getMutex());
+            return queue->empty();
         } catch (const std::exception& e) {
             std::cerr << "CommandQueueIPC::empty() failed: " << e.what() << std::endl;
             return true;
@@ -179,8 +193,14 @@ public:
 
     size_t size() {
         try {
-            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex_);
-            return queue_ ? queue_->size() : 0;
+            if (!shm_manager_ || !shm_manager_->isValid()) {
+                return 0;
+            }
+            auto queue = shm_manager_->getQueue();
+            if (!queue) return 0;
+
+            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*shm_manager_->getMutex());
+            return queue->size();
         } catch (const std::exception& e) {
             std::cerr << "CommandQueueIPC::size() failed: " << e.what() << std::endl;
             return 0;
@@ -188,21 +208,14 @@ public:
     }
 
     static void cleanup() {
-        try {
-            boost::interprocess::shared_memory_object::remove(SEGMENT_NAME);
-            boost::interprocess::named_mutex::remove(MUTEX_NAME);
-            boost::interprocess::named_condition::remove(COND_NAME);
-        } catch (...) {}
+        ipc::SharedMemoryManager::cleanup();
     }
 
 private:
-    CommandQueueIPC() : queue_(nullptr) {}
+    CommandQueueIPC() = default;
     ~CommandQueueIPC() = default;
 
-    std::shared_ptr<boost::interprocess::managed_shared_memory> segment_;
-    CommandDeque* queue_;
-    std::shared_ptr<boost::interprocess::named_mutex> mutex_;
-    std::shared_ptr<boost::interprocess::named_condition> cond_;
+    std::shared_ptr<ipc::SharedMemoryManager> shm_manager_;
 };
 
 } // namespace arm_controller
