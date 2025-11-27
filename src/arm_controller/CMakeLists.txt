@@ -71,6 +71,7 @@ add_library(arm_controller_lib
   src/hardware/hardware_manager.cpp
   src/controller/controller_registry.cpp
   src/utils/trajectory_converter.cpp
+  src/utils/joint_recorder.cpp
   # 只保留测试需要的控制器
   src/controller/joint_velocity/joint_velocity_controller.cpp
   src/controller/joint_velocity/joint_velocity_interface.cpp
@@ -93,10 +94,10 @@ add_library(arm_controller_lib
   # src/controller/point_record/point_record_interface.cpp
   # src/controller/point_replay/point_replay_controller.cpp
   # src/controller/point_replay/point_replay_interface.cpp
-  # src/controller/trajectory_record/trajectory_record_controller.cpp
-  # src/controller/trajectory_record/trajectory_record_interface.cpp
-  # src/controller/trajectory_replay/trajectory_replay_controller.cpp
-  # src/controller/trajectory_replay/trajectory_replay_interface.cpp
+  src/controller/trajectory_record/trajectory_record_controller.cpp
+  src/controller/trajectory_record/trajectory_record_interface.cpp
+  src/controller/trajectory_replay/trajectory_replay_controller.cpp
+  src/controller/trajectory_replay/trajectory_replay_interface.cpp
 )
 
 # target_link_libraries(robot_controller_lib

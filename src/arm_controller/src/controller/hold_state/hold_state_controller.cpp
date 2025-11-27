@@ -14,9 +14,21 @@ HoldStateController::HoldStateController(const rclcpp::Node::SharedPtr& node)
 void HoldStateController::start(const std::string& mapping) {
     const std::string normalized_mapping = normalize_mapping(mapping);
 
-    // 如果已经为该 mapping 激活，直接返回（幂等）
+    // 如果已经为该 mapping 激活，更新 hold 位置但不重新创建 context
     if (mapping_contexts_.count(normalized_mapping)) {
-        RCLCPP_WARN(node_->get_logger(), "HoldStateController already active for mapping '%s'", normalized_mapping.c_str());
+        RCLCPP_INFO(node_->get_logger(), "HoldStateController already active for mapping '%s', updating hold position",
+                    normalized_mapping.c_str());
+
+        // 更新 hold 位置到当前位置
+        if (hardware_manager_) {
+            auto& ctx = mapping_contexts_[normalized_mapping];
+            ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
+            if (!ctx.hold_positions.empty()) {
+                hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
+                RCLCPP_INFO(node_->get_logger(), "[%s] Updated hold position to current position",
+                           normalized_mapping.c_str());
+            }
+        }
         return;
     }
 
@@ -27,8 +39,9 @@ void HoldStateController::start(const std::string& mapping) {
     // ========== 关键：获取当前位置并维持状态 ==========
     if (hardware_manager_) {
         // 添加延迟，等待最新的电机状态更新到达
-        // 这是必要的，因为 mapping_joint_states_ 可能需要一些时间才能被最新的电机状态填充
-        // std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        // 这是必要的，因为 mapping_joint_states_ 需要时间被最新的电机反馈填充
+        // 特别是在轨迹执行完成后切换到 HoldState 时
+        //std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
         // 获取当前关节位置作为保持目标
         ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);

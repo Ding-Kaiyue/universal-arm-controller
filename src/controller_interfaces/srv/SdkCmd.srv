@@ -1,0 +1,33 @@
+# SDK命令服务
+# 用于外部程序（如QT界面）调用机械臂控制功能
+
+# Request
+uint8 command                           # 命令类型 (见下方枚举)
+string mapping                          # 映射名称 ("single_arm", "left_arm", "right_arm")
+string trajectory_name                  # 轨迹名称 (用于示教录制和复现)
+float64[] joint_positions               # 关节目标位置 (用于MoveJ)
+float64[] cartesian_pose                # 笛卡尔目标位姿 (用于MoveL) [x,y,z,rx,ry,rz]
+uint8 joint_index                       # 关节索引 (用于单关节控制, 1-6)
+int8 velocity_direction                 # 速度方向 (1=正向, -1=反向)
+
+---
+# Response
+bool success
+string message
+float64[] current_joint_positions       # 当前关节位置 (弧度)
+float64[] current_cartesian_pose        # 当前笛卡尔位姿 [x,y,z,rx,ry,rz]
+
+# 命令类型枚举 (在代码中定义):
+# CYCLIC_SYNC_POS = 8    (MIT位置模式)
+# CYCLIC_SYNC_VEL = 9    (MIT速度模式)
+# CYCLIC_SYNC_TORQUE = 10 (MIT力矩模式)
+#
+# SDK_DISABLE = 1              # 失能电机
+# SDK_JOINT_CONTROL = 2        # 单关节控制
+# SDK_MOVEJ = 4                # 关节空间运动
+# SDK_MOVEL = 5                # 笛卡尔空间运动
+# SDK_TEACH_START = 7          # 开始示教录制
+# SDK_TEACH_REPEAT = 8         # 开始轨迹复现
+# SDK_TEACH_STOP = 16          # 停止示教录制
+# SDK_GET_POSE = 17            # 获取当前位姿
+# SDK_JOINT_STOP = 18          # 停止关节运动

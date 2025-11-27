@@ -5,7 +5,7 @@ repositories:
     version: planning-only
   hardware_driver:
     type: git
-    url: https://github.com/Ding-Kaiyue/hardware-driver.git
+    url: https://github.com/yameiwu0/hardware-driver.git
     version: master
   trajectory_interpolator:
     type: git
