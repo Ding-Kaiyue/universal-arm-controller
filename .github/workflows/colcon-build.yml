@@ -2,7 +2,7 @@ name: colcon build
 
 on:
   push:
-    branches: [ test, master ]
+    branches: [ master ]
   pull_request:
 
 jobs:
@@ -67,6 +67,7 @@ jobs:
           fi
 
 
+<<<<<<< HEAD
       - name: Build and install OSQP
         run: |
           mkdir -p /tmp/osqp-build
@@ -89,6 +90,8 @@ jobs:
           make -j$(nproc)
           sudo make install
 
+=======
+>>>>>>> origin/master
       - name: Install ROS dependencies
         run: |
           source /opt/ros/humble/setup.bash

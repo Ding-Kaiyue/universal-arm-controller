@@ -14,11 +14,9 @@ MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹插值器
     trajectory_interpolator_ = std::make_unique<TrajectoryInterpolator>();
 
-    // 从配置读取输入话题名称
     std::string input_topic;
     node_->get_parameter("controllers.MoveJ.input_topic", input_topic);
-
-    // 创建全局话题订阅（生命周期与 ControllerManagerNode 一致）
+    
     sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
         input_topic, rclcpp::QoS(10).reliable(),
         std::bind(&MoveJController::trajectory_callback, this, std::placeholders::_1)
@@ -37,33 +35,21 @@ void MoveJController::start(const std::string& mapping) {
         );
     }
 
-    // 保存当前激活的 mapping
+    // 保存当前激活的mapping
     active_mapping_ = mapping;
     is_active_ = true;
-
-    RCLCPP_INFO(node_->get_logger(), "[%s] MoveJController activated", mapping.c_str());
 }
 
 bool MoveJController::stop(const std::string& mapping) {
-    // 停止处理消息
     is_active_ = false;
-
-    // 清理资源
-    active_mapping_.clear();
-
-    // 注意：轨迹执行是在 ROS2 callback 中同步进行的
-    // execute_trajectory 是阻塞调用，stop() 被调用时表示上一个轨迹已执行完毕
-    // 或模式切换已等待轨迹完成
-
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveJController deactivated", mapping.c_str());
     return true;
 }
 
 void MoveJController::trajectory_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
-    // 只在激活时才处理消息
     if (!is_active_) return;
 
-    // 使用保存的 mapping 进行规划和执行
+    // 使用mapping进行规划和执行
     plan_and_execute(active_mapping_, msg);
 }
 

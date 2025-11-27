@@ -342,7 +342,7 @@ void TrajectoryReplayController::smoothed_trajectory_callback(const trajectory_m
         // 避免 HoldState 使用旧的位置（轨迹起点）导致电机突然回到起点
         auto current_positions = hardware_manager_->get_current_joint_positions(current_mapping_);
         if (!current_positions.empty()) {
-            hardware_manager_->send_hold_state_command(current_mapping_, current_positions);
+            hardware_manager_->send_hold_position_command(current_mapping_, current_positions);
             RCLCPP_INFO(node_->get_logger(), "Sent hold command at trajectory end position");
         }
 

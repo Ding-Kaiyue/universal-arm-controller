@@ -13,21 +13,24 @@ common:
       name: /controller_api/running_status
       type: std_msgs/msg/String
       kind: input_topic
-  
+
 
 controllers:
-  # - key: CartesianVelocity
-  #   class: CartesianVelocityController
-  #   input_topic:
-  #     name: /controller_api/cartesian_velocity_action
+  - key: SystemStart
+    class: SystemStartController
+
+  - key: CartesianVelocity
+    class: CartesianVelocityController
+    input_topic:
+      name: /controller_api/cartesian_velocity_action
       # type: geometry_msgs/msg/Twist
+
+  - key: Disable
+    class: DisableController
 
   - key: HoldState
     class: HoldStateController
 
-  - key: SystemStart
-    class: SystemStartController
-    
   - key: JointVelocity
     class: JointVelocityController
     input_topic:
@@ -61,22 +64,24 @@ controllers:
 
   # - key: PointRecord
   #   class: PointRecordController
-  #   input_topic: 
+  #   input_topic:
   #     name: /controller_api/point_record_action
   #     type: std_msgs/msg/String
   # - key: PointReplay
   #   class: PointReplayController
-  #   input_topic: 
+  #   input_topic:
   #     name: /controller_api/point_replay_action
   #     type: std_msgs/msg/String
+
   - key: TrajectoryRecord
     class: TrajectoryRecordController
-    input_topic: 
+    input_topic:
       name: /controller_api/trajectory_record_action
       type: std_msgs/msg/String
     output_topic:
       name: /controller_api/trajectory_record_status
       type: std_msgs/msg/String
+
   - key: TrajectoryReplay
     class: TrajectoryReplayController
     input_dir: /home/w/work/robotic_arm_ws/trajectories

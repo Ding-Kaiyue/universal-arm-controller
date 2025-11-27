@@ -4,7 +4,8 @@
 #include "hold_state/hold_state_controller.hpp"
 #include "system_start/system_start_controller.hpp"
 #include "joint_velocity/joint_velocity_controller.hpp"
-// #include "cartesian_velocity/cartesian_velocity_controller.hpp"
+#include "disable/disable_controller.hpp"
+#include "cartesian_velocity/cartesian_velocity_controller.hpp"
 #include "move2initial/move2initial_controller.hpp"
 #include "move2start/move2start_controller.hpp"
 #include "ros2_action_control/ros2_action_control_controller.hpp"
@@ -19,14 +20,18 @@
 std::unordered_map<std::string, ControllerInterface::Creator> get_available_controllers() {
     return {
         // 只注册测试需要的控制器
-        {"HoldStateController", [](rclcpp::Node::SharedPtr node) {
-            return std::make_shared<HoldStateController>(node); }},
         {"SystemStartController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<SystemStartController>(node); }},
+        {"DisableController", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<DisableController>(node); }},
+        {"HoldStateController", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<HoldStateController>(node); }},
         {"JointVelocityController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<JointVelocityController>(node); }},
-        // {"CartesianVelocityController", [](rclcpp::Node::SharedPtr node) {
-        //     return std::make_shared<CartesianVelocityController>(node); }},
+
+        // 其他控制器暂时屏蔽用于测试
+        {"CartesianVelocityController", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<CartesianVelocityController>(node); }},
         {"Move2InitialController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<Move2InitialController>(node); }},
         {"Move2StartController", [](rclcpp::Node::SharedPtr node) {
@@ -39,7 +44,6 @@ std::unordered_map<std::string, ControllerInterface::Creator> get_available_cont
             return std::make_shared<MoveJController>(node); }},
         {"MoveLController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<MoveLController>(node); }},
-
         // {"PointRecordController", [](rclcpp::Node::SharedPtr node) {
         //     return std::make_shared<PointRecordController>(node); }},
         // {"PointReplayController", [](rclcpp::Node::SharedPtr node) {

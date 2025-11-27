@@ -37,12 +37,11 @@ public:
 private:
     void initialize_moveit_service();
     void velocity_callback(const geometry_msgs::msg::TwistStamped::SharedPtr msg) override;
-    bool solve_velocity_qp(const std::string& mapping,
-                           const Eigen::MatrixXd& J,
+    bool solve_velocity_qp(const Eigen::MatrixXd& J,
                            const Eigen::VectorXd& v_ee,
                            Eigen::VectorXd& qd_solution,
                            const std::vector<std::string>& joint_names);
-    bool send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities);
+    bool send_joint_velocities(const std::vector<double>& joint_velocities);
     /**
      * @brief 检查工作空间边界约束
      * @details 预测下一个关节位置，确保不会超出关节限制。允许从限制违规中恢复。
@@ -53,8 +52,7 @@ private:
      * @param dt 控制周期，用于预测下一位置（秒）。默认 0.01s 对应 100Hz 控制频率。
      * @return true 如果预测位置不违反关节限制；false 如果会违反限制
      */
-    bool check_workspace_boundary(const std::string& mapping,
-                                  const std::vector<double>& joint_positions,
+    bool check_workspace_boundary(const std::vector<double>& joint_positions,
                                   const Eigen::VectorXd& qd_command,
                                   double dt = 0.01);
 
@@ -69,7 +67,6 @@ private:
 
     // 方向一致性验证（后置）
     bool post_verify_direction(
-        const std::string& mapping,
         const Eigen::MatrixXd &J,
         const Eigen::VectorXd &qd_solution,
         const Eigen::VectorXd &v_ee,
@@ -79,7 +76,8 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr sub_;
     std::shared_ptr<HardwareManager> hardware_manager_;
     std::map<std::string, std::shared_ptr<trajectory_planning::infrastructure::integration::MoveItAdapter>> moveit_adapters_;
-    bool is_active_ = false;
+
+    // 当前激活的mapping
     std::string active_mapping_;
 
     // TF2 坐标系转换

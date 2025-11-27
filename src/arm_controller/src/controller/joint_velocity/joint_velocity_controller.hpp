@@ -16,13 +16,12 @@ public:
 
 protected:
     void velocity_callback(const sensor_msgs::msg::JointState::SharedPtr msg) override;
-    bool send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities);
+    bool send_joint_velocities(const std::vector<double>& joint_velocities);
 
 private:
-    std::shared_ptr<HardwareManager> hardware_manager_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_;
-    bool is_active_ = false;
-    std::string active_mapping_;
+    std::shared_ptr<HardwareManager> hardware_manager_;
+    std::string mapping_;
 };
 
 #endif      // __JOINT_VELOCITY_CONTROLLER_HPP__

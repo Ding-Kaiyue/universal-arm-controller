@@ -23,11 +23,9 @@ CartesianVelocityController::CartesianVelocityController(const rclcpp::Node::Sha
     node_->get_parameter("controllers.CartesianVelocity.base_frame", base_frame_);
     RCLCPP_INFO(node_->get_logger(), "[CartesianVelocity] Base frame: %s", base_frame_.c_str());
 
-    // 从配置读取输入话题名称
     std::string input_topic;
     node_->get_parameter("controllers.CartesianVelocity.input_topic", input_topic);
 
-    // 创建全局话题订阅（生命周期与 ControllerManagerNode 一致）
     sub_ = node_->create_subscription<geometry_msgs::msg::TwistStamped>(
         input_topic, rclcpp::QoS(10).reliable(),
         std::bind(&CartesianVelocityController::velocity_callback, this, std::placeholders::_1)
@@ -47,13 +45,7 @@ void CartesianVelocityController::start(const std::string& mapping) {
         );
     }
 
-    auto hardware_driver = hardware_manager_->get_hardware_driver();
-    if (!hardware_driver) {
-        RCLCPP_ERROR(node_->get_logger(), "Hardware driver not initialized");
-        return;
-    }
-
-    // 保存当前激活的 mapping
+    // 保存当前激活的mapping
     active_mapping_ = mapping;
     is_active_ = true;
 
@@ -82,21 +74,17 @@ void CartesianVelocityController::start(const std::string& mapping) {
             mapping.c_str(), ex.what());
         has_reference_frame_ = false;
     }
-
-    RCLCPP_INFO(node_->get_logger(), "[%s] CartesianVelocityController activated", mapping.c_str());
 }
 
 
 bool CartesianVelocityController::stop(const std::string& mapping) {
-    // 停止处理消息
     is_active_ = false;
     has_reference_frame_ = false;
-
     // 发送零速度命令停止机械臂
     auto joint_names = hardware_manager_->get_joint_names(mapping);
     if (!joint_names.empty()) {
         std::vector<double> zero_velocities(joint_names.size(), 0.0);
-        send_joint_velocities(mapping, zero_velocities);
+        send_joint_velocities(zero_velocities);
     }
 
     RCLCPP_INFO(node_->get_logger(), "[%s] CartesianVelocityController deactivated", mapping.c_str());
@@ -141,8 +129,10 @@ void CartesianVelocityController::initialize_moveit_service() {
     }
 }
 void CartesianVelocityController::velocity_callback(const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
-    // 只在激活时才处理消息
-    if (!is_active_) return;
+    if (!is_active_ || active_mapping_.empty()) {
+        RCLCPP_WARN(node_->get_logger(), "velocity_callback: not active or mapping empty. is_active=%d, mapping=%s", is_active_, active_mapping_.c_str());
+        return;
+    }
 
     auto joint_positions = hardware_manager_->get_current_joint_positions(active_mapping_);
     auto joint_names = hardware_manager_->get_joint_names(active_mapping_);
@@ -245,35 +235,34 @@ void CartesianVelocityController::velocity_callback(const geometry_msgs::msg::Tw
         active_mapping_.c_str(), v_ee(0), v_ee(1), v_ee(2), v_ee(3), v_ee(4), v_ee(5));
 
     Eigen::VectorXd qd(J.cols());
-    if (!solve_velocity_qp(active_mapping_, J, v_ee, qd, joint_names)) {
+    if (!solve_velocity_qp(J, v_ee, qd, joint_names)) {
         RCLCPP_WARN(node_->get_logger(), "[%s] ❎ Failed to solve velocity QP. Sending zero velocities to stop.", active_mapping_.c_str());
         // 发送零速度命令来停止机械臂（与工作空间边界检查逻辑一致）
         auto joint_names_list = hardware_manager_->get_joint_names(active_mapping_);
         if (!joint_names_list.empty()) {
             std::vector<double> zero_velocities(joint_names_list.size(), 0.0);
-            send_joint_velocities(active_mapping_, zero_velocities);
+            send_joint_velocities(zero_velocities);
         }
         return;
     }
 
     // 检查工作空间边界 - 如果会超出工作空间，停止运动
-    if (!check_workspace_boundary(active_mapping_, joint_positions, qd)) {
+    if (!check_workspace_boundary(joint_positions, qd)) {
         RCLCPP_WARN(node_->get_logger(), "[%s] ❎ Workspace boundary violation detected. Sending zero velocities.", active_mapping_.c_str());
         // 发送零速度命令来停止机械臂
         auto joint_names_list = hardware_manager_->get_joint_names(active_mapping_);
         if (!joint_names_list.empty()) {
             std::vector<double> zero_velocities(joint_names_list.size(), 0.0);
-            send_joint_velocities(active_mapping_, zero_velocities);
+            send_joint_velocities(zero_velocities);
         }
         return;
     }
 
     std::vector<double> velocities(qd.data(), qd.data() + qd.size());
-    send_joint_velocities(active_mapping_, velocities);
+    send_joint_velocities(velocities);
 }
 
 bool CartesianVelocityController::solve_velocity_qp(
-    const std::string& mapping,
     const Eigen::MatrixXd &J,
     const Eigen::VectorXd &v_ee,
     Eigen::VectorXd &qd_solution,
@@ -317,7 +306,7 @@ bool CartesianVelocityController::solve_velocity_qp(
         cond > CONDITION_NUMBER_THRESHOLD) {
         RCLCPP_WARN(node_->get_logger(),
             "[%s] ❎ Direction not geometrically feasible (feasibility=%.3f, residual=%.3f, cond=%.3g). Stopping motion.",
-            mapping.c_str(), feasibility_ratio, residual_norm, cond);
+            active_mapping_.c_str(), feasibility_ratio, residual_norm, cond);
         qd_solution = Eigen::VectorXd::Zero(dof);
         return true;  // 返回 true 表示"安全地停止了"
     }
@@ -430,19 +419,19 @@ bool CartesianVelocityController::solve_velocity_qp(
         !solver.data()->setLinearConstraintsMatrix(A_sparse) ||
         !solver.data()->setLowerBound(lb) ||
         !solver.data()->setUpperBound(ub)) {
-        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ QP setup failed", mapping.c_str());
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ QP setup failed", active_mapping_.c_str());
         return false;
     }
 
     if (!solver.initSolver()) {
-        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ QP init failed", mapping.c_str());
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ QP init failed", active_mapping_.c_str());
         return false;
     }
 
     auto exitflag = solver.solveProblem();
     if (exitflag != OsqpEigen::ErrorExitFlag::NoError) {
         RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️ QP failed (flag=%d). Trying geometric scaling fallback...",
-            mapping.c_str(), static_cast<int>(exitflag));
+            active_mapping_.c_str(), static_cast<int>(exitflag));
 
         // Fallback: geometric scaling of v_ee (direction preserved)
         // Try scaling velocity by 0.9^(iter+1) to make velocity constraint less aggressive
@@ -469,13 +458,13 @@ bool CartesianVelocityController::solve_velocity_qp(
             if (exitflag == OsqpEigen::ErrorExitFlag::NoError) {
                 solved = true;
                 RCLCPP_INFO(node_->get_logger(), "[%s] Fallback solved at iter=%d, scale=%.3f",
-                    mapping.c_str(), iter, std::pow(scale, iter + 1));
+                    active_mapping_.c_str(), iter, std::pow(scale, iter + 1));
                 break;
             }
         }
 
         if (!solved) {
-            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Fallback scaling also failed", mapping.c_str());
+            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Fallback scaling also failed", active_mapping_.c_str());
             return false;
         }
     }
@@ -506,14 +495,14 @@ bool CartesianVelocityController::solve_velocity_qp(
                 v_actual *= velocity_scale;
                 RCLCPP_DEBUG(node_->get_logger(),
                     "[%s] Velocity rescaled: %.3f → %.3f (direction preserved)",
-                    mapping.c_str(), 1.0 / velocity_scale, 1.0);
+                    active_mapping_.c_str(), 1.0 / velocity_scale, 1.0);
             }
         }
     }
 
     RCLCPP_DEBUG(node_->get_logger(),
         "[%s] s=%.4f, ||Jq̇||=%.6f, dir_err=%.6f, feasibility=%.3f, cond=%.3g",
-        mapping.c_str(), s_opt, v_actual_norm, dir_err, feasibility_ratio, cond);
+        active_mapping_.c_str(), s_opt, v_actual_norm, dir_err, feasibility_ratio, cond);
 
     // Final safety check: if direction misalignment exceeds threshold, force stop
     // ========== 后置方向一致性验证（第3层防护）==========
@@ -539,7 +528,7 @@ bool CartesianVelocityController::solve_velocity_qp(
     //   - 安全裕度：足以检测出实质的轨迹偏离
     //   - 工业标准：大多数应用使用 3~10° 范围
 
-    if (!post_verify_direction(mapping, J, qd_solution, v_ee, ALLOWED_ANGLE_DEG)) {
+    if (!post_verify_direction(J, qd_solution, v_ee, ALLOWED_ANGLE_DEG)) {
         // Direction drifted too much (>5°), force stop to prevent corrupted motion
         qd_solution = Eigen::VectorXd::Zero(dof);
     }
@@ -548,7 +537,7 @@ bool CartesianVelocityController::solve_velocity_qp(
 }
 
 
-bool CartesianVelocityController::send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities) {
+bool CartesianVelocityController::send_joint_velocities(const std::vector<double>& joint_velocities) {
 
     if (!hardware_manager_) {
         RCLCPP_ERROR(node_->get_logger(), "❎ Hardware manager not initialized");
@@ -561,8 +550,8 @@ bool CartesianVelocityController::send_joint_velocities(const std::string& mappi
         return false;
     }
 
-    const std::string& interface = hardware_manager_->get_interface(mapping);
-    const std::vector<uint32_t>& motor_ids = hardware_manager_->get_motors_id(mapping);
+    const std::string& interface = hardware_manager_->get_interface(active_mapping_);
+    const std::vector<uint32_t>& motor_ids = hardware_manager_->get_motors_id(active_mapping_);
 
 
     for (size_t i = 0; i < motor_ids.size(); ++i) {
@@ -605,7 +594,6 @@ void CartesianVelocityController::check_direction_feasibility(
 
 // ==================== 方向一致性验证（后置） ====================
 bool CartesianVelocityController::post_verify_direction(
-    const std::string& mapping,
     const Eigen::MatrixXd &J,
     const Eigen::VectorXd &qd_solution,
     const Eigen::VectorXd &v_ee,
@@ -627,7 +615,7 @@ bool CartesianVelocityController::post_verify_direction(
     if (cos_val < cos_thresh) {
         RCLCPP_WARN(node_->get_logger(),
             "[%s] ❗ Direction mismatch after QP: cos=%.6f < %.6f (angle=%.2f°). Stopping motion.",
-            mapping.c_str(), cos_val, cos_thresh,
+            active_mapping_.c_str(), cos_val, cos_thresh,
             std::acos(std::min(1.0, std::max(-1.0, cos_val))) * 180.0 / M_PI);
         return false;  // 方向偏离过大，不允许运动
     }
@@ -636,7 +624,6 @@ bool CartesianVelocityController::post_verify_direction(
 }
 
 bool CartesianVelocityController::check_workspace_boundary(
-    const std::string& mapping,
     const std::vector<double>& joint_positions,
     const Eigen::VectorXd& qd_command,
     double dt)
@@ -649,7 +636,7 @@ bool CartesianVelocityController::check_workspace_boundary(
 
     // 检查预测的关节位置是否在关节限制范围内
     // 关键：只阻止进一步违反限制的运动，但允许离开限制的运动（恢复）
-    auto joint_names = hardware_manager_->get_joint_names(mapping);
+    auto joint_names = hardware_manager_->get_joint_names(active_mapping_);
     bool would_violate_limits = false;
 
     for (size_t i = 0; i < q_next_vec.size() && i < joint_names.size(); ++i) {
@@ -671,7 +658,7 @@ bool CartesianVelocityController::check_workspace_boundary(
                 (current_exceeds_max && next_exceeds_max && q_next_vec[i] > joint_positions[i])) {
                 RCLCPP_WARN(node_->get_logger(),
                     "[%s] ⚠️ Joint '%s' out of limits, motion blocked: curr=%.4f, cmd=%.4f (limits: [%.4f, %.4f])",
-                    mapping.c_str(), joint_names[i].c_str(),
+                    active_mapping_.c_str(), joint_names[i].c_str(),
                     joint_positions[i], q_next_vec[i], limits.min_position, limits.max_position);
                 would_violate_limits = true;
                 break;
@@ -682,7 +669,7 @@ bool CartesianVelocityController::check_workspace_boundary(
                 (next_exceeds_min || next_exceeds_max)) {
                 RCLCPP_WARN(node_->get_logger(),
                     "[%s] ⚠️ Joint '%s' would exceed limits: curr=%.4f, cmd=%.4f (limits: [%.4f, %.4f])",
-                    mapping.c_str(), joint_names[i].c_str(),
+                    active_mapping_.c_str(), joint_names[i].c_str(),
                     joint_positions[i], q_next_vec[i], limits.min_position, limits.max_position);
                 would_violate_limits = true;
                 break;
@@ -693,7 +680,7 @@ bool CartesianVelocityController::check_workspace_boundary(
                 (current_exceeds_max && !next_exceeds_max)) {
                 RCLCPP_DEBUG(node_->get_logger(),
                     "[%s] Joint '%s' recovering from limit violation: %.4f → %.4f",
-                    mapping.c_str(), joint_names[i].c_str(),
+                    active_mapping_.c_str(), joint_names[i].c_str(),
                     joint_positions[i], q_next_vec[i]);
             }
         }
@@ -701,7 +688,7 @@ bool CartesianVelocityController::check_workspace_boundary(
 
     if (would_violate_limits) {
         RCLCPP_DEBUG(node_->get_logger(),
-            "[%s] Joint limit violation detected. Motion blocked.", mapping.c_str());
+            "[%s] Joint limit violation detected. Motion blocked.", active_mapping_.c_str());
         return false;  // 停止运动
     }
 

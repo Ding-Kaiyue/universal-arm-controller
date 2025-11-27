@@ -72,6 +72,7 @@ private:
     // 成员变量
     std::map<std::string, std::shared_ptr<ModeControllerBase>> controller_map_;
     std::map<std::string, std::string> mapping_to_mode_;  // 每个 mapping 的当前模式
+    std::string current_mode_;  // 当前全局模式
     std::string target_mode_;
     bool in_hook_state_;
     bool emergency_stop_active_;

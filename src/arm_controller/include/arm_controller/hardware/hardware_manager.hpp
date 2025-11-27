@@ -71,14 +71,11 @@ public:
 
     // ============= 关节状态获取和控制 =============
     std::vector<double> get_current_joint_positions(const std::string& mapping) const;
-    bool send_hold_state_command(const std::string& mapping, const std::vector<double>& positions);
+    bool send_hold_position_command(const std::string& mapping, const std::vector<double>& positions);
+    bool send_hold_velocity_command(const std::string& mapping);  // 发送零速度命令保持位置
 
     // ============= 轨迹执行接口 =============
     bool executeTrajectory(const std::string& interface, const trajectory_interpolator::Trajectory& trajectory);
-
-    // ============= 电机使能/失能接口 =============
-    bool enable_motors(const std::string& mapping, uint8_t mode);
-    bool disable_motors(const std::string& mapping, uint8_t mode);
 
     // ============= MotorStatusObserver接口实现 =============
     void on_motor_status_update(const std::string& interface,

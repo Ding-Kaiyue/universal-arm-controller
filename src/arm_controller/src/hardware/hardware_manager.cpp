@@ -1,5 +1,6 @@
 #include "arm_controller/hardware/hardware_manager.hpp"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 
@@ -258,7 +259,7 @@ std::vector<double> HardwareManager::get_current_joint_positions(const std::stri
     return std::vector<double>{};
 }
 
-bool HardwareManager::send_hold_state_command(const std::string& mapping,
+bool HardwareManager::send_hold_position_command(const std::string& mapping,
                                                   const std::vector<double>& positions) {
     if (!hardware_driver_) {
         RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
@@ -273,31 +274,27 @@ bool HardwareManager::send_hold_state_command(const std::string& mapping,
         return false;
     }
 
-    // 检查关节数量，最多支持6个关节
-    if (positions.size() > 6) {
+    // 检查输入位置是否有效
+    if (positions.empty()) {
         RCLCPP_ERROR(node_->get_logger(),
-                    "[%s] ❎ Too many joints (%zu), maximum is 6",
-                    mapping.c_str(), positions.size());
+                    "[%s] ❎ Cannot send hold position command: empty positions vector",
+                    mapping.c_str());
         return false;
     }
 
-    // 使用MIT模式发送位置保持命令
-    // 位置模式参数: kp=0.05, kd=0.005, effort=0
-    std::array<double, 6> positions_deg = {};
-    std::array<double, 6> velocities_deg = {};
-    std::array<double, 6> efforts = {};
-    std::array<double, 6> kps = {};
-    std::array<double, 6> kds = {};
-
-    for (size_t i = 0; i < positions.size(); ++i) {
+    // 使用实时位置控制接口发送保持命令 - 转换为 std::array<double, 6>
+    std::array<double, 6> positions_deg{};
+    for (size_t i = 0; i < std::min(positions.size(), size_t(6)); ++i) {
         positions_deg[i] = positions[i] * 180.0 / M_PI;
-        velocities_deg[i] = 0.0;  // 零速度
-        efforts[i] = 0.0;          // 零力矩
-        kps[i] = 0.05;             // 位置模式参数
-        kds[i] = 0.005;            // 位置模式参数
     }
 
-    bool success = hardware_driver_->send_realtime_mit_command(interface, positions_deg, velocities_deg, efforts, kps, kds);
+    RCLCPP_DEBUG(node_->get_logger(),
+                "[%s] Sending hold position (deg): [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+                mapping.c_str(),
+                positions_deg[0], positions_deg[1], positions_deg[2],
+                positions_deg[3], positions_deg[4], positions_deg[5]);
+
+    bool success = hardware_driver_->send_realtime_position_command(interface, positions_deg);
 
     if (!success) {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
@@ -308,6 +305,34 @@ bool HardwareManager::send_hold_state_command(const std::string& mapping,
     return success;
 }
 
+bool HardwareManager::send_hold_velocity_command(const std::string& mapping) {
+    if (!hardware_driver_) {
+        RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+        return false;
+    }
+
+    const std::string& interface = get_interface(mapping);
+    if (interface.empty() || interface == "unknown_interface") {
+        RCLCPP_ERROR(node_->get_logger(),
+                    "[%s] ❎ Invalid interface for sending hold velocity command",
+                    mapping.c_str());
+        return false;
+    }
+
+    // 创建零速度数组
+    std::array<double, 6> zero_velocities{};
+
+    // 使用实时速度控制接口发送零速度命令
+    bool success = hardware_driver_->send_realtime_velocity_command(interface, zero_velocities);
+
+    if (!success) {
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+                            "[%s] ❎ Failed to send hold velocity command",
+                            mapping.c_str());
+    }
+
+    return success;
+}
 
 void HardwareManager::on_motor_status_update(const std::string& interface,
                                             uint32_t motor_id,
@@ -355,14 +380,15 @@ void HardwareManager::update_joint_state(const std::string& interface, uint32_t 
         return;
     }
 
-    // 转换单位：度数 → 弧度 (硬件返回度数，ROS需要弧度)
-    double pos_rad = status.position * M_PI / 180.0;
-    mapping_joint_states_[mapping].position[local_index] = pos_rad;
-    mapping_joint_states_[mapping].velocity[local_index] = status.velocity * M_PI / 180.0;
-    mapping_joint_states_[mapping].effort[local_index] = status.effort;
+    // 更新该mapping的关节状态
+    sensor_msgs::msg::JointState& joint_state = joint_state_it->second;
+    joint_state.header.stamp = node_->now();
 
-    // 更新时间戳
-    mapping_joint_states_[mapping].header.stamp = node_->now();
+    // 转换单位：度数 → 弧度 (硬件返回度数，ROS需要弧度)
+    joint_state.position[local_index] = status.position * M_PI / 180.0;
+    joint_state.velocity[local_index] = status.velocity * M_PI / 180.0;
+    joint_state.effort[local_index] = status.effort;
+
     // 记录最新温度用于调试
     std::string motor_key = mapping + "_motor" + std::to_string(motor_id);
     motor_temperatures_[motor_key] = status.temperature;
@@ -774,60 +800,4 @@ void HardwareManager::reset_system_health(const std::string& mapping) {
 
 void HardwareManager::clear_emergency_stops(const std::string& mapping) {
     joint_emergency_stop_[mapping] = false;
-}
-
-bool HardwareManager::enable_motors(const std::string& mapping, uint8_t mode) {
-    if (!hardware_driver_) {
-        RCLCPP_ERROR(node_->get_logger(), "Hardware driver not initialized");
-        return false;
-    }
-
-    try {
-        const std::string& interface = get_interface(mapping);
-        const std::vector<uint32_t>& motor_ids = get_motors_id(mapping);
-
-        // 检查mapping是否有效
-        if (interface.empty() || motor_ids.empty()) {
-            RCLCPP_ERROR(node_->get_logger(), "❎ Mapping '%s' not found in configuration", mapping.c_str());
-            return false;
-        }
-
-        hardware_driver_->enable_motors(interface, motor_ids, mode);
-
-        // 重置系统安全状态
-        clear_emergency_stops(mapping);
-        reset_system_health(mapping);
-
-        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ All motors enabled successfully (mode: %u)", mapping.c_str(), mode);
-        return true;
-    } catch (const std::exception& e) {
-        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to enable motors: %s", mapping.c_str(), e.what());
-        return false;
-    }
-}
-
-bool HardwareManager::disable_motors(const std::string& mapping, uint8_t mode) {
-    if (!hardware_driver_) {
-        RCLCPP_ERROR(node_->get_logger(), "Hardware driver not initialized");
-        return false;
-    }
-
-    try {
-        const std::string& interface = get_interface(mapping);
-        const std::vector<uint32_t>& motor_ids = get_motors_id(mapping);
-
-        // 检查mapping是否有效
-        if (interface.empty() || motor_ids.empty()) {
-            RCLCPP_ERROR(node_->get_logger(), "❎ Mapping '%s' not found in configuration", mapping.c_str());
-            return false;
-        }
-
-        hardware_driver_->disable_motors(interface, motor_ids, mode);
-
-        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ All motors disabled successfully (mode: %u)", mapping.c_str(), mode);
-        return true;
-    } catch (const std::exception& e) {
-        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to disable motors: %s", mapping.c_str(), e.what());
-        return false;
-    }
 }

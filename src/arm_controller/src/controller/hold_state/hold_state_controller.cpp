@@ -24,7 +24,7 @@ void HoldStateController::start(const std::string& mapping) {
             auto& ctx = mapping_contexts_[normalized_mapping];
             ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
             if (!ctx.hold_positions.empty()) {
-                hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
+                hardware_manager_->send_hold_position_command(normalized_mapping, ctx.hold_positions);
                 RCLCPP_INFO(node_->get_logger(), "[%s] Updated hold position to current position",
                            normalized_mapping.c_str());
             }
@@ -36,27 +36,35 @@ void HoldStateController::start(const std::string& mapping) {
     ctx.transition_ready = true;
     ctx.system_health_check_paused = false;
 
-    // ========== 关键：获取当前位置并维持状态 ==========
+    // ========== 关键：根据前一个模式选择保持策略 ==========
     if (hardware_manager_) {
-        // 添加延迟，等待最新的电机状态更新到达
-        // 这是必要的，因为 mapping_joint_states_ 需要时间被最新的电机反馈填充
-        // 特别是在轨迹执行完成后切换到 HoldState 时
-        //std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        // 判断前一个模式是否为速度控制模式
+        bool is_velocity_mode = (previous_mode_ == "JointVelocity" ||
+                                 previous_mode_ == "ServoMode" ||
+                                 previous_mode_.find("Velocity") != std::string::npos);
 
-        // 获取当前关节位置作为保持目标
-        ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
-
-        if (!ctx.hold_positions.empty()) {
+        if (is_velocity_mode) {
+            // 速度模式：发送零速度命令保持
             RCLCPP_INFO(node_->get_logger(),
-                       "[%s] HoldState using MIT mode to hold current state with %zu joints (previous mode: %s)",
-                       normalized_mapping.c_str(), ctx.hold_positions.size(), previous_mode_.c_str());
-
-            // 立即发送一次保持状态命令（MIT模式，维持当前位置，速度为0）
-            hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
+                       "[%s] HoldState using velocity hold strategy (previous mode: %s)",
+                       normalized_mapping.c_str(), previous_mode_.c_str());
+            hardware_manager_->send_hold_velocity_command(normalized_mapping);
         } else {
-            RCLCPP_WARN(node_->get_logger(),
-                       "[%s] Failed to get current joint positions for hold state",
-                       normalized_mapping.c_str());
+            // 位置模式：锁定当前位置
+            ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
+
+            if (!ctx.hold_positions.empty()) {
+                RCLCPP_INFO(node_->get_logger(),
+                           "[%s] HoldState using position hold strategy with %zu joints (previous mode: %s)",
+                           normalized_mapping.c_str(), ctx.hold_positions.size(), previous_mode_.c_str());
+
+                // 立即发送一次保持位置命令
+                hardware_manager_->send_hold_position_command(normalized_mapping, ctx.hold_positions);
+            } else {
+                RCLCPP_WARN(node_->get_logger(),
+                           "[%s] Failed to get current joint positions for hold state",
+                           normalized_mapping.c_str());
+            }
         }
     }
     // =======================================================
@@ -66,7 +74,7 @@ void HoldStateController::start(const std::string& mapping) {
         hardware_manager_->reset_system_health(normalized_mapping);
     }
 
-    // // 为该 mapping 创建定时器（捕获 mapping 的副本）
+    // 为该 mapping 创建定时器（捕获 mapping 的副本）
     ctx.safety_timer = node_->create_wall_timer(
         std::chrono::milliseconds(100),
         [this, normalized_mapping]() { this->safety_check_timer_callback(normalized_mapping); }
@@ -183,11 +191,19 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
         return;
     }
 
-    // ========== 持续发送保持命令 ==========
+    // ========== 持续发送保持命令（根据前一个模式选择策略） ==========
     if (hardware_manager_) {
-        // 持续发送保持状态命令（MIT模式，维持当前位置，速度为0）
-        if (!ctx.hold_positions.empty()) {
-            hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
+        // 判断前一个模式是否为速度控制模式
+        bool is_velocity_mode = (previous_mode_ == "JointVelocity" ||
+                                 previous_mode_ == "CartesianVelocity" ||
+                                 previous_mode_.find("Velocity") != std::string::npos);
+
+        if (is_velocity_mode) {
+            // 速度模式：持续发送零速度命令
+            hardware_manager_->send_hold_velocity_command(normalized_mapping);
+        } else if (!ctx.hold_positions.empty()) {
+            // 位置模式：持续发送锁定的目标位置
+            hardware_manager_->send_hold_position_command(normalized_mapping, ctx.hold_positions);
         }
     }
     // ===========================================================

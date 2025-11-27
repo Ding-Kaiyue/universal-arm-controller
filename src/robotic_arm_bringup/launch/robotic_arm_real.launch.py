@@ -16,7 +16,7 @@ def generate_launch_description():
     # 所有配置都从hardware_config.yaml中的mapping配置读取，不再依赖ROS参数
     arm_controller_node = Node(
         package='arm_controller',
-        executable='universal_arm_controller_node',  # 合并后的main函数
+        executable='universial_arm_controller_node',  # 合并后的main函数
         name='arm_controller',
         output='screen',
         parameters=[{
