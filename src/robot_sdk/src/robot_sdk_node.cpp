@@ -83,13 +83,12 @@ private:
 
         pid_t pid = fork();
         if (pid == 0) {
-            // 子进程：使用 launch 文件启动重力补偿节点（需要传递 URDF 文件）
-            // 使用环境变量或默认路径
+            // 子进程：使用 bash -c 来启动，确保环境变量正确
             const char* urdf_path = "/home/w/work/robotic_arm_ws/install/robot_description/share/robot_description/urdf/arm380.urdf";
-            std::string urdf_arg = std::string("urdf_file:=") + urdf_path;
+            std::string cmd = "source /home/w/work/robotic_arm_ws/install/setup.bash && "
+                              "ros2 launch robot_dynamics gravity_compensator.launch.py urdf_file:=" + std::string(urdf_path);
 
-            execlp("ros2", "ros2", "launch", "robot_dynamics", "gravity_compensator.launch.py",
-                   urdf_arg.c_str(), nullptr);
+            execlp("bash", "bash", "-c", cmd.c_str(), nullptr);
             // 如果exec失败
             _exit(1);
         } else if (pid > 0) {

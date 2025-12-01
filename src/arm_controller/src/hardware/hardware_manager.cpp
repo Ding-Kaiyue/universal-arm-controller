@@ -274,27 +274,31 @@ bool HardwareManager::send_hold_position_command(const std::string& mapping,
         return false;
     }
 
-    // 检查输入位置是否有效
-    if (positions.empty()) {
+    // 检查关节数量，最多支持6个关节
+    if (positions.size() > 6) {
         RCLCPP_ERROR(node_->get_logger(),
-                    "[%s] ❎ Cannot send hold position command: empty positions vector",
-                    mapping.c_str());
+                    "[%s] ❎ Too many joints (%zu), maximum is 6",
+                    mapping.c_str(), positions.size());
         return false;
     }
 
-    // 使用实时位置控制接口发送保持命令 - 转换为 std::array<double, 6>
-    std::array<double, 6> positions_deg{};
-    for (size_t i = 0; i < std::min(positions.size(), size_t(6)); ++i) {
+    // 使用MIT模式发送位置保持命令
+    // 位置模式参数: kp=0.05, kd=0.005, effort=0
+    std::array<double, 6> positions_deg = {};
+    std::array<double, 6> velocities_deg = {};
+    std::array<double, 6> efforts = {};
+    std::array<double, 6> kps = {};
+    std::array<double, 6> kds = {};
+
+    for (size_t i = 0; i < positions.size(); ++i) {
         positions_deg[i] = positions[i] * 180.0 / M_PI;
+        velocities_deg[i] = 0.0;
+        efforts[i] = 0.0;
+        kps[i] = 0.05;
+        kds[i] = 0.005;
     }
 
-    RCLCPP_DEBUG(node_->get_logger(),
-                "[%s] Sending hold position (deg): [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
-                mapping.c_str(),
-                positions_deg[0], positions_deg[1], positions_deg[2],
-                positions_deg[3], positions_deg[4], positions_deg[5]);
-
-    bool success = hardware_driver_->send_realtime_position_command(interface, positions_deg);
+    bool success = hardware_driver_->send_realtime_mit_command(interface, positions_deg, velocities_deg, efforts, kps, kds);
 
     if (!success) {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
