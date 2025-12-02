@@ -24,6 +24,14 @@ def generate_launch_description():
         }]
     )
 
+    # SDK节点 - 提供示教/复现等高级功能，支持按键控制
+    robot_sdk_node = Node(
+        package='robot_sdk',
+        executable='robot_sdk_node',
+        name='robot_sdk',
+        output='screen',
+    )
+
     # 包含trajectory planning launch - 只启动robot_description和MoveIt组件
     trajectory_planning_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
@@ -38,6 +46,9 @@ def generate_launch_description():
     return LaunchDescription([
         # 主控制器节点（合并后的controller_manager + trajectory_controller）
         arm_controller_node,
+
+        # SDK节点（示教/复现/按键控制）
+        robot_sdk_node,
 
         # MoveIt和robot_description组件
         trajectory_planning_launch,

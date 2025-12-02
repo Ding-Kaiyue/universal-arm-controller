@@ -13,8 +13,14 @@
 #include <std_msgs/msg/string.hpp>
 #include "arm_controller/controller_base/mode_controller_base.hpp"
 #include "arm_controller/hardware/hardware_manager.hpp"
+#include "hardware_driver/driver/button_driver_interface.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <yaml-cpp/yaml.h>
+
+// 前向声明
+namespace arm_controller {
+    class ButtonEventHandler;
+}
 
 class ControllerManagerNode : public rclcpp::Node {
 public:
@@ -69,6 +75,9 @@ private:
     void init_action_event_listener();
     void handle_action_event(const std_msgs::msg::String::SharedPtr msg);
 
+    // 按键事件处理
+    void init_button_handler();
+
     // 成员变量
     std::map<std::string, std::shared_ptr<ModeControllerBase>> controller_map_;
     std::map<std::string, std::string> mapping_to_mode_;  // 每个 mapping 的当前模式
@@ -99,8 +108,14 @@ private:
     // 动作事件监听器
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr action_event_subscriber_;
 
+    // 轨迹复现状态订阅者（用于检测复现完成并发送FXJS信号）
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr replay_status_subscriber_;
+
     // 硬件管理
     std::shared_ptr<HardwareManager> hardware_manager_;
+
+    // 按键事件处理器
+    std::shared_ptr<arm_controller::ButtonEventHandler> button_handler_;
 
     // [已弃用] 话题订阅管理 - 现在由各控制器在构造函数中管理生命周期
     // std::map<std::pair<std::string, std::string>, rclcpp::SubscriptionBase::SharedPtr> controller_subscriptions_;

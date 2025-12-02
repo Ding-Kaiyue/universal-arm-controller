@@ -1,6 +1,8 @@
 #include "trajectory_record_controller.hpp"
 #include "controller_interface.hpp"
 #include <filesystem>
+#include <thread>
+#include <chrono>
 
 TrajectoryRecordController::TrajectoryRecordController(const rclcpp::Node::SharedPtr & node)
     : RecordControllerBase("TrajectoryRecord", node)
@@ -82,21 +84,22 @@ bool TrajectoryRecordController::stop(const std::string& mapping) {
 }
 
 void TrajectoryRecordController::joint_states_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
-    if (!is_active_) return;
-
     // 验证关节状态数据
     if (msg->effort.size() < 6 || msg->position.size() < 6) {
-        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-            "JointState data incomplete! Expected 6, got effort: %zu, position: %zu",
-            msg->effort.size(), msg->position.size());
+        if (is_active_) {
+            RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
+                "JointState data incomplete! Expected 6, got effort: %zu, position: %zu",
+                msg->effort.size(), msg->position.size());
+        }
         return;
     }
 
-    // 缓存最新的关节状态
+    // 始终缓存最新的关节状态（不管控制器是否激活）
+    // 这样在控制器激活时就已经有数据可用，避免等待超时
     latest_joint_states_ = msg;
 
-    // 如果正在录制，将消息加入队列
-    if (recorder_->isRecording()) {
+    // 只有在控制器激活且正在录制时，才将消息加入队列
+    if (is_active_ && recorder_->isRecording()) {
         recorder_->enqueue(latest_joint_states_);
     }
 }
@@ -122,6 +125,14 @@ void TrajectoryRecordController::trajectory_record_callback(const std_msgs::msg:
     }
 
     // 使用给定的文件名开始录制
+    // 如果还没有关节状态数据，等待最多2秒
+    if (!latest_joint_states_) {
+        RCLCPP_INFO(node_->get_logger(), "Waiting for joint states data...");
+        for (int i = 0; i < 20 && !latest_joint_states_ && is_active_; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
     if (!recorder_->isRecording() && latest_joint_states_) {
         std::string file_path = record_output_dir_ + "/" + msg->data + ".txt";
 
@@ -138,7 +149,7 @@ void TrajectoryRecordController::trajectory_record_callback(const std_msgs::msg:
     } else if (recorder_->isRecording()) {
         RCLCPP_WARN(node_->get_logger(), "Already recording! Stop current recording first.");
     } else {
-        RCLCPP_WARN(node_->get_logger(), "No joint states available yet. Wait for data.");
+        RCLCPP_WARN(node_->get_logger(), "No joint states available after waiting. Check /joint_states topic.");
     }
 }
 

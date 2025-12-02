@@ -5,6 +5,7 @@
 #include "controller_base/velocity_controller_base.hpp"
 #include "controller/controller_registry.hpp"
 #include "controller_interface.hpp"
+#include "button/button_event_handler.hpp"
 // #include "controller/move2start/move2start_controller.hpp"
 // #include "controller/move2initial/move2initial_controller.hpp"
 
@@ -30,10 +31,14 @@ void ControllerManagerNode::post_init() {
     init_hardware();
     init_commons();
     init_action_event_listener();
+    init_button_handler();  // 初始化按键处理器
     init_controllers();
 
-    // 启动默认控制器
-    start_working_controller("HoldState");
+    // 先启动 SystemStart 控制器使能电机（使用默认 mapping）
+    start_working_controller("SystemStart", "single_arm");
+
+    // 然后切换到 HoldState 保持当前位置
+    start_working_controller("HoldState", "single_arm");
 
     RCLCPP_INFO(this->get_logger(), "Controller Manager Node post-initialization complete");
 }
@@ -431,6 +436,38 @@ void ControllerManagerNode::init_action_event_listener() {
         std::bind(&ControllerManagerNode::handle_action_event, this, std::placeholders::_1));
 
     RCLCPP_INFO(this->get_logger(), "Action event listener initialized");
+}
+
+void ControllerManagerNode::init_button_handler() {
+    // 创建按键事件处理器
+    button_handler_ = std::make_shared<arm_controller::ButtonEventHandler>(this->shared_from_this());
+
+    // 设置复现完成回调 - 发送FXJS信号让LED熄灭
+    button_handler_->set_replay_complete_callback([this](const std::string& interface) {
+        if (hardware_manager_ && hardware_manager_->get_hardware_driver()) {
+            hardware_manager_->get_hardware_driver()->send_button_replay_complete(interface);
+            RCLCPP_INFO(this->get_logger(), "发送复现完成信号 (FXJS) 到 %s", interface.c_str());
+        }
+    });
+
+    // 将按键处理器注册为硬件按键观察者
+    if (hardware_manager_ && hardware_manager_->get_hardware_driver()) {
+        hardware_manager_->get_hardware_driver()->add_button_observer(button_handler_);
+        RCLCPP_INFO(this->get_logger(), "按键事件处理器初始化完成");
+    } else {
+        RCLCPP_WARN(this->get_logger(), "硬件驱动未就绪，按键处理器注册延迟");
+    }
+
+    // 订阅轨迹复现状态，检测复现完成并通知按键处理器
+    replay_status_subscriber_ = this->create_subscription<std_msgs::msg::String>(
+        "/controller_api/trajectory_replay_status", 10,
+        [this](const std_msgs::msg::String::SharedPtr msg) {
+            if (msg->data == "completed" && button_handler_) {
+                // 复现完成，通知按键处理器发送FXJS信号
+                button_handler_->notify_replay_complete(button_handler_->get_last_interface());
+                RCLCPP_INFO(this->get_logger(), "轨迹复现完成，通知按键处理器");
+            }
+        });
 }
 
 void ControllerManagerNode::handle_action_event(const std_msgs::msg::String::SharedPtr msg) {

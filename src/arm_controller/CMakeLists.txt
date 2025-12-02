@@ -51,6 +51,7 @@ find_package(Eigen3 REQUIRED)
 find_package(OsqpEigen REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(robot_sdk REQUIRED)
 
 
 include_directories(
@@ -101,6 +102,7 @@ add_library(arm_controller_lib
   src/controller/trajectory_record/trajectory_record_interface.cpp
   src/controller/trajectory_replay/trajectory_replay_controller.cpp
   src/controller/trajectory_replay/trajectory_replay_interface.cpp
+  src/button/button_event_handler.cpp
 )
 
 # target_link_libraries(robot_controller_lib
@@ -129,6 +131,7 @@ ament_target_dependencies(arm_controller_lib
   OsqpEigen
   tf2_ros
   tf2_geometry_msgs
+  robot_sdk
 )
 
 # 链接硬件驱动库和 osqp 到库

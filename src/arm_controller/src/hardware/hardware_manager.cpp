@@ -38,6 +38,11 @@ bool HardwareManager::initialize(rclcpp::Node::SharedPtr node) {
         hardware_driver_ = std::make_shared<RobotHardware>(motor_driver, interface_motor_config,
                                                           shared_from_this());
 
+        // 初始化按键驱动 (不需要独立的总线，通过motor_driver转发数据包)
+        auto button_driver = hardware_driver::createCanFdButtonDriver(nullptr);
+        hardware_driver_->set_button_driver(button_driver);
+        RCLCPP_INFO(node_->get_logger(), "按键驱动初始化完成");
+
         // 创建关节状态发布器
         joint_state_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(
             "/joint_states", 10);
