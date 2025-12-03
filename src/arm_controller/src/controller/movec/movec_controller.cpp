@@ -232,30 +232,27 @@ bool MoveCController::move(const std::string& mapping, const std::vector<double>
         return false;
     }
 
-    // 获取期望的关节数
-    int expected_joint_count = hardware_manager_->get_joint_count(mapping);
-
     // MoveC 参数为 PoseArray：多个 Pose，每个 Pose 占 7 个数值（x,y,z,qx,qy,qz,qw）
     // 参数长度应该是 7 的倍数，不足则填充，过多则截取
     std::vector<double> pose_params = parameters;
-    int num_poses = (pose_params.size() + 6) / 7;  // 向上取整
-    int expected_size = num_poses * 7;
+    size_t num_poses = (pose_params.size() + 6) / 7;  // 向上取整
+    size_t expected_size = num_poses * 7;
 
     if (pose_params.size() < expected_size) {
         pose_params.resize(expected_size, 0.0);
-        RCLCPP_WARN(node_->get_logger(), "[%s] MoveC: Parameters padded to %d poses (%zu values)",
+        RCLCPP_WARN(node_->get_logger(), "[%s] MoveC: Parameters padded to %zu poses (%zu values)",
                    mapping.c_str(), num_poses, pose_params.size());
     } else if (pose_params.size() > expected_size) {
         pose_params.resize(expected_size);
-        RCLCPP_WARN(node_->get_logger(), "[%s] MoveC: Parameters truncated to %d poses (%zu values)",
+        RCLCPP_WARN(node_->get_logger(), "[%s] MoveC: Parameters truncated to %zu poses (%zu values)",
                    mapping.c_str(), num_poses, pose_params.size());
     }
 
     // 构建 PoseArray 消息
     auto pose_array = std::make_shared<geometry_msgs::msg::PoseArray>();
-    for (int i = 0; i < num_poses; ++i) {
+    for (size_t i = 0; i < num_poses; ++i) {
         geometry_msgs::msg::Pose pose;
-        int offset = i * 7;
+        size_t offset = i * 7;
 
         // 位置 (x, y, z)
         pose.position.x = pose_params[offset + 0];

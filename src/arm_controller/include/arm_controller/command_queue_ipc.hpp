@@ -175,6 +175,69 @@ public:
         }
     }
 
+    // 带过滤的 pop 方法：只返回指定模式的命令
+    // 不匹配的命令会被保留在队列中，等待对应的 controller 处理
+    // 只有队列为空时才等待新命令；如果队列有命令但都不匹配则立即返回 false
+    bool popWithFilter(TrajectoryCommandIPC& cmd, const std::string& target_mode, int timeout_ms = 1000) {
+        try {
+            if (!shm_manager_ || !shm_manager_->isValid()) {
+                if (!open()) {
+                    return false;
+                }
+            }
+
+            auto queue = shm_manager_->getQueue();
+            auto mutex = shm_manager_->getMutex();
+            auto cond = shm_manager_->getCondition();
+
+            if (!queue || !mutex || !cond) {
+                return false;
+            }
+
+            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
+
+            // 第一步：查找队列中已有的匹配命令（保持顺序）
+            for (auto it = queue->begin(); it != queue->end(); ++it) {
+                if (it->get_mode() == target_mode) {
+                    cmd.set_mode(it->get_mode());
+                    cmd.set_mapping(it->get_mapping());
+                    cmd.set_command_id(it->get_command_id());
+                    cmd.set_parameters(it->get_parameters());
+                    queue->erase(it);
+                    return true;
+                }
+            }
+
+            // 第二步：队列为空时，才等待新命令到来
+            if (queue->empty()) {
+                int wait_time = timeout_ms > 0 ? timeout_ms : 5000;
+                auto deadline = boost::posix_time::microsec_clock::universal_time() +
+                    boost::posix_time::milliseconds(wait_time);
+
+                if (cond->timed_wait(lock, deadline)) {
+                    // 有新命令到来，再查找一遍
+                    for (auto it = queue->begin(); it != queue->end(); ++it) {
+                        if (it->get_mode() == target_mode) {
+                            cmd.set_mode(it->get_mode());
+                            cmd.set_mapping(it->get_mapping());
+                            cmd.set_command_id(it->get_command_id());
+                            cmd.set_parameters(it->get_parameters());
+                            queue->erase(it);
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // 队列有命令但都不匹配，或等待超时，返回 false
+            return false;
+
+        } catch (const std::exception& e) {
+            std::cerr << "CommandQueueIPC::popWithFilter() failed: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
     bool empty() {
         try {
             if (!shm_manager_ || !shm_manager_->isValid()) {

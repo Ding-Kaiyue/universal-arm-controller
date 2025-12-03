@@ -23,38 +23,50 @@ int main() {
 
     // 创建接口实例
     movej::MoveJIPCInterface movej;
-    // movel::MoveLIPCInterface movel;
+    movel::MoveLIPCInterface movel;
     // movec::MoveCIPCInterface movec;
 
-    // MoveJ 演示
+    // 1. MoveL 演示
+    std::cout << "========== MoveL 演示 ==========\n";
+    std::cout << "发送 MoveL 命令 -> left_arm ...\n";
+    if (!movel.execute(0.19, -0.5, 0.63, -0.4546, 0.4546, -0.5417, 0.5417, "left_arm")) {
+        std::cerr << "❌ 失败: " << movel.getLastError() << "\n";
+    } else {
+        std::cout << "✅ 已入队\n";
+    }
+    std::cout << "\n";
+
+    // 2. MoveJ 演示
     std::cout << "========== MoveJ 演示 ==========\n";
     std::cout << "发送 MoveJ 命令 -> left_arm ...\n";
-    if (!movej.execute({0.0, 0.5, 1.0, 0.2, 0.3, 0.4}, "left_arm")) {
+    if (!movej.execute({0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0}, "left_arm")) {
         std::cerr << "❌ 失败: " << movej.getLastError() << "\n";
     } else {
         std::cout << "✅ 已入队\n";
     }
     std::cout << "\n";
 
-    // MoveJ 演示
+    // 3. MoveJ 演示
     std::cout << "========== MoveJ 演示 ==========\n";
     std::cout << "发送 MoveJ 命令 -> right_arm ...\n";
-    if (!movej.execute({0.0, 0.5, 1.0, 0.2, 0.3, 0.4}, "right_arm")) {
+    if (!movej.execute({0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0}, "right_arm")) {
         std::cerr << "❌ 失败: " << movej.getLastError() << "\n";
     } else {
         std::cout << "✅ 已入队\n";
     }
     std::cout << "\n";
+    
+    // 4. MoveL 演示
+    std::cout << "========== MoveL 演示 ==========\n";
+    std::cout << "发送 MoveL 命令 -> right_arm ...\n";
+    if (!movel.execute(0.19, 0.5, 0.63, -0.4546, 0.4546, -0.5417, 0.5417, "right_arm")) {
+        std::cerr << "❌ 失败: " << movel.getLastError() << "\n";
+    } else {
+        std::cout << "✅ 已入队\n";
+    }
+    std::cout << "\n";
 
-    // MoveL 演示
-    // std::cout << "========== MoveL 演示 ==========\n";
-    // std::cout << "发送 MoveL 命令...\n";
-    // if (!movel.execute(0.19, -0.5, 0.63, -0.4546, 0.4546, -0.5417, 0.5417, "left_arm")) {
-    //     std::cerr << "❌ 失败: " << movel.getLastError() << "\n";
-    // } else {
-    //     std::cout << "✅ 已入队\n";
-    // }
-    // std::cout << "\n";
+    
 
     // // MoveC 演示
     // std::cout << "========== MoveC 演示 ==========\n";

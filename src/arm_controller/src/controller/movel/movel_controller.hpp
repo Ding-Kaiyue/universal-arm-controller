@@ -56,6 +56,9 @@ private:
     // 队列消费者线程
     std::unique_ptr<std::thread> queue_consumer_;
     std::atomic<bool> consumer_running_{false};
+
+    // 规划状态追踪
+    std::map<std::string, bool> last_planning_success_;
 };
 
 #endif  // __MOVEL_CONTROLLER_HPP_
