@@ -55,7 +55,7 @@ int main() {
         std::cout << "✅ 已入队\n";
     }
     std::cout << "\n";
-    
+
     // 4. MoveL 演示
     std::cout << "========== MoveL 演示 ==========\n";
     std::cout << "发送 MoveL 命令 -> right_arm ...\n";
@@ -65,8 +65,6 @@ int main() {
         std::cout << "✅ 已入队\n";
     }
     std::cout << "\n";
-
-    
 
     // // MoveC 演示
     // std::cout << "========== MoveC 演示 ==========\n";

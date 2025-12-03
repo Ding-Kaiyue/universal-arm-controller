@@ -273,7 +273,7 @@ void MoveJController::command_queue_consumer_thread() {
 
     while (consumer_running_) {
         // 使用带过滤的 pop，只获取 MoveJ 命令
-        if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "MoveJ", 1000)) {
+        if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "MoveJ")) {
             continue;
         }
 
@@ -284,30 +284,12 @@ void MoveJController::command_queue_consumer_thread() {
         RCLCPP_INFO(node_->get_logger(), "[%s] MoveJ: Received IPC command (ID: %s)",
                    mapping.c_str(), cmd_id.c_str());
 
-        // 等待相同 arm 的所有命令执行完成（无论是哪个 controller 的命令）
+        // 获取 per-mapping 的互斥锁，确保同一手臂的命令串行执行
+        std::lock_guard<std::mutex> execution_lock(arm_controller::CommandQueueIPC::getMappingExecutionMutex(mapping));
+
         auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
-        if (state_mgr) {
-            auto current = state_mgr->getExecutionState();
-            // 如果上一条命令还在执行中，等待其完成
-            if (current == arm_controller::ipc::ExecutionState::EXECUTING) {
-                RCLCPP_INFO(node_->get_logger(), "[%s] ⏳ Waiting for previous command to complete before executing next (ID: %s)",
-                           mapping.c_str(), cmd_id.c_str());
-                // 无限等待直到前一条命令完成
-                while (consumer_running_) {
-                    current = state_mgr->getExecutionState();
-                    if (current != arm_controller::ipc::ExecutionState::EXECUTING) {
-                        break;
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
-            }
-        }
 
-        // Now execute the MoveJ command
         try {
-            RCLCPP_INFO(node_->get_logger(), "[%s] 🚀 Executing MoveJ command (ID: %s)",
-                       mapping.c_str(), cmd_id.c_str());
-
             // 获取状态管理器并更新为执行中
             if (state_mgr) {
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::EXECUTING);
@@ -332,12 +314,20 @@ void MoveJController::command_queue_consumer_thread() {
                     last_state[mapping] = arm_controller::ipc::ExecutionState::FAILED;
                 }
             }
+
+            // 延迟后恢复到 IDLE，给下一条命令足够的时间看到最终状态
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (state_mgr) {
+                state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::IDLE);
+            }
         } catch (const std::exception& e) {
             RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in MoveJ command execution: %s",
                         mapping.c_str(), e.what());
             if (state_mgr) {
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::FAILED);
                 last_state[mapping] = arm_controller::ipc::ExecutionState::FAILED;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::IDLE);
             }
         }
     }
