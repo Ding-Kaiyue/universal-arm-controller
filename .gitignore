@@ -122,3 +122,4 @@ code_review.md
 从硬编码到插件化*.md
 控制器体系的演进*.md
 笛卡尔控制的安全设计*.md
+shared_memory_ipc_design*.md

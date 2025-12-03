@@ -283,65 +283,30 @@ void MoveJController::command_queue_consumer_thread() {
         RCLCPP_INFO(node_->get_logger(), "📥 MoveJ: Received IPC command (ID: %s, mode: %s, mapping: %s)",
                    cmd_id.c_str(), mode.c_str(), mapping.c_str());
 
-        // Auto-switch mode if needed
-        if (mode != "MoveJ" && mode != "__MODE_SWITCH__") {
-            std::string current = current_mode[mapping];
-            if (current != mode) {
-                RCLCPP_INFO(node_->get_logger(), "[%s] 🔄 Auto-switching mode from %s to %s",
-                           mapping.c_str(), current.empty() ? "unknown" : current.c_str(), mode.c_str());
-
-                try {
-                    auto client = node_->create_client<controller_interfaces::srv::WorkMode>("/controller_api/controller_mode");
-                    if (client->wait_for_service(std::chrono::seconds(1))) {
-                        auto request = std::make_shared<controller_interfaces::srv::WorkMode::Request>();
-                        request->mode = mode;
-                        request->mapping = mapping;
-
-                        auto future = client->async_send_request(request);
-                        if (rclcpp::spin_until_future_complete(node_, future) == rclcpp::FutureReturnCode::SUCCESS) {
-                            auto response = future.get();
-                            if (response->success) {
-                                current_mode[mapping] = mode;
-                                RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Auto-mode switch to %s successful",
-                                           mapping.c_str(), mode.c_str());
-                            } else {
-                                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Auto-mode switch failed: %s",
-                                           mapping.c_str(), response->message.c_str());
-                                continue;
-                            }
-                        } else {
-                            RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Auto-mode switch timeout", mapping.c_str());
-                            continue;
-                        }
-                    } else {
-                        RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Mode switch service not available", mapping.c_str());
-                        continue;
-                    }
-                } catch (const std::exception& e) {
-                    RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in auto-mode switch: %s",
-                                mapping.c_str(), e.what());
-                    continue;
-                }
-            }
+        // 只处理 MoveJ 命令，其他模式的命令由对应的控制器处理
+        if (mode != "MoveJ") {
+            RCLCPP_DEBUG(node_->get_logger(), "[%s] ⏭️  Skipping non-MoveJ command (mode: %s, ID: %s)",
+                        mapping.c_str(), mode.c_str(), cmd_id.c_str());
+            continue;
         }
 
-        // Now execute the command
+        // Now execute the MoveJ command
         try {
-            RCLCPP_INFO(node_->get_logger(), "[%s] 🚀 Executing command (ID: %s, mode: %s)",
-                       mapping.c_str(), cmd_id.c_str(), mode.c_str());
+            RCLCPP_INFO(node_->get_logger(), "[%s] 🚀 Executing MoveJ command (ID: %s)",
+                       mapping.c_str(), cmd_id.c_str());
 
             auto params = cmd.get_parameters();
             bool success = move(mapping, params);
 
             if (success) {
-                RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Command executed successfully (ID: %s)",
+                RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveJ command executed successfully (ID: %s)",
                            mapping.c_str(), cmd_id.c_str());
             } else {
-                RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Command execution failed (ID: %s)",
+                RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ command execution failed (ID: %s)",
                            mapping.c_str(), cmd_id.c_str());
             }
         } catch (const std::exception& e) {
-            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in command execution: %s",
+            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in MoveJ command execution: %s",
                         mapping.c_str(), e.what());
         }
     }

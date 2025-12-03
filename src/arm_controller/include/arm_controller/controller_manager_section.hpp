@@ -7,6 +7,7 @@
 #include <set>
 #include <map>
 #include <unordered_map>
+#include <mutex>
 #include <any>
 #include <controller_interfaces/srv/work_mode.hpp>
 #include <controller_interfaces/srv/motor_control.hpp>
@@ -83,6 +84,9 @@ private:
     bool emergency_stop_active_;
     bool safety_zone_violation_;
 
+    // 线程同步 - 保护共享状态
+    mutable std::mutex state_mutex_;  // 保护 mapping_to_mode_, target_mode_, in_hook_state_
+
     // 配置和缓存
     YAML::Node yaml_config_;
     std::unordered_map<std::string, std::any> cached_messages_;
@@ -113,6 +117,14 @@ private:
 
     // 配置管理
     // Configuration is loaded via YAML files directly
+
+    // 线程安全的状态访问方法
+    std::string get_mapping_mode(const std::string& mapping);
+    void set_mapping_mode(const std::string& mapping, const std::string& mode);
+    std::string get_target_mode(const std::string& mapping);
+    void set_target_mode(const std::string& mapping, const std::string& mode);
+    bool get_in_hook_state(const std::string& mapping);
+    void set_in_hook_state(const std::string& mapping, bool state);
 };
 
 #endif // __CONTROLLER_MANAGER_SECTION_HPP__

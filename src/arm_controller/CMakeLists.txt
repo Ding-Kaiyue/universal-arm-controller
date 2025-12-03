@@ -17,14 +17,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -Wno-subobject-linkage)
 endif()
 
-# 覆盖率编译选项（仅在构建测试时启用）
-if(BUILD_TESTING)
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    add_compile_options(--coverage -fprofile-arcs -ftest-coverage)
-    link_libraries(--coverage -fprofile-arcs -ftest-coverage)
-  endif()
-endif()
-
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -82,6 +74,8 @@ add_library(arm_controller_lib
   src/arm_controller_api.cpp
   src/ipc/shm_manager.cpp
   src/ipc/command_producer.cpp
+  src/ipc/controller_state_manager.cpp
+  src/ipc/ipc_context.cpp
   # 只保留测试需要的控制器
   src/controller/joint_velocity/joint_velocity_controller.cpp
   src/controller/joint_velocity/joint_velocity_interface.cpp
@@ -96,10 +90,13 @@ add_library(arm_controller_lib
   src/controller/ros2_action_control/ros2_action_control_controller.cpp
   src/controller/movec/movec_controller.cpp
   src/controller/movec/movec_interface.cpp
+  src/controller/movec/movec_ipc_interface.cpp
   src/controller/movej/movej_controller.cpp
   src/controller/movej/movej_interface.cpp
+  src/controller/movej/movej_ipc_interface.cpp
   src/controller/movel/movel_controller.cpp
   src/controller/movel/movel_interface.cpp
+  src/controller/movel/movel_ipc_interface.cpp
   # src/controller/point_record/point_record_controller.cpp
   # src/controller/point_record/point_record_interface.cpp
   # src/controller/point_replay/point_replay_controller.cpp
@@ -144,20 +141,21 @@ target_link_libraries(arm_controller_lib
   OsqpEigen::OsqpEigen
 )
 
-# 为库本身添加覆盖率编译选项（在构建测试时）
-if(BUILD_TESTING)
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    target_compile_options(arm_controller_lib PRIVATE --coverage -fprofile-arcs -ftest-coverage)
-    target_link_options(arm_controller_lib PRIVATE --coverage -fprofile-arcs -ftest-coverage)
-  endif()
-endif()
-
 # Node
 add_executable(universal_arm_controller_node
   src/main.cpp
   src/trajectory_controller_section.cpp
   src/controller_manager_section.cpp
 )
+
+# When BUILD_TESTING=ON, library has coverage flags, so node must also have them
+if(BUILD_TESTING)
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    target_compile_options(universal_arm_controller_node PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+    target_link_options(universal_arm_controller_node PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+  endif()
+endif()
+
 target_link_libraries(universal_arm_controller_node
   arm_controller_lib
   yaml-cpp
@@ -187,6 +185,15 @@ if(EXAMPLE_SOURCES)
   foreach(EXAMPLE_FILE ${EXAMPLE_SOURCES})
     get_filename_component(EXAMPLE_NAME ${EXAMPLE_FILE} NAME_WE)
     add_executable(${EXAMPLE_NAME} ${EXAMPLE_FILE})
+
+    # When BUILD_TESTING=ON, library has coverage flags, so examples must also have them
+    if(BUILD_TESTING)
+      if(CMAKE_COMPILER_IS_GNUCXX)
+        target_compile_options(${EXAMPLE_NAME} PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+        target_link_options(${EXAMPLE_NAME} PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+      endif()
+    endif()
+
     target_link_libraries(${EXAMPLE_NAME}
       arm_controller_lib
     )
@@ -205,6 +212,12 @@ endif()
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
+
+  # 为库本身添加覆盖率编译选项（在构建测试时）
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    target_compile_options(arm_controller_lib PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+    target_link_options(arm_controller_lib PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+  endif()
 
   # 自动发现并编译所有测试文件
   file(GLOB TEST_SOURCES test/test_*.cpp)

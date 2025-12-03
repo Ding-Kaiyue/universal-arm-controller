@@ -30,15 +30,16 @@ def generate_launch_description():
             os.path.join(trajectory_planning_bringup_pkg, 'launch', 'trajectory_planning.launch.py')
         ]),
         launch_arguments={
+            'robot_model_name': 'dual_arm620',  # 明确指定使用双臂模型
             'planning_node_type': 'none',  # 不启动额外的规划节点
             'use_hardware_controller': 'false'  # 使用我们的arm_controller管理硬件
         }.items()
     )
 
     return LaunchDescription([
-        # 主控制器节点（合并后的controller_manager + trajectory_controller）
-        arm_controller_node,
-
         # MoveIt和robot_description组件
         trajectory_planning_launch,
+
+        # 主控制器节点（合并后的controller_manager + trajectory_controller）
+        arm_controller_node,
     ])
