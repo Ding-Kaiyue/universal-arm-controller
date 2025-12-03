@@ -1,6 +1,9 @@
 #include "movel_controller.hpp"
 #include "controller_interface.hpp"
 #include "hardware/hardware_manager.hpp"
+#include "arm_controller/utils/trajectory_converter.hpp"
+#include "arm_controller/ipc/ipc_context.hpp"
+#include <controller_interfaces/srv/work_mode.hpp>
 #include <set>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveL', mapping: 'single_arm'}"
@@ -17,7 +20,12 @@ MoveLController::MoveLController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹规划服务
     initialize_planning_services();
 
-    // 注意：话题订阅在 init_subscriptions() 中创建，以支持 {mapping} 占位符
+    // 启动IPC命令队列消费线程（早期启动以接收API发送的命令）
+    if (!consumer_running_) {
+        consumer_running_ = true;
+        queue_consumer_ = std::make_unique<std::thread>(&MoveLController::command_queue_consumer_thread, this);
+        RCLCPP_INFO(node_->get_logger(), "✅ MoveL: IPC queue consumer thread started early");
+    }
 }
 
 void MoveLController::start(const std::string& mapping) {
@@ -29,12 +37,11 @@ void MoveLController::start(const std::string& mapping) {
         );
     }
 
-    // 保存当前激活的 mapping，供 trajectory_callback 使用
-    active_mapping_ = mapping;
-
-    // 在激活时创建话题订阅（如果还没创建的话）
-    // if (subscriptions_.find(mapping) == subscriptions_.end()) {
-    //     init_subscriptions(mapping);
+    // 仅在首次启动时创建队列消费线程
+    // if (!consumer_running_) {
+    //     consumer_running_ = true;
+    //     queue_consumer_ = std::make_unique<std::thread>(&MoveLController::command_queue_consumer_thread, this);
+    //     RCLCPP_INFO(node_->get_logger(), "✅ MoveL: Command queue consumer thread started");
     // }
 
     // 同步 MoveIt 状态到当前机械臂位置，防止规划从错误的起始位置开始
@@ -49,6 +56,7 @@ void MoveLController::start(const std::string& mapping) {
     }
 
     // 调用基类 start() 设置 per-mapping 的 is_active_[mapping] = true
+    // 订阅已在 ControllerNode::init_controllers() 时提前创建，Lambda 会直接调用 plan_and_execute
     TrajectoryControllerImpl::start(mapping);
 
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveLController activated", mapping.c_str());
@@ -102,7 +110,8 @@ void MoveLController::initialize_planning_services() {
 
                 // 创建轨迹规划服务
                 auto motion_planning_service = std::make_shared<trajectory_planning::application::services::MotionPlanningService>(
-                    moveit_adapter, node_);
+                    moveit_adapter, 
+                    node_);
 
                 if (!motion_planning_service) {
                     RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Failed to create MotionPlanningService", mapping.c_str());
@@ -225,7 +234,7 @@ bool MoveLController::move(const std::string& mapping, const std::vector<double>
                    mapping.c_str(), 7);
     }
 
-    // 构建 JointState 消息
+    // 构建 Pose 消息
     auto pose_state = std::make_shared<geometry_msgs::msg::Pose>();
     pose_state->position.x = pose[0];
     pose_state->position.y = pose[1];
@@ -264,4 +273,69 @@ void MoveLController::execute_trajectory(
                     mapping.c_str(), e.what());
         return;
     }
+}
+
+void MoveLController::command_queue_consumer_thread() {
+    RCLCPP_INFO(node_->get_logger(), "🔄 MoveL: IPC queue consumer thread running");
+
+    arm_controller::TrajectoryCommandIPC cmd;
+    std::map<std::string, std::string> current_mode;  // Track current mode per mapping
+
+    while (consumer_running_) {
+        if (!arm_controller::CommandQueueIPC::getInstance().pop(cmd, 1000)) {
+            continue;
+        }
+
+        std::string mode = cmd.get_mode();
+        std::string mapping = cmd.get_mapping();
+        std::string cmd_id = cmd.get_command_id();
+
+        RCLCPP_INFO(node_->get_logger(), "[%s] MoveL: Received IPC command (ID: %s)",
+                   mapping.c_str(), cmd_id.c_str());
+
+        // 只处理 MoveL 命令，其他模式的命令由对应的控制器处理
+        if (mode != "MoveL") {
+            RCLCPP_DEBUG(node_->get_logger(), "[%s] ❎ Skipping non-MoveL command (mode: %s, ID: %s)",
+                        mapping.c_str(), mode.c_str(), cmd_id.c_str());
+            continue;
+        }
+
+        // Now execute the MoveL command
+        try {
+            RCLCPP_INFO(node_->get_logger(), "[%s] Executing MoveL command (ID: %s)",
+                       mapping.c_str(), cmd_id.c_str());
+
+            // 获取状态管理器并更新为执行中
+            auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+            if (state_mgr) {
+                state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::EXECUTING);
+            }
+
+            auto params = cmd.get_parameters();
+            bool success = move(mapping, params);
+
+            if (success) {
+                RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveL command executed successfully (ID: %s)",
+                           mapping.c_str(), cmd_id.c_str());
+                if (state_mgr) {
+                    state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::SUCCESS);
+                }
+            } else {
+                RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL command execution failed (ID: %s)",
+                           mapping.c_str(), cmd_id.c_str());
+                if (state_mgr) {
+                    state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::FAILED);
+                }
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in MoveL command execution: %s",
+                        mapping.c_str(), e.what());
+            auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+            if (state_mgr) {
+                state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::FAILED);
+            }
+        }
+    }
+
+    RCLCPP_INFO(node_->get_logger(), "🔄 MoveL: IPC queue consumer thread stopped");
 }

@@ -2,12 +2,12 @@
 #include "controller_interface.hpp"
 #include "hardware/hardware_manager.hpp"
 #include "arm_controller/utils/trajectory_converter.hpp"
+#include "arm_controller/ipc/ipc_context.hpp"
 #include <controller_interfaces/srv/work_mode.hpp>
 #include <set>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
-// ros2 topic pub --once --w 1 /controller_api/movej_action/left_arm sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
-// ros2 topic pub --rate 1 /controller_api/movej_action/left_arm sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+// ros2 topic pub --once /controller_api/movej_action/single_arm sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 // ros2 topic pub --once /trajectory_control controller_interfaces/msg/TrajectoryControl "{mapping: 'single_arm', action: 'Cancel'}"
 
 MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
@@ -27,8 +27,6 @@ MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
         queue_consumer_ = std::make_unique<std::thread>(&MoveJController::command_queue_consumer_thread, this);
         RCLCPP_INFO(node_->get_logger(), "✅ MoveJ: IPC queue consumer thread started early");
     }
-
-    // 注意：话题订阅在 init_subscriptions() 中创建，以支持 {mapping} 占位符
 }
 
 void MoveJController::start(const std::string& mapping) {
@@ -41,11 +39,11 @@ void MoveJController::start(const std::string& mapping) {
     }
 
     // 仅在首次启动时创建队列消费线程
-    if (!consumer_running_) {
-        consumer_running_ = true;
-        queue_consumer_ = std::make_unique<std::thread>(&MoveJController::command_queue_consumer_thread, this);
-        RCLCPP_INFO(node_->get_logger(), "✅ MoveJ: Command queue consumer thread started");
-    }
+    // if (!consumer_running_) {
+    //     consumer_running_ = true;
+    //     queue_consumer_ = std::make_unique<std::thread>(&MoveJController::command_queue_consumer_thread, this);
+    //     RCLCPP_INFO(node_->get_logger(), "✅ MoveJ: Command queue consumer thread started");
+    // }
 
     // 调用基类 start() 设置 per-mapping 的 is_active_[mapping] = true
     // 订阅已在 ControllerNode::init_controllers() 时提前创建，Lambda 会直接调用 plan_and_execute
@@ -280,20 +278,26 @@ void MoveJController::command_queue_consumer_thread() {
         std::string mapping = cmd.get_mapping();
         std::string cmd_id = cmd.get_command_id();
 
-        RCLCPP_INFO(node_->get_logger(), "📥 MoveJ: Received IPC command (ID: %s, mode: %s, mapping: %s)",
-                   cmd_id.c_str(), mode.c_str(), mapping.c_str());
+        RCLCPP_INFO(node_->get_logger(), "[%s] MoveJ: Received IPC command (ID: %s)",
+                   mapping.c_str(), cmd_id.c_str());
 
         // 只处理 MoveJ 命令，其他模式的命令由对应的控制器处理
         if (mode != "MoveJ") {
-            RCLCPP_DEBUG(node_->get_logger(), "[%s] ⏭️  Skipping non-MoveJ command (mode: %s, ID: %s)",
+            RCLCPP_DEBUG(node_->get_logger(), "[%s] ❎ Skipping non-MoveJ command (mode: %s, ID: %s)",
                         mapping.c_str(), mode.c_str(), cmd_id.c_str());
             continue;
         }
 
         // Now execute the MoveJ command
         try {
-            RCLCPP_INFO(node_->get_logger(), "[%s] 🚀 Executing MoveJ command (ID: %s)",
+            RCLCPP_INFO(node_->get_logger(), "[%s] Executing MoveJ command (ID: %s)",
                        mapping.c_str(), cmd_id.c_str());
+
+            // 获取状态管理器并更新为执行中
+            auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+            if (state_mgr) {
+                state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::EXECUTING);
+            }
 
             auto params = cmd.get_parameters();
             bool success = move(mapping, params);
@@ -301,13 +305,23 @@ void MoveJController::command_queue_consumer_thread() {
             if (success) {
                 RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveJ command executed successfully (ID: %s)",
                            mapping.c_str(), cmd_id.c_str());
+                if (state_mgr) {
+                    state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::SUCCESS);
+                }
             } else {
                 RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ command execution failed (ID: %s)",
                            mapping.c_str(), cmd_id.c_str());
+                if (state_mgr) {
+                    state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::FAILED);
+                }
             }
         } catch (const std::exception& e) {
             RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in MoveJ command execution: %s",
                         mapping.c_str(), e.what());
+            auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+            if (state_mgr) {
+                state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::FAILED);
+            }
         }
     }
 

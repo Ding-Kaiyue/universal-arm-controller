@@ -24,9 +24,6 @@ public:
 
     // 获取执行状态
     ipc::ExecutionState getExecutionState(const std::string& mapping) const;
-
-    // 获取当前笛卡尔位置
-    std::vector<double> getCurrentPose(const std::string& mapping) const;
 };
 
 }  // namespace arm_controller::movel

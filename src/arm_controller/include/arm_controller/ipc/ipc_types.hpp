@@ -50,18 +50,15 @@ struct alignas(16) TrajectoryCommand {
     uint64_t seq;                              // 序号，用于检测丢包
     uint64_t timestamp_ns;                     // 生产者写入时的时间戳
     uint32_t producer_id;                      // 生产者ID（安全检查）
-    uint32_t command_type;                     // 命令类型（0=MoveJ, 1=MoveL, 2=MoveC）
 
     // 命令内容
     char mode[MAX_MODE_LEN];                   // "MoveJ", "MoveL", "MoveC"
     char mapping[MAX_MAPPING_LEN];             // 目标映射（"left_arm", "right_arm"）
     char command_id[MAX_COMMAND_ID_LEN];       // 唯一命令ID（用于追踪）
 
-    // 参数（根据 command_type 解释不同含义）
-    int32_t param_count;                       // 参数数量（MoveJ: 关节数; MoveL/MoveC: 坐标点数）
-    double parameters[MAX_JOINTS];             // 参数值（MoveJ: 关节位置; MoveL: x,y,z,qx,qy,qz,qw; MoveC: 轨迹点坐标）
-    double velocities[MAX_JOINTS];             // 速度（预留，后续使用）
-    double efforts[MAX_JOINTS];                // 力矩/力（预留，后续使用）
+    // 参数（根据 mode 解释不同含义）
+    int32_t param_count;                       // 参数数量（MoveJ: 关节数; MoveL: x,y,z,qx,qy,qz,qw; MoveC: 轨迹点数*7）
+    double parameters[MAX_JOINTS];             // 参数值（可包含位置、速度等，具体含义由 mode 决定）
 
     // 完整性检查
     uint32_t crc32;                            // CRC校验（防止传输过程损坏）
@@ -70,15 +67,12 @@ struct alignas(16) TrajectoryCommand {
         : seq(0),
           timestamp_ns(0),
           producer_id(0),
-          command_type(0),
           param_count(0),
           crc32(0) {
         std::memset(mode, 0, MAX_MODE_LEN);
         std::memset(mapping, 0, MAX_MAPPING_LEN);
         std::memset(command_id, 0, MAX_COMMAND_ID_LEN);
         std::memset(parameters, 0, MAX_JOINTS * sizeof(double));
-        std::memset(velocities, 0, MAX_JOINTS * sizeof(double));
-        std::memset(efforts, 0, MAX_JOINTS * sizeof(double));
     }
 
     // 计算CRC（简化实现，可集成第三方库）

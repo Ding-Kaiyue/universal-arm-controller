@@ -86,7 +86,6 @@ CommandBuilder& CommandBuilder::withMapping(const std::string& mapping) {
 CommandBuilder& CommandBuilder::withJointPositions(
     const std::vector<double>& positions) {
     cmd_.set_parameters(positions);
-    cmd_.command_type = 0;  // MoveJ
     return *this;
 }
 
@@ -95,14 +94,12 @@ CommandBuilder& CommandBuilder::withPose(
     double qx, double qy, double qz, double qw) {
     std::vector<double> pose_data = {x, y, z, qx, qy, qz, qw};
     cmd_.set_parameters(pose_data);
-    cmd_.command_type = 1;  // MoveL
     return *this;
 }
 
 CommandBuilder& CommandBuilder::withWaypoints(
     const std::vector<double>& waypoints) {
     cmd_.set_parameters(waypoints);
-    cmd_.command_type = 2;  // MoveC
     return *this;
 }
 

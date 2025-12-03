@@ -28,7 +28,16 @@ void ControllerStateManager::setExecutionState(ExecutionState state) {
         std::lock_guard<std::mutex> lock(state_mutex_);
         execution_state_ = state;
     }
-    std::cout << "📊 [" << mapping_ << "] Execution state: " << (int32_t)state << std::endl;
+    std::string state_str;
+    switch (state) {
+        case ExecutionState::IDLE: state_str = "IDLE"; break;
+        case ExecutionState::PENDING: state_str = "PENDING"; break;
+        case ExecutionState::EXECUTING: state_str = "EXECUTING"; break;
+        case ExecutionState::SUCCESS: state_str = "SUCCESS"; break;
+        case ExecutionState::FAILED: state_str = "FAILED"; break;
+        default: state_str = "UNKNOWN"; break;
+    }
+    // std::cout << "[" << mapping_ << "] Execution state: " << state_str << std::endl;
 }
 
 void ControllerStateManager::initializeCurrentMode(const std::string& mode) {

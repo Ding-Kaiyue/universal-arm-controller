@@ -79,13 +79,4 @@ ipc::ExecutionState MoveJIPCInterface::getExecutionState(const std::string& mapp
     return state_mgr->getExecutionState();
 }
 
-std::vector<double> MoveJIPCInterface::getCurrentJointPositions(
-    const std::string& mapping [[maybe_unused]]) const {
-    if (!ensureInitialized()) {
-        return {};
-    }
-
-    return {};
-}
-
 }  // namespace arm_controller::movej

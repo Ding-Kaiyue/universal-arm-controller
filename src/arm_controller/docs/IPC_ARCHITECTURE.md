@@ -181,23 +181,20 @@ struct alignas(16) TrajectoryCommand {
     uint64_t seq;                       // 序号，用于检测丢包
     uint64_t timestamp_ns;              // 生产者写入时的时间戳
     uint32_t producer_id;               // 生产者 ID（安全检查）
-    uint32_t command_type;              // 命令类型（0=MoveJ, 1=MoveL, 2=MoveC）
 
     // 命令内容
     char mode[32];                      // "MoveJ", "MoveL", "MoveC"
     char mapping[32];                   // "left_arm", "right_arm"
     char command_id[128];               // 唯一命令 ID（用于追踪）
 
-    // 参数
-    int32_t joint_count;                // 实际关节数量
-    double positions[16];               // 关节位置
-    double velocities[16];              // 关节速度（可选）
-    double efforts[16];                 // 关节力（可选）
+    // 参数（根据 mode 解释不同含义）
+    int32_t param_count;                // 参数数量
+    double parameters[16];              // 参数值（可包含位置、速度等）
 
     // 完整性检查
     uint32_t crc32;                     // CRC 校验
 };
-// 总大小：~400 字节，16 字节对齐优化跨进程访问
+// 总大小：~320 字节，16 字节对齐优化跨进程访问
 ```
 
 ### ShmHeader (元数据)
@@ -344,29 +341,24 @@ api.shutdown();
 
 ### 添加新的命令类型
 
-1. 在 `ipc_types.hpp` 中添加新的命令类型常量
-2. 在 `CommandValidator` 中添加验证方法
-3. 在 `CommandBuilder` 中添加 `withXxx()` 方法
-4. 在 `arm_controller_api.hpp` 中添加公开方法
+1. 在 `CommandValidator` 中添加验证方法
+2. 在 `CommandBuilder` 中添加 `withXxx()` 方法
+3. 在 `arm_controller_api.hpp` 中添加公开方法
 
 ```cpp
-// 1. 新命令类型
-constexpr uint32_t COMMAND_TYPE_CUSTOM = 3;
-
-// 2. 验证方法
+// 1. 验证方法
 static ValidationResult CommandValidator::validateCustom(...) {
     // 验证逻辑
     return {valid, error_msg};
 }
 
-// 3. Builder 方法
+// 2. Builder 方法
 CommandBuilder& CommandBuilder::withCustom(...) {
-    cmd_.command_type = COMMAND_TYPE_CUSTOM;
     // 设置参数
     return *this;
 }
 
-// 4. API 公开方法
+// 3. API 公开方法
 bool ArmControllerAPI::custom(..., const std::string& mapping) {
     // 使用新的 Builder 方法
     auto cmd = CommandBuilder(0)

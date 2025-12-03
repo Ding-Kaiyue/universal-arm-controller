@@ -80,12 +80,4 @@ ipc::ExecutionState MoveLIPCInterface::getExecutionState(const std::string& mapp
     return state_mgr->getExecutionState();
 }
 
-std::vector<double> MoveLIPCInterface::getCurrentPose(const std::string& mapping [[maybe_unused]]) const {
-    if (!ensureInitialized()) {
-        return {};
-    }
-
-    return {};
-}
-
 }  // namespace arm_controller::movel

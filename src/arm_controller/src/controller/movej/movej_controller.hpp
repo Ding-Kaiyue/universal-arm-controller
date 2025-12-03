@@ -45,10 +45,6 @@ private:
     // 硬件接口
     std::shared_ptr<HardwareManager> hardware_manager_;
 
-    // 话题订阅 - 全局订阅
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_;
-    std::string active_mapping_;
-
     // 轨迹规划相关 - 支持多臂mapping
     std::map<std::string, std::shared_ptr<trajectory_planning::application::services::MotionPlanningService>> motion_planning_services_;
     std::map<std::string, std::shared_ptr<trajectory_planning::infrastructure::integration::MoveItAdapter>> moveit_adapters_;
