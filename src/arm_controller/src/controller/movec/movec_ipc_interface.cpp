@@ -79,12 +79,4 @@ ipc::ExecutionState MoveCIPCInterface::getExecutionState(const std::string& mapp
     return state_mgr->getExecutionState();
 }
 
-std::vector<double> MoveCIPCInterface::getCurrentPosition(const std::string& mapping [[maybe_unused]]) const {
-    if (!ensureInitialized()) {
-        return {};
-    }
-
-    return {};
-}
-
 }  // namespace arm_controller::movec

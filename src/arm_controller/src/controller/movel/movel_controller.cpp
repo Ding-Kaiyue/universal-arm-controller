@@ -37,13 +37,6 @@ void MoveLController::start(const std::string& mapping) {
         );
     }
 
-    // 仅在首次启动时创建队列消费线程
-    // if (!consumer_running_) {
-    //     consumer_running_ = true;
-    //     queue_consumer_ = std::make_unique<std::thread>(&MoveLController::command_queue_consumer_thread, this);
-    //     RCLCPP_INFO(node_->get_logger(), "✅ MoveL: Command queue consumer thread started");
-    // }
-
     // 同步 MoveIt 状态到当前机械臂位置，防止规划从错误的起始位置开始
     if (moveit_adapters_.find(mapping) != moveit_adapters_.end() && moveit_adapters_[mapping]) {
         auto current_positions = hardware_manager_->get_current_joint_positions(mapping);
@@ -56,7 +49,6 @@ void MoveLController::start(const std::string& mapping) {
     }
 
     // 调用基类 start() 设置 per-mapping 的 is_active_[mapping] = true
-    // 订阅已在 ControllerNode::init_controllers() 时提前创建，Lambda 会直接调用 plan_and_execute
     TrajectoryControllerImpl::start(mapping);
 
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveLController activated", mapping.c_str());

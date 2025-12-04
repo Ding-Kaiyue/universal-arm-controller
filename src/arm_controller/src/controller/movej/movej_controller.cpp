@@ -38,15 +38,7 @@ void MoveJController::start(const std::string& mapping) {
         );
     }
 
-    // 仅在首次启动时创建队列消费线程
-    // if (!consumer_running_) {
-    //     consumer_running_ = true;
-    //     queue_consumer_ = std::make_unique<std::thread>(&MoveJController::command_queue_consumer_thread, this);
-    //     RCLCPP_INFO(node_->get_logger(), "✅ MoveJ: Command queue consumer thread started");
-    // }
-
     // 调用基类 start() 设置 per-mapping 的 is_active_[mapping] = true
-    // 订阅已在 ControllerNode::init_controllers() 时提前创建，Lambda 会直接调用 plan_and_execute
     TrajectoryControllerImpl::start(mapping);
 
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveJController activated", mapping.c_str());

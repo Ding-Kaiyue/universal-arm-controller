@@ -7,6 +7,9 @@
 #include "trajectory_planning_v3/infrastructure/integration/moveit_adapter.hpp"
 #include "trajectory_interpolator/trajectory_interpolator.hpp"
 #include "arm_controller/utils/trajectory_converter.hpp"
+#include "arm_controller/command_queue_ipc.hpp"
+#include <thread>
+#include <atomic>
 
 class MoveCController final : public TrajectoryControllerImpl<geometry_msgs::msg::PoseArray> {
 public:
@@ -36,12 +39,11 @@ private:
         const trajectory_interpolator::Trajectory& trajectory,
         const std::string& mapping);
     
+    // 队列消费线程 - 后台处理来自C++ API的命令
+    void command_queue_consumer_thread();
+
     // 硬件接口
     std::shared_ptr<HardwareManager> hardware_manager_;
-
-    // 话题订阅 - 全局订阅
-    rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr sub_;
-    std::string active_mapping_;
 
     // 轨迹规划相关 - 支持多臂mapping
     std::map<std::string, std::shared_ptr<trajectory_planning::application::services::MotionPlanningService>> motion_planning_services_;
@@ -50,6 +52,13 @@ private:
 
     // 轨迹插值器
     std::unique_ptr<TrajectoryInterpolator> trajectory_interpolator_;
+
+    // 队列消费者线程
+    std::unique_ptr<std::thread> queue_consumer_;
+    std::atomic<bool> consumer_running_{false};
+
+    // 规划状态追踪
+    std::map<std::string, bool> last_planning_success_;
 };
 
 

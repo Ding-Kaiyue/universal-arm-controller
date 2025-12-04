@@ -23,9 +23,6 @@ public:
 
     // 获取执行状态
     ipc::ExecutionState getExecutionState(const std::string& mapping) const;
-
-    // 获取当前位置
-    std::vector<double> getCurrentPosition(const std::string& mapping) const;
 };
 
 }  // namespace arm_controller::movec
