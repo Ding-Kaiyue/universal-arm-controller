@@ -38,17 +38,6 @@ void SystemStartController::start(const std::string& mapping) {
         hardware_driver->enable_motors(interface, motor_ids, static_cast<uint8_t>(MotorControlMode::MIT_MODE));
         RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Enabled %zu motors in MIT mode",
                    mapping.c_str(), motor_ids.size());
-
-        // 获取当前关节位置并发送保持命令
-        auto current_positions = hardware_manager_->get_current_joint_positions(mapping);
-        if (!current_positions.empty()) {
-            hardware_manager_->send_hold_state_command(mapping, current_positions);
-            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Holding current position with %zu joints",
-                       mapping.c_str(), current_positions.size());
-        } else {
-            RCLCPP_WARN(node_->get_logger(), "[%s] ❎ No current positions available yet", mapping.c_str());
-        }
-
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Error during SystemStart initialization: %s",
                     mapping.c_str(), e.what());

@@ -141,22 +141,6 @@ void ControllerManagerNode::init_controllers() {
             std::string key = entry["key"].as<std::string>();
             std::string class_name = entry["class"].as<std::string>();
 
-            // 从 YAML 提取默认 topic 值
-            std::string default_input_topic, default_output_topic;
-            if (entry["input_topic"] && entry["input_topic"]["name"]) {
-                default_input_topic = entry["input_topic"]["name"].as<std::string>();
-            }
-            if (!default_input_topic.empty()) {
-                this->declare_parameter("controllers." + key + ".input_topic", default_input_topic);
-            }
-
-            if (entry["output_topic"] && entry["output_topic"]["name"]) {
-                default_output_topic = entry["output_topic"]["name"].as<std::string>();
-            }
-            if (!default_output_topic.empty()) {
-                this->declare_parameter("controllers." + key + ".output_topic", default_output_topic);
-            }
-
             auto it = available.find(class_name);
             if (it != available.end()) {
                 ControllerInterface::instance().register_class(key, it->second);
@@ -178,25 +162,6 @@ void ControllerManagerNode::init_controllers() {
         }
 
         RCLCPP_INFO(this->get_logger(), "Initialized %zu controller instances", controller_map_.size());
-
-        // 为所有控制器提前创建订阅者（所有 mapping）
-        // 这样即使控制器还未激活，消息也会被接收（不会被 --once 错过）
-        std::set<std::string> initialized_subscriptions;
-
-        for (const auto& [key_pair, controller] : controller_map_) {
-            const auto& controller_name = key_pair.first;
-            const auto& mapping = key_pair.second;
-
-            // 每个 controller-mapping 对只需初始化一次
-            std::string sub_key = controller_name + ":" + mapping;
-            if (controller && initialized_subscriptions.find(sub_key) == initialized_subscriptions.end()) {
-                controller->init_subscriptions(mapping);
-                initialized_subscriptions.insert(sub_key);
-                RCLCPP_DEBUG(this->get_logger(), "[init_controllers] Pre-created subscription for %s, mapping: %s",
-                            controller_name.c_str(), mapping.c_str());
-            }
-        }
-        RCLCPP_INFO(this->get_logger(), "Pre-created subscriptions for all controller-mapping pairs");
     } catch (const std::exception& e) {
         RCLCPP_FATAL(this->get_logger(), "Failed to initialize controllers: %s", e.what());
         rclcpp::shutdown();
@@ -309,9 +274,6 @@ bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::
     if (it != controller_map_.end()) {
         need_hook = it->second->needs_hook_state();
         it->second->stop(mapping);
-
-        // 注意：话题订阅由控制器在 start() 中动态创建
-        // 当 stop() 调用时，控制器会停止处理消息（通过 is_active_ 标志）
 
         RCLCPP_INFO(this->get_logger(), "[%s] Stopped controller for mode: %s, needs_hook: %s",
                     mapping.c_str(), current_mode_it->second.c_str(), need_hook ? "true" : "false");
@@ -437,13 +399,6 @@ bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const s
         it->second->start(mapping);
         mapping_to_mode_[mapping] = mode_name;
 
-        // 清空缓存的消息（避免切换控制器时执行旧消息导致意外运动）
-        // 注意：禁用自动投递缓存消息，因为这会导致切换控制器时机械臂意外运动
-        auto cached = cached_messages_.find(mode_name);
-        if (cached != cached_messages_.end()) {
-            RCLCPP_INFO(this->get_logger(), "Clearing cached messages for controller %s (auto-delivery disabled for safety)", mode_name.c_str());
-            cached_messages_.erase(cached);
-        }
         RCLCPP_INFO(this->get_logger(), "✅ Switched to mode %s [%s]", mode_name.c_str(), mapping.c_str());
         return true;
     } catch (const std::exception& e) {
@@ -642,14 +597,3 @@ void ControllerManagerNode::handle_trajectory_control(const controller_interface
     }
 }
 
-// [已弃用] 这些函数不再被使用
-// 原因：控制器现在在自己的构造函数中创建话题订阅，而不是由ControllerManagerNode管理
-// 保留以供参考，但不应被调用
-//
-// void ControllerManagerNode::create_controller_subscriptions(const std::string& mode_key, const std::string& mapping) {
-//     // 已移到各控制器的构造函数中
-// }
-//
-// void ControllerManagerNode::remove_controller_subscriptions(const std::string& mode_key, const std::string& mapping) {
-//     // 不再需要
-// }

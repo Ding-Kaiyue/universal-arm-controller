@@ -77,16 +77,16 @@ add_library(arm_controller_lib
   src/ipc/controller_state_manager.cpp
   src/ipc/ipc_context.cpp
   # 只保留测试需要的控制器
-  src/controller/joint_velocity/joint_velocity_controller.cpp
-  src/controller/joint_velocity/joint_velocity_interface.cpp
+  # src/controller/joint_velocity/joint_velocity_controller.cpp
+  # src/controller/joint_velocity/joint_velocity_interface.cpp
   src/controller/hold_state/hold_state_controller.cpp
   src/controller/system_start/system_start_controller.cpp
-  src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
-  src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
-  src/controller/move2initial/move2initial_controller.cpp
-  src/controller/move2initial/move2initial_interface.cpp
-  src/controller/move2start/move2start_controller.cpp
-  src/controller/move2start/move2start_interface.cpp
+  # src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
+  # src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
+  # src/controller/move2initial/move2initial_controller.cpp
+  # src/controller/move2initial/move2initial_interface.cpp
+  # src/controller/move2start/move2start_controller.cpp
+  # src/controller/move2start/move2start_interface.cpp
   src/controller/ros2_action_control/ros2_action_control_controller.cpp
   src/controller/movec/movec_controller.cpp
   src/controller/movec/movec_interface.cpp

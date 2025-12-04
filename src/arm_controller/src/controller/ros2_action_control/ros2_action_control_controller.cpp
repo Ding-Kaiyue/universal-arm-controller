@@ -26,13 +26,12 @@ void ROS2ActionControlController::start(const std::string& mapping) {
         return;
     }
 
-    RCLCPP_INFO(node_->get_logger(), "ROS2ActionControl: Ready to execute trajectories via action server");
     UtilityControllerBase::start(mapping);
+    RCLCPP_INFO(node_->get_logger(), "ROS2ActionControl: Ready to execute trajectories via action server");
 }
 
 bool ROS2ActionControlController::stop(const std::string& mapping) {
-    // is_active_[mapping] = false; // 由基类 stop() 设置
+    UtilityControllerBase::stop(mapping);
     RCLCPP_INFO(node_->get_logger(), "[%s] ROS2ActionControlController deactivated", mapping.c_str());
     return true;
-    UtilityControllerBase::stop(mapping);
 }

@@ -12,10 +12,10 @@ public:
         : ModeControllerBase(mode), node_(node) {}
     virtual ~RecordControllerBase() = default;
 
-    void handle_message(std::any /*msg*/) override final {}
+    // void handle_message(std::any /*msg*/) override final {}
 
     virtual void start(const std::string& mapping) override = 0;
-    virtual bool stop() override = 0;
+    virtual bool stop(const std::string& mapping) override = 0;
 protected:
     rclcpp::Node::SharedPtr node_;
 };

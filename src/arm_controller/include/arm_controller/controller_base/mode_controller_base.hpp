@@ -11,9 +11,6 @@ public:
     explicit ModeControllerBase(std::string mode) : mode_(mode) {}
     virtual ~ModeControllerBase() = default;
 
-    // 初始化订阅 - 子类可以重写以创建话题订阅
-    virtual void init_subscriptions(const std::string& mapping = "") { (void)mapping; }
-
     virtual void start(const std::string& mapping = "") {
         std::string normalized = normalize_mapping(mapping);
         is_active_[normalized] = true;
@@ -24,7 +21,7 @@ public:
         return !is_active_[normalized];
     }
 
-    virtual void handle_message(std::any msg) = 0;
+    // virtual void handle_message(std::any msg) = 0;
 
     bool is_active(const std::string& mapping = "") const {
         std::string normalized = normalize_mapping(mapping);
