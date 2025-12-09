@@ -15,90 +15,89 @@ sudo ip link set can0 txqueuelen 1000
 sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off restart-ms 100
 ```
 
-## 第二步:启动系统
+## 第二步:编写 C++ 控制程序
+
+Arm Controller 采用 IPC 命令队列架构，通过 C++ API 进行控制。参考完整示例：[example_single_arm.cpp](../example/example_single_arm.cpp)
+
+```cpp
+#include "arm_controller/arm_controller_api.hpp"
+#include "controller/movej/movej_ipc_interface.hpp"
+#include "controller/movel/movel_ipc_interface.hpp"
+
+using namespace arm_controller;
+
+int main() {
+    // 初始化 IPC
+    if (!IPCLifecycle::initialize()) {
+        return 1;
+    }
+
+    // 创建控制器接口
+    movej::MoveJIPCInterface movej;
+    movel::MoveLIPCInterface movel;
+
+    // MoveJ 控制
+    movej.execute({0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0}, "single_arm");
+
+    // MoveL 控制
+    movel.execute(0.19, -0.5, 0.63, -0.4546, 0.4546, -0.5417, 0.5417, "single_arm");
+
+    IPCLifecycle::shutdown();
+    return 0;
+}
+```
+
+## 第三步:编译程序
 
 ```bash
 # source 工作空间
 source ~/robotic_arm_ws/install/setup.bash
 
-# 启动控制系统
-ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
+# 编译
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+# 运行程序
+./install/arm_controller/bin/example_single_arm
 ```
 
-## 第三步:测试基本功能
+## 第四步:多臂并发控制
 
-### 1. 移动到启动位置
+```cpp
+#include "arm_controller/arm_controller_api.hpp"
+#include "controller/movej/movej_ipc_interface.hpp"
+#include "controller/joint_velocity/joint_velocity_ipc_interface.hpp"
 
-```bash
-ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode \
-  "{mode: 'Move2Start', mapping: 'single_arm'}"
-```
+using namespace arm_controller;
 
-### 2. MoveJ 测试
+int main() {
+    IPCLifecycle::initialize();
 
-```bash
-# 切换到 MoveJ 模式
-ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode \
-  "{mode: 'MoveJ', mapping: 'single_arm'}"
+    movej::MoveJIPCInterface movej;
+    joint_velocity::JointVelocityIPCInterface joint_vel;
 
-# 发送目标位置
-ros2 topic pub --once /controller_api/movej_action/single_arm sensor_msgs/msg/JointState \
-  "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
-```
+    // 左臂 MoveJ，右臂 JointVelocity（真并发！）
+    movej.execute({0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0}, "left_arm");
+    joint_vel.execute({0.3, 0.3, 0.0, 0.0, 0.0, 0.0}, "right_arm");
 
-### 3. 轨迹控制测试
-
-在轨迹执行过程中，可以实时暂停、恢复或取消:
-
-```bash
-# 暂停轨迹
-ros2 topic pub --once /trajectory_control controller_interfaces/msg/TrajectoryControl \
-  "{mapping: 'single_arm', action: 'Pause'}"
-
-# 恢复轨迹
-ros2 topic pub --once /trajectory_control controller_interfaces/msg/TrajectoryControl \
-  "{mapping: 'single_arm', action: 'Resume'}"
-
-# 取消轨迹
-ros2 topic pub --once /trajectory_control controller_interfaces/msg/TrajectoryControl \
-  "{mapping: 'single_arm', action: 'Cancel'}"
-```
-
-### 4. MoveL 测试
-
-```bash
-# 切换到 MoveL 模式
-ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode \
-  "{mode: 'MoveL', mapping: 'single_arm'}"
-
-# 发送目标位姿
-ros2 topic pub --once /controller_api/movel_action/single_arm geometry_msgs/msg/Pose \
-  "{position: {x: 0.19, y: 0.0, z: 0.63}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}}"
-```
-
-## 第四步:监控状态
-
-```bash
-# 查看当前模式
-ros2 topic echo /controller_api/running_status
-
-# 查看关节状态
-ros2 topic echo /joint_states
+    IPCLifecycle::shutdown();
+    return 0;
+}
 ```
 
 ## 下一步
 
-- 📖 阅读 [控制器详解](CONTROLLERS.md) 了解所有控制模式
+- 📖 阅读 [IPC 架构详解](IPC_ARCHITECTURE.md) 了解 IPC 通信机制
+- 📖 阅读 [控制器详解](CONTROLLERS.md) 了解所有控制模式实现
 - ⚙️ 查看 [配置指南](CONFIGURATION.md) 自定义配置
-- 🏗️ 学习 [系统架构](ARCHITECTURE.md) 深入理解系统
+- 🏗️ 学习 [系统架构](ARCHITECTURE.md) 了解双节点架构和线程模型
 
 ## 常见问题
 
-**Q: 机械臂不动?**
-A: 检查 CAN 接口是否配置,电机是否上电。
+**Q: IPC 命令入队失败?**
+A: 确保已调用 `IPCLifecycle::initialize()`，检查共享内存是否已创建。
 
-**Q: 规划失败?**
-A: 检查目标位置是否在工作空间内,查看 MoveIt 日志。
+**Q: 多臂不能真并发?**
+A: 每臂内命令严格顺序执行，但不同臂之间完全并发（无需等待）。参考 [IPC_ARCHITECTURE.md](IPC_ARCHITECTURE.md)。
 
-**Q: 模式切换卡住?**
-A: 等待 HoldState 完成安全检查,通常需要几秒钟。
+**Q: 如何添加新的控制模式?**
+A: 参考 [CONTROLLERS.md](CONTROLLERS.md) 和 [DEVELOPER.md](DEVELOPER.md) 了解控制器扩展流程。

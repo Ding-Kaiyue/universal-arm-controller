@@ -22,7 +22,11 @@
 
 ### Multi-Layer Safety Architecture
 
+<div align="center">
+
 ![Safety_Architecture](diagrams/Safety_Architecture.png)
+
+</div>
 
 ### 安全原则
 

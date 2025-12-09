@@ -8,18 +8,19 @@ Arm Controller 运动控制核心的详细文档。
 
 ### 🚀 快速上手
 - **[README](../README.md)** - 组件介绍和文档导航
-- **[快速开始](QUICKSTART.md)** - 5分钟上手教程
+- **[快速开始](QUICKSTART.md)** - 5分钟上手教程，C++ IPC API 使用示例
 
 ### 📖 功能和配置
-- **[控制器详解](CONTROLLERS.md)** - 所有控制模式和接口说明
+- **[控制器详解](CONTROLLERS.md)** - 所有控制模式详解（MoveJ/MoveL/MoveC/JointVelocity/CartesianVelocity）
 - **[配置指南](CONFIGURATION.md)** - 硬件绑定、参数配置、多臂配置
 
 ### 🏗️ 架构和设计
-- **[系统架构](ARCHITECTURE.md)** - 双节点架构、设计模式、数据流
+- **[系统架构](ARCHITECTURE.md)** - 双节点架构、线程模型、状态机设计
+- **[IPC 架构详解](IPC_ARCHITECTURE.md)** - Boost.Interprocess 实现、SOLID 原则应用、性能指标
 - **[安全机制](SAFETY.md)** - 安全设计、HoldState、限位保护
 
 ### 👨‍💻 开发
-- **[开发者指南](DEVELOPER.md)** - 开发环境、编译、测试、调试
+- **[开发者指南](DEVELOPER.md)** - 开发环境、编译、单元测试、集成测试、调试
 - **[代码规范](CODE_STYLE.md)** - C++ 编码标准、命名规范
 
 ### 🔧 故障排除
@@ -31,21 +32,28 @@ Arm Controller 运动控制核心的详细文档。
 
 ### 我想了解 Arm Controller 的功能
 1. 阅读 [README](../README.md) 了解核心功能
-2. 查看 [快速开始](QUICKSTART.md) 运行第一个程序
+2. 查看 [快速开始](QUICKSTART.md) 运行第一个程序（C++ IPC API）
 3. 参考 [控制器详解](CONTROLLERS.md) 了解各控制模式
+
+### 我想理解 IPC 架构
+1. 阅读 [IPC 架构详解](IPC_ARCHITECTURE.md) 了解 Boost.Interprocess 实现
+2. 参考 [系统架构](ARCHITECTURE.md) 理解双节点和线程模型
+3. 查看 [开发者指南](DEVELOPER.md) 了解如何开发新控制器
 
 ### 我需要配置系统
 1. 查看 [配置指南](CONFIGURATION.md) 了解硬件配置和参数设置
 2. 参考 [系统架构](ARCHITECTURE.md) 理解工作原理
 
 ### 我是开发者，想参与开发
-1. 阅读 [开发者指南](DEVELOPER.md) 了解开发流程
-2. 查看 [系统架构](ARCHITECTURE.md) 理解设计
+1. 阅读 [开发者指南](DEVELOPER.md) 了解开发流程和 IPC 模式
+2. 查看 [系统架构](ARCHITECTURE.md) 理解线程模型和设计
 3. 参考 [代码规范](CODE_STYLE.md) 遵循编码标准
+4. 研究 [IPC 架构详解](IPC_ARCHITECTURE.md) 了解 SOLID 原则应用
 
 ### 我遇到了问题
 1. 查看 [故障排除](TROUBLESHOOTING.md) 寻找解决方案
-2. 在 [GitHub Issues](https://github.com/Ding-Kaiyue/universal-arm-controller/issues) 搜索或提交问题
+2. 查看 [安全机制](SAFETY.md) 了解安全相关问题
+3. 在 [GitHub Issues](https://github.com/Ding-Kaiyue/universal-arm-controller/issues) 搜索或提交问题
 
 ---
 

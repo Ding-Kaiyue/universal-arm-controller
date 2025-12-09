@@ -137,13 +137,13 @@ git checkout -b feature/new-controller
 
 #### 添加新控制器示例
 
-根据控制器类型,选择合适的基类:
-- **轨迹控制器**: 继承 `TrajectoryControllerImpl<MessageType>` (需要钩子状态)
-- **工具控制器**: 继承 `UtilityControllerBase` (不需要钩子状态)
+Arm Controller 采用 **IPC 命令队列架构**。新控制器应实现以下两个关键方法：
+- `move()` - C++ API 入口点，验证并将命令推送到 IPC 队列
+- `command_queue_consumer_thread()` - 后台线程，从 IPC 队列消费命令并执行
 
-注意: 你也可以自己改变是否需要钩子状态
+参考现有实现：[MoveJController](../src/controller/movej/)、[JointVelocityController](../src/controller/joint_velocity/)
 
-##### 示例 1: 轨迹控制器 (如 MoveJ)
+##### 示例 1: 轨迹控制器 (如 MyTrajectory)
 
 ```cpp
 // src/controller/my_trajectory/my_trajectory_controller.hpp
@@ -151,26 +151,40 @@ git checkout -b feature/new-controller
 #define __MY_TRAJECTORY_CONTROLLER_HPP__
 
 #include <controller_base/trajectory_controller_base.hpp>
-#include "sensor_msgs/msg/joint_state.hpp"
+#include "ipc/ipc_context.hpp"
 #include "hardware/hardware_manager.hpp"
+#include <thread>
+#include <atomic>
 
-class MyTrajectoryController final : public TrajectoryControllerImpl<sensor_msgs::msg::JointState> {
+namespace my_trajectory {
+
+class MyTrajectoryController final : public TrajectoryControllerBase {
 public:
     explicit MyTrajectoryController(const rclcpp::Node::SharedPtr& node);
-    ~MyTrajectoryController() override = default;
+    ~MyTrajectoryController() override;
 
     void start(const std::string& mapping = "") override;
     bool stop(const std::string& mapping = "") override;
 
+    // C++ IPC API - 供外部程序调用
+    bool move(const std::vector<double>& target, const std::string& mapping);
+
 private:
-    void trajectory_callback(const sensor_msgs::msg::JointState::SharedPtr msg) override;
-    void plan_and_execute(const std::string& mapping,
-                         const sensor_msgs::msg::JointState::SharedPtr msg) override;
+    // IPC 消费者线程
+    void command_queue_consumer_thread();
+
+    // 执行逻辑
+    bool plan_and_execute(const std::string& mapping, const std::vector<double>& target);
 
     std::shared_ptr<HardwareManager> hardware_manager_;
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_;
-    std::string active_mapping_;
+    std::shared_ptr<arm_controller::ipc::IPCContext> ipc_context_;
+
+    // 线程管理
+    std::thread queue_consumer_;
+    std::atomic<bool> consumer_running_{false};
 };
+
+}  // namespace my_trajectory
 
 #endif  // __MY_TRAJECTORY_CONTROLLER_HPP__
 ```
@@ -178,31 +192,31 @@ private:
 ```cpp
 // src/controller/my_trajectory/my_trajectory_controller.cpp
 #include "my_trajectory_controller.hpp"
-#include "controller_interface.hpp"
+#include <iostream>
+
+namespace my_trajectory {
 
 MyTrajectoryController::MyTrajectoryController(const rclcpp::Node::SharedPtr& node)
-    : TrajectoryControllerImpl<sensor_msgs::msg::JointState>("MyTrajectory", node)
+    : TrajectoryControllerBase("MyTrajectory", node)
 {
     hardware_manager_ = HardwareManager::getInstance();
+    ipc_context_ = arm_controller::ipc::IPCContext::getInstance();
+}
 
-    std::string input_topic;
-    node_->get_parameter("controllers.MyTrajectory.input_topic", input_topic);
-
-    sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
-        input_topic, rclcpp::QoS(10).reliable(),
-        std::bind(&MyTrajectoryController::trajectory_callback, this, std::placeholders::_1)
-    );
+MyTrajectoryController::~MyTrajectoryController() {
+    if (consumer_running_) {
+        consumer_running_ = false;
+        if (queue_consumer_.joinable()) {
+            queue_consumer_.join();
+        }
+    }
 }
 
 void MyTrajectoryController::start(const std::string& mapping) {
-    const auto& all_mappings = hardware_manager_->get_all_mappings();
-    if (std::find(all_mappings.begin(), all_mappings.end(), mapping) == all_mappings.end()) {
-        throw std::runtime_error(
-            "❎ [" + mapping + "] MyTrajectory: not found in hardware configuration."
-        );
+    if (!consumer_running_) {
+        consumer_running_ = true;
+        queue_consumer_ = std::thread(&MyTrajectoryController::command_queue_consumer_thread, this);
     }
-
-    active_mapping_ = mapping;
     is_active_ = true;
     RCLCPP_INFO(node_->get_logger(), "[%s] MyTrajectoryController activated", mapping.c_str());
 }
@@ -213,86 +227,183 @@ bool MyTrajectoryController::stop(const std::string& mapping) {
     return true;
 }
 
-void MyTrajectoryController::trajectory_callback(
-    const sensor_msgs::msg::JointState::SharedPtr msg) {
-    if (!is_active_) return;
-    plan_and_execute(active_mapping_, msg);
+bool MyTrajectoryController::move(const std::vector<double>& target, const std::string& mapping) {
+    // 验证参数
+    if (target.size() != 6) {
+        RCLCPP_ERROR(node_->get_logger(), "❌ Invalid target size: %zu", target.size());
+        return false;
+    }
+
+    // 将命令推送到 IPC 队列
+    try {
+        ipc_context_->enqueueCommand(mapping, "MyTrajectory", target);
+        return true;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "❌ Failed to enqueue command: %s", e.what());
+        return false;
+    }
 }
 
-void MyTrajectoryController::plan_and_execute(
-    const std::string& mapping,
-    const sensor_msgs::msg::JointState::SharedPtr msg) {
-    // 实现你的规划和执行逻辑
-    RCLCPP_INFO(node_->get_logger(), "[%s] Executing trajectory", mapping.c_str());
+void MyTrajectoryController::command_queue_consumer_thread() {
+    while (consumer_running_) {
+        // 从 IPC 队列消费该控制器的命令
+        try {
+            auto cmd = ipc_context_->dequeueCommand("MyTrajectory", std::chrono::milliseconds(100));
+            if (cmd) {
+                plan_and_execute(cmd->mapping, cmd->parameters);
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_WARN(node_->get_logger(), "⚠️ Dequeue error: %s", e.what());
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 }
+
+bool MyTrajectoryController::plan_and_execute(
+    const std::string& mapping,
+    const std::vector<double>& target) {
+    // 实现你的轨迹规划逻辑
+    RCLCPP_INFO(node_->get_logger(), "[%s] Planning and executing trajectory", mapping.c_str());
+
+    // 规划轨迹
+    // auto trajectory = plan_trajectory(target);
+
+    // 执行轨迹
+    // hardware_manager_->executeTrajectory(mapping, trajectory);
+
+    return true;
+}
+
+}  // namespace my_trajectory
 ```
 
-##### 示例 2: 工具控制器 (如 Disable)
+##### 示例 2: 速度控制器 (如 JointVelocity)
 
 ```cpp
-// src/controller/my_utility/my_utility_controller.hpp
-#ifndef __MY_UTILITY_CONTROLLER_HPP__
-#define __MY_UTILITY_CONTROLLER_HPP__
+// src/controller/my_velocity/my_velocity_controller.hpp
+#ifndef __MY_VELOCITY_CONTROLLER_HPP__
+#define __MY_VELOCITY_CONTROLLER_HPP__
 
-#include "controller_base/utility_controller_base.hpp"
+#include <controller_base/velocity_controller_base.hpp>
+#include "ipc/ipc_context.hpp"
 #include "hardware/hardware_manager.hpp"
+#include <thread>
+#include <atomic>
 
-class MyUtilityController final : public UtilityControllerBase {
+namespace my_velocity {
+
+class MyVelocityController final : public VelocityControllerBase {
 public:
-    explicit MyUtilityController(const rclcpp::Node::SharedPtr& node);
-    ~MyUtilityController() override = default;
+    explicit MyVelocityController(const rclcpp::Node::SharedPtr& node);
+    ~MyVelocityController() override;
 
     void start(const std::string& mapping = "") override;
     bool stop(const std::string& mapping = "") override;
 
+    // C++ IPC API
+    bool move(const std::vector<double>& velocity, const std::string& mapping);
+
 private:
-    bool execute_utility_function(const std::string& mapping);
+    // IPC 消费者线程
+    void command_queue_consumer_thread();
+
+    // 执行逻辑
+    bool execute_velocity(const std::string& mapping, const std::vector<double>& velocity);
+
     std::shared_ptr<HardwareManager> hardware_manager_;
+    std::shared_ptr<arm_controller::ipc::IPCContext> ipc_context_;
+
+    // 线程管理
+    std::thread queue_consumer_;
+    std::atomic<bool> consumer_running_{false};
 };
 
-#endif  // __MY_UTILITY_CONTROLLER_HPP__
+}  // namespace my_velocity
+
+#endif  // __MY_VELOCITY_CONTROLLER_HPP__
 ```
 
 ```cpp
-// src/controller/my_utility/my_utility_controller.cpp
-#include "my_utility_controller.hpp"
-#include "controller_interface.hpp"
+// src/controller/my_velocity/my_velocity_controller.cpp
+#include "my_velocity_controller.hpp"
 
-MyUtilityController::MyUtilityController(const rclcpp::Node::SharedPtr& node)
-    : UtilityControllerBase("MyUtility", node)
+namespace my_velocity {
+
+MyVelocityController::MyVelocityController(const rclcpp::Node::SharedPtr& node)
+    : VelocityControllerBase("MyVelocity", node)
 {
     hardware_manager_ = HardwareManager::getInstance();
+    ipc_context_ = arm_controller::ipc::IPCContext::getInstance();
 }
 
-void MyUtilityController::start(const std::string& mapping) {
-    const auto& all_mappings = hardware_manager_->get_all_mappings();
-    if (std::find(all_mappings.begin(), all_mappings.end(), mapping) == all_mappings.end()) {
-        throw std::runtime_error(
-            "❎ [" + mapping + "] MyUtility: not found in hardware configuration."
-        );
+MyVelocityController::~MyVelocityController() {
+    if (consumer_running_) {
+        consumer_running_ = false;
+        if (queue_consumer_.joinable()) {
+            queue_consumer_.join();
+        }
     }
+}
 
-    if (!execute_utility_function(mapping)) {
-        throw std::runtime_error(
-            "❎ [" + mapping + "] MyUtility: Failed to execute"
-        );
+void MyVelocityController::start(const std::string& mapping) {
+    if (!consumer_running_) {
+        consumer_running_ = true;
+        queue_consumer_ = std::thread(&MyVelocityController::command_queue_consumer_thread, this);
     }
-
     is_active_ = true;
-    RCLCPP_INFO(node_->get_logger(), "[%s] MyUtilityController activated", mapping.c_str());
+    RCLCPP_INFO(node_->get_logger(), "[%s] MyVelocityController activated", mapping.c_str());
 }
 
-bool MyUtilityController::stop(const std::string& mapping) {
+bool MyVelocityController::stop(const std::string& mapping) {
     is_active_ = false;
-    RCLCPP_INFO(node_->get_logger(), "[%s] MyUtilityController deactivated", mapping.c_str());
+    RCLCPP_INFO(node_->get_logger(), "[%s] MyVelocityController deactivated", mapping.c_str());
     return true;
 }
 
-bool MyUtilityController::execute_utility_function(const std::string& mapping) {
-    // 实现你的工具功能逻辑
-    RCLCPP_INFO(node_->get_logger(), "[%s] Executing utility function", mapping.c_str());
+bool MyVelocityController::move(const std::vector<double>& velocity, const std::string& mapping) {
+    // 验证参数
+    if (velocity.size() != 6) {
+        RCLCPP_ERROR(node_->get_logger(), "❌ Invalid velocity size: %zu", velocity.size());
+        return false;
+    }
+
+    // 将命令推送到 IPC 队列
+    try {
+        ipc_context_->enqueueCommand(mapping, "MyVelocity", velocity);
+        return true;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "❌ Failed to enqueue command: %s", e.what());
+        return false;
+    }
+}
+
+void MyVelocityController::command_queue_consumer_thread() {
+    while (consumer_running_) {
+        try {
+            auto cmd = ipc_context_->dequeueCommand("MyVelocity", std::chrono::milliseconds(100));
+            if (cmd) {
+                execute_velocity(cmd->mapping, cmd->parameters);
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_WARN(node_->get_logger(), "⚠️ Dequeue error: %s", e.what());
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+bool MyVelocityController::execute_velocity(
+    const std::string& mapping,
+    const std::vector<double>& velocity) {
+    // 实现你的速度控制逻辑
+    RCLCPP_INFO(node_->get_logger(), "[%s] Executing velocity control", mapping.c_str());
+
+    // 执行速度控制
+    // hardware_manager_->controlVelocity(mapping, velocity);
+
     return true;
 }
+
+}  // namespace my_velocity
 ```
 
 #### 注册控制器
@@ -301,29 +412,81 @@ bool MyUtilityController::execute_utility_function(const std::string& mapping) {
 
 ```cpp
 #include "my_trajectory/my_trajectory_controller.hpp"
-#include "my_utility/my_utility_controller.hpp"
+#include "my_velocity/my_velocity_controller.hpp"
 
-std::unordered_map<std::string, ControllerInterface::Creator> get_available_controllers() {
+std::unordered_map<std::string, ControllerFactory::Creator> get_available_controllers() {
     return {
         // ... 现有控制器 ...
 
-        // 添加新控制器
-        {"MyTrajectoryController", [](rclcpp::Node::SharedPtr node) {
-            return std::make_shared<MyTrajectoryController>(node); }},
-        {"MyUtilityController", [](rclcpp::Node::SharedPtr node) {
-            return std::make_shared<MyUtilityController>(node); }}
+        // 添加新控制器（IPC 模式）
+        {"MyTrajectory", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<my_trajectory::MyTrajectoryController>(node); }},
+        {"MyVelocity", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<my_velocity::MyVelocityController>(node); }}
     };
 }
 ```
 
-#### 更新配置文件
+#### 使用新控制器（C++ IPC API）
 
-在 `config/controller_config.yaml` 中添加配置:
+```cpp
+#include "arm_controller_api.hpp"
+#include "controller/my_trajectory/my_trajectory_ipc_interface.hpp"
 
-```yaml
-controllers:
-  MyTrajectory:
-    input_topic: "/controller_api/my_trajectory_action"
+using namespace arm_controller;
+
+int main() {
+    // 初始化 IPC
+    IPCLifecycle::initialize();
+
+    // 创建接口实例
+    my_trajectory::MyTrajectoryIPCInterface my_traj;
+
+    // 调用 move() 方法推送命令到 IPC 队列
+    std::vector<double> target = {0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0};
+    if (my_traj.execute(target, "single_arm")) {
+        std::cout << "✅ Command enqueued\n";
+    }
+
+    IPCLifecycle::shutdown();
+    return 0;
+}
+```
+
+#### IPC 接口包装类
+
+为了简化 API 使用，建议为每个控制器创建一个 IPC 接口包装类：
+
+```cpp
+// src/controller/my_trajectory/my_trajectory_ipc_interface.hpp
+#ifndef __MY_TRAJECTORY_IPC_INTERFACE_HPP__
+#define __MY_TRAJECTORY_IPC_INTERFACE_HPP__
+
+#include "ipc/ipc_context.hpp"
+
+namespace my_trajectory {
+
+class MyTrajectoryIPCInterface {
+public:
+    bool execute(const std::vector<double>& target, const std::string& mapping) {
+        auto ipc = arm_controller::ipc::IPCContext::getInstance();
+        try {
+            ipc->enqueueCommand(mapping, "MyTrajectory", target);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    std::string getLastError() const { return last_error_; }
+
+private:
+    std::string last_error_;
+};
+
+}  // namespace my_trajectory
+
+#endif  // __MY_TRAJECTORY_IPC_INTERFACE_HPP__
 ```
 
 ### 3. 测试
@@ -357,52 +520,100 @@ git push origin feature/new-controller
 
 ### 单元测试
 
-**⚠️ TODO: 单元测试框架待集成**
+项目已集成 gtest 单元测试框架，覆盖率约 34%。当前已有单元测试覆盖核心功能。
 
-目前项目尚未集成 gtest 单元测试框架。所有功能已通过手动测试验证。
+**现有测试**:
+- ✅ IPC 命令队列入队/出队
+- ✅ 控制器 move() 方法验证
+- ✅ 多臂命令处理
+- ✅ 基础硬件接口
 
-计划添加以下测试用例：
-- ControllerManager 的控制器注册和切换
-- 各个控制器的 start/stop 方法
-- HoldState 的状态转移逻辑
-- HardwareManager 的硬件通信接口
-- TrajectoryController 的轨迹规划和执行
+**计划添加测试**:
+- 📋 ControllerManager 的控制器注册和切换
+- 📋 各个控制器的 start/stop 方法
+- 📋 HoldState 的状态转移逻辑
+- 📋 CartesianVelocity QP 求解器
+- 📋 VelocityQPSolver 工具类
 
 ### 集成测试 (已验证)
 
-**测试系统启动和基本功能**:
+参考完整的集成测试示例：[example_single_arm.cpp](../example/example_single_arm.cpp)
+
+**运行集成测试**:
 
 ```bash
 # 1. 编译项目
 cd ~/robotic_arm_ws
-colcon build --packages-select arm_controller
+colcon build --packages-select arm_controller --cmake-args -DCMAKE_BUILD_TYPE=Release
 
-# 2. 启动系统
-ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
+# 2. 运行集成测试程序
+./install/arm_controller/bin/example_single_arm
 
-# 3. 在另一个终端测试控制器切换
-ros2 service call /controller_api/controller_mode \
-  controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
-
-# 4. 发送 MoveJ 目标点
-ros2 topic pub --once /controller_api/movej_action sensor_msgs/msg/JointState \
-  "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
-
-# 5. 切换到 HoldState
-ros2 service call /controller_api/controller_mode \
-  controller_interfaces/srv/WorkMode "{mode: 'HoldState', mapping: 'single_arm'}"
-
-# 6. 切换到 Disable
-ros2 service call /controller_api/controller_mode \
-  controller_interfaces/srv/WorkMode "{mode: 'Disable', mapping: 'single_arm'}"
+# 3. 预期输出
+# ===============================================================
+# ARM Controller IPC 演示
+# ===============================================================
+# 📍 初始化 IPC...
+# ✅ 初始化成功
+#
+# ========== MoveJ 演示 ==========
+# 发送 MoveJ 命令 -> left_arm ...
+# ✅ 已入队
+#
+# ========== MoveL 演示 ==========
+# ...
 ```
 
-**验证项目**:
-- ✅ 系统启动成功，两个节点并行运行
-- ✅ 控制器切换通过 ROS2 服务正常工作
-- ✅ 轨迹规划和执行通过话题订阅正常工作
-- ✅ HoldState 的安全转移机制正常运作
-- ✅ 硬件通信通过 CAN-FD 正常进行
+**测试覆盖内容** (参考 example_single_arm.cpp):
+- ✅ IPC 系统初始化和清理
+- ✅ MoveJ 控制器命令入队
+- ✅ MoveL 控制器命令入队
+- ✅ MoveC 控制器命令入队
+- ✅ 多臂单臂映射支持
+- ✅ 多个命令的顺序保证
+- ✅ 命令入队成功/失败处理
+
+**创建自己的集成测试**:
+
+参考 example_single_arm.cpp 的模式：
+
+```cpp
+#include "arm_controller/arm_controller_api.hpp"
+#include "controller/movej/movej_ipc_interface.hpp"
+#include "controller/movel/movel_ipc_interface.hpp"
+
+using namespace arm_controller;
+
+int main() {
+    // 初始化 IPC
+    if (!IPCLifecycle::initialize()) {
+        std::cerr << "❌ 初始化失败\n";
+        return 1;
+    }
+
+    // 创建控制器接口
+    movej::MoveJIPCInterface movej;
+    movel::MoveLIPCInterface movel;
+
+    // 测试 MoveJ
+    if (movej.execute({0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0}, "single_arm")) {
+        std::cout << "✅ MoveJ 已入队\n";
+    } else {
+        std::cerr << "❌ MoveJ 失败: " << movej.getLastError() << "\n";
+    }
+
+    // 测试 MoveL
+    if (movel.execute(0.19, -0.5, 0.63, -0.4546, 0.4546, -0.5417, 0.5417, "single_arm")) {
+        std::cout << "✅ MoveL 已入队\n";
+    } else {
+        std::cerr << "❌ MoveL 失败: " << movel.getLastError() << "\n";
+    }
+
+    // 清理
+    IPCLifecycle::shutdown();
+    return 0;
+}
+```
 
 ---
 

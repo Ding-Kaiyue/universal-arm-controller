@@ -1,6 +1,18 @@
 # 控制器详解
 
-本文档详细介绍 Arm Controller 支持的所有控制器及其使用方法。
+本文档详细介绍 Arm Controller 支持的所有控制器。
+
+> [!NOTE]
+> **使用 C++ IPC API 而非 ROS2 Services**
+>
+> Arm Controller 已从 ROS2 Topic/Service 通信方式升级为 Boost.Interprocess IPC 命令队列架构。
+>
+> **推荐方式**：使用 C++ IPC API（参考 [QUICKSTART.md](QUICKSTART.md) 的代码示例）
+> - 更高的可靠性（100%）
+> - 更低的延迟
+> - 完整的并发控制
+>
+> 本文档的 ROS2 Service 示例已过时，仅供参考。请使用 IPC 接口进行实际控制。
 
 ## 📋 目录
 
@@ -38,7 +50,7 @@
 | | MoveL | ✅ 稳定 | 笛卡尔空间直线运动 |
 | | MoveC | ✅ 稳定 | 圆弧/圆周轨迹运动 |
 | **速度控制器** | JointVelocity | ✅ 稳定 | 关节空间速度控制 |
-| | CartesianVelocity | 🚧 开发中 | 笛卡尔速度控制 |
+| | CartesianVelocity | ✅ 稳定 | 笛卡尔速度控制（QP 求解 + 3层安全检查） |
 | **实用控制器** | HoldState | ✅ 稳定 | 安全保持状态 |
 | | Move2Start | ✅ 稳定 | 移动到启动位置 |
 | | Move2Initial | ✅ 稳定 | 移动到初始位置 |
@@ -330,13 +342,42 @@ A: 检查是否触发急停,查看关节是否在限位。
 
 ### CartesianVelocity - 笛卡尔速度控制
 
-> 🚧 **开发中** - 该控制器正在开发中,敬请期待。
+#### 功能描述
 
-#### 规划功能
+末端执行器笛卡尔空间速度控制，基于二次规划（QP）求解逆速度雅可比，具有多层安全验证机制。
 
-- 末端执行器笛卡尔空间速度控制
-- 实时逆运动学求解
-- 奇点自动处理
+#### 核心特性
+
+- ✅ **QP 逆速度雅可比求解**：使用 OSQP 求解器求解软约束逆运动学问题
+- ✅ **3层安全检查**：
+  1. 前置几何可行性检查（SVD 分析）
+  2. QP 求解和参数约束验证
+  3. 后置方向一致性验证
+- ✅ **关节限位保护**：在工作空间边界自动减速或停止
+- ✅ **奇点处理**：自动检测和处理奇点附近的运动
+- ✅ **MIT 模式控制**：使用位置+速度+力矩模式模拟纯速度控制
+- ✅ **IPC 命令队列**：支持通过 IPC 接口高效通信
+
+#### 控制原理
+
+```
+用户指令（末端笛卡尔速度）
+    ↓
+前置几何可行性检查（SVD）
+    ↓
+QP 求解逆速度雅可比
+    ↓
+后置方向验证
+    ↓
+MIT 模式电机控制
+```
+
+#### 性能参数
+
+- **控制延迟**：< 1ms（IPC 命令队列）
+- **最大笛卡尔速度**：0.05 m/s（可配置）
+- **关节速度限制**：根据机械臂参数自适应
+- **安全检查频率**：100Hz 以上
 
 ---
 
@@ -470,34 +511,6 @@ MoveIt规划 → FollowJointTrajectory Action → ROS2ActionControl → 轨迹�
 
 ---
 
-### Disable - 禁用控制
-
-#### 功能描述
-
-禁用电机控制,释放机械臂。
-
-#### 特点
-
-- ✅ 立即禁用所有电机
-- ✅ 跳过安全钩子状态
-- ✅ 机械臂可手动拖动
-
-#### 使用方法
-
-```bash
-ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode \
-  "{mode: 'Disable', mapping: 'single_arm'}"
-```
-
-#### 使用场景
-
-- 紧急停止
-- 手动示教
-- 系统维护
-- 拖动示教
-
----
-
 ## 双臂控制
 
 ### 独立控制
@@ -518,9 +531,77 @@ ros2 topic pub --once /controller_api/movel_action/right_arm geometry_msgs/msg/P
   "{position: {...}, orientation: {...}}"
 ```
 
-### 协同控制
+### 真并发多臂控制
 
-> 🚧 **规划中** - 双臂协同控制功能正在规划中。
+#### 功能描述
+
+基于 IPC 命令队列的真并发多臂控制。两个臂可以同时执行不同的命令，无需互相等待。
+
+#### 核心特性
+
+- ✅ **真并发执行**：两臂同时运动，无需等待对方完成
+- ✅ **全局顺序保证**：多个命令保证入队顺序（序列号 0, 1, 2, ...）
+- ✅ **单臂顺序执行**：同一臂的多个命令按序列号顺序执行
+- ✅ **线程安全**：每臂独立消费者线程 + 全局执行序列号
+- ✅ **IPC 高效通信**：微秒级命令分发（< 100μs）
+
+#### 工作原理
+
+```
+命令入队（赋予全局序列号）
+         ↓
+  共享内存 IPC 队列
+         ↓
+   ┌─────┴─────┐
+   ↓           ↓
+左臂消费线程   右臂消费线程
+   ↓           ↓
+ 电机控制     电机控制（真并发！）
+```
+
+**关键设计**：
+- 每臂有独立的消费者线程，从 IPC 队列取出该臂的命令
+- 全局序列号保证命令顺序
+- 两臂消费线程完全独立，可真正并发执行，无需互相等待
+
+#### 使用方法（ROS2 Topic - 参考）
+
+双臂独立控制示例：
+
+```bash
+# 终端1：左臂执行 MoveJ
+ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode \
+  "{mode: 'MoveJ', mapping: 'left_arm'}"
+
+ros2 topic pub --once /controller_api/movej_action/left_arm sensor_msgs/msg/JointState \
+  "{position: [0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0]}"
+
+# 终端2：右臂同时执行 JointVelocity（无需等待左臂！）
+ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode \
+  "{mode: 'JointVelocity', mapping: 'right_arm'}"
+
+ros2 topic pub --rate 10 /controller_api/joint_velocity_action/right_arm sensor_msgs/msg/JointState \
+  "{velocity: [0.3, 0.3, 0.0, 0.0, 0.0, 0.0]}"
+```
+
+> **推荐方式**：使用 C++ IPC API（参考 [QUICKSTART.md](QUICKSTART.md)），获得更高的可靠性和效率。使用 ROS 话题控制的方式已经弃用.
+
+#### 并发控制保证
+
+| 特性 | 说明 |
+|------|------|
+| **全局顺序** | 所有命令入队时被赋予全局序列号 (0, 1, 2, ...) |
+| **单臂顺序** | 同一臂的命令按其全局序列号顺序执行 |
+| **臂间并发** | 不同臂的消费线程并发运行，无互斥锁竞争 |
+| **线程安全** | 每臂一个互斥锁 + 全局序列号保证安全性 |
+| **实时性** | IPC 队列延迟 < 100μs，完整延迟 < 1ms |
+
+#### 多臂控制的安全性
+
+1. **全局序列号**：确保即使多个进程同时发送命令，也能保证顺序
+2. **每臂互斥锁**：防止同一臂的并发访问
+3. **HoldState 过渡**：模式切换时自动通过 HoldState 进行安全检查
+4. **状态同步**：通过 ROS2 Topics 发布每臂的实时状态
 
 ---
 

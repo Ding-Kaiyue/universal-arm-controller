@@ -18,42 +18,11 @@
 
 ### 系统架构图
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                      Universal Arm Controller                       │
-│                                                                     │
-│  ┌──────────────────────────┐    ┌──────────────────────────┐       │
-│  │   ControllerManager      │    │   TrajectoryController   │       │
-│  │   (状态管理节点)           │    │   (轨迹执行节点)           │       │
-│  │                          │    │                          │       │
-│  │  • WorkMode Service      │    │  • Action Server         │       │
-│  │  • Controller Registry   │    │  • MoveIt Integration    │       │
-│  │  • Mode Switching        │    │  • Trajectory Execution  │       │
-│  │  • Safety Monitoring     │    │  • Interpolation         │       │
-│  └──────────┬───────────────┘    └───────────┬──────────────┘       │
-│             │                                │                      │
-│             └────────────┬───────────────────┘                      │
-│                          │                                          │
-│              ┌───────────▼──────────┐                               │
-│              │  HardwareManager     │                               │
-│              │    (Singleton)       │                               │
-│              │                      │                               │
-│              │  • Motor Control     │                               │
-│              │  • State Feedback    │                               │
-│              │  • CAN-FD Protocol   │                               │
-│              └───────────┬──────────┘                               │
-└──────────────────────────┼──────────────────────────────────────────┘
-                           │
-                    ┌──────▼───────┐
-                    │  CAN-FD Bus  │
-                    └──────┬───────┘
-                           │
-                ┌──────────┴──────────┐
-                │                     │
-           ┌────▼─────┐         ┌────▼─────┐
-           │ Motor 1  │   ...   │ Motor N  │
-           └──────────┘         └──────────┘
-```
+</div align="center">
+
+![system architecture detailed](diagrams/system_architecture_detailed.png)
+
+</div>
 
 ### 设计理念
 
@@ -206,21 +175,20 @@ Arm Controller 基于以下设计理念:
 
 状态转移遵循以下规则：
 
+</div align="center">
+
 ![HoldState_Workflow](diagrams/HoldState_Workflow.png)
+
+</div>
 
 **状态转移规则**:
 
-1. **Disable 和 EmergencyStop 模式**:
-   - 可以从任意状态直接转移到任意模式
-   - 无需安全检查或 HoldState 过渡
-   - 用于紧急停止或快速模式切换
-
-2. **MoveJ/MoveL/MoveC/JointVelocity 之间的转移**:
+1. **MoveJ/MoveL/MoveC/JointVelocity 之间的转移**:
    - 如果当前控制器的 `needs_hook_state()` 返回 true，则必须先转移到 HoldState
    - HoldState 会持续监控转移条件（如轨迹执行完成、速度降为零等）
    - 条件满足时，自动转移到目标模式
 
-3. **任意模式回到 HoldState**:
+2. **任意模式回到 HoldState**:
    - 所有模式都支持转移到 HoldState
    - HoldState 是一个中间安全状态，用于模式间的缓冲和过渡
 

@@ -30,7 +30,8 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 **位置**: `src/arm_controller/`
 
 运动控制系统的核心组件，负责：
-- ✅ 多模式控制（MoveJ、MoveL、MoveC、JointVelocity）
+- ✅ **6+ 控制模式**：MoveJ、MoveL、MoveC、JointVelocity、CartesianVelocity、HoldState
+- ✅ **IPC 命令队列架构**：多臂真并发控制，单臂安全顺序执行
 - ✅ 状态管理与模式切换
 - ✅ 安全监控与限位保护
 - ✅ ROS2 接口与服务
@@ -38,9 +39,19 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 
 **特性**:
 - 双节点架构：ControllerManager + TrajectoryController
-- 原生双臂支持
+- **原生双臂支持**：基于 IPC 命令队列的真并发控制
+- **双接口模式**：ROS2 发布/订阅 + C++ API（move() 方法）
 - 事件驱动的状态监控
 - 微秒级控制延迟
+- **3层安全检查**：前置几何可行性检查 + QP 求解 + 后置方向验证（CartesianVelocity）
+
+**控制模式详情**:
+- **MoveJ** - 关节空间点到点运动（轨迹规划 + 插值）
+- **MoveL** - 笛卡尔空间直线运动（逆运动学 + 插值）
+- **MoveC** - 笛卡尔空间圆弧运动（参数化圆弧 + 插值）
+- **JointVelocity** - 实时关节速度控制（MIT 模式）
+- **CartesianVelocity** - 基于 QP 的笛卡尔速度控制（逆速度雅可比 + 安全验证）
+- **HoldState** - 保持当前位置（闭环力矩控制）
 
 **文档**: [Arm Controller 文档中心](../src/arm_controller/docs/README.md)
 
@@ -119,40 +130,11 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 
 ### 整体架构图
 
-```
-┌─────────────────────────── Universal Arm Controller ──────────────────────┐
-│                                                                           │
-│  ┌──────────────────────────┐         ┌──────────────────────────┐        │
-│  │  Arm Controller Nodes    │         │  User Applications       │        │
-│  │ (ControllerManager +     │◄────────│  - ROS2 Nodes           │         │
-│  │  TrajectoryController)   │         │  - Python Scripts       │         │
-│  └──────────────┬───────────┘         └──────────────────────────┘        │
-│                 │                                                         │
-│                 │ (Motion Commands & Feedback)                            │
-│                 ▼                                                         │
-│  ┌──────────────────────────┐         ┌──────────────────────────┐        │
-│  │ Trajectory Planning      │         │ Trajectory Interpolator  │        │
-│  │ (MoveIt2 + TracIK)       │         │ (Spline + Dynamics)      │        │
-│  └──────────────┬───────────┘         └──────────────┬───────────┘        │
-│                 │                                    │                    │
-│                 └────────────┬───────────────────────┘                    │
-│                              │                                            │
-│                    ┌─────────▼────────┐                                   │
-│                    │ Hardware Manager │                                   │
-│                    │ (Unified Driver) │                                   │
-│                    └─────────┬────────┘                                   │
-│                              │                                            │
-│                    ┌─────────▼────────┐                                   │
-│                    │  CAN-FD Bus      │                                   │
-│                    │  (Communication) │                                   │
-│                    └─────────┬────────┘                                   │
-└────────────────────────────────┼──────────────────────────────────────────┘
-                                 │
-                        ┌────────▼────────┐
-                        │    Hardware     │
-                        │  (Motors/Arm)   │
-                        └─────────────────┘
-```
+<div align="center">
+
+![System Architecture](diagrams/image/system_architecture.png)
+
+</div>
 
 ### 分层设计
 

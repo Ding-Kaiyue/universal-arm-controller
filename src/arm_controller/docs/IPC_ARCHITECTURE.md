@@ -12,7 +12,7 @@
 - ✅ 便于测试和扩展
 - ✅ 保持向后兼容性
 
-## 📁 项目结构
+## 项目结构
 
 ```
 arm_controller/
@@ -35,9 +35,9 @@ arm_controller/
     └── shm_clean.sh                          ← IPC 清理工具
 ```
 
-## 🏗️ SOLID 原则应用详解
+## SOLID 原则应用详解
 
-### 1️⃣ Single Responsibility (单一职责)
+### Single Responsibility (单一职责)
 
 每个类有且仅有一个理由改变：
 
@@ -48,12 +48,12 @@ arm_controller/
 | **CommandProducer** | 推送命令到 IPC 队列 | IPC 推送逻辑改变 |
 | **SharedMemoryManager** | 管理 Boost.Interprocess 资源 | IPC 库或资源改变 |
 
-### 2️⃣ Open/Closed (开闭原则)
+### Open/Closed (开闭原则)
 
 系统对扩展开放，对修改关闭：
 
 ```cpp
-// ❌ 旧方式（必须修改 API）
+// 旧方式（必须修改 API）
 bool ArmControllerAPI::moveX(...) {
     // 新的验证逻辑、新的构造方式
 }
@@ -65,7 +65,7 @@ auto cmd = CommandBuilder(producer_id)
     .build();
 ```
 
-### 3️⃣ Liskov Substitution (里氏替换)
+### Liskov Substitution (里氏替换)
 
 SharedMemoryManager 提供一致的接口，消费者无需知道内部实现：
 
@@ -75,7 +75,7 @@ auto mutex = shm_manager_->getMutex();    // 可返回不同实现
 auto queue = shm_manager_->getQueue();    // 可扩展为其他队列类型
 ```
 
-### 4️⃣ Interface Segregation (接口分离)
+### Interface Segregation (接口分离)
 
 每个类只暴露必要的接口：
 
@@ -90,7 +90,7 @@ class CommandBuilder {
     TrajectoryCommand build();
 };
 
-// ❌ 不会出现单个类暴露所有功能
+// 不会出现单个类暴露所有功能
 ```
 
 ### 5️⃣ Dependency Inversion (依赖倒置)
@@ -105,7 +105,7 @@ struct Impl {
 };
 ```
 
-## 🔄 IPC 通信流程
+## IPC 通信流程
 
 ### 完整工作流
 
@@ -151,25 +151,19 @@ struct Impl {
 
 ### 时间流程图
 
-```
-生产端                                消费端
- API                                Controller
-  │                                    │
-  ├─→ Validator                        │
-  │      (0-1ms)                       │
-  │                                    │
-  ├─→ Builder                          │
-  │      (0-1ms)                       │
-  │                                    │
-  ├─→ Producer                         │
-  │      ├─ lock()    ┐                │
-  │      ├─ push()    │ (0.1-0.5ms)    │
-  │      ├─ unlock()  ┘                │
-  │      └─ notify()  ━━━━━━━━━━━━━→  pop() (被唤醒)
-  │         (立即返回)                  │
-  │                                    ├─→ 执行轨迹
-  │                                    │    (100-1000ms)
-```
+<div align="center">
+
+![IPC Producer Consumer Flow](diagrams/ipc_producer_consumer_flow.png)
+
+</div>
+
+
+**关键时间指标**:
+- 验证 (Validator): 0-1ms
+- 构建 (Builder): 0-1ms
+- 推送 (Producer lock/push/unlock): 0.1-0.5ms
+- 执行轨迹 (Trajectory Execution): 100-1000ms
+- **总 API 响应时间**: < 2ms
 
 ## 💾 数据结构设计
 
@@ -208,7 +202,7 @@ struct alignas(64) ShmHeader {
 };
 ```
 
-## 📊 代码质量对比
+## 代码质量对比
 
 ### 旧架构
 
@@ -267,13 +261,13 @@ bool ArmControllerAPI::moveJ(const std::vector<double>& positions, ...) {
 
 ### 质量指标
 
-| 指标 | 旧架构 | 新架构 | 改进 |
-|------|--------|--------|------|
-| 代码重复率 | 80% | 10% | ⬇️ 87.5% |
-| 平均函数长度 | 50 行 | 15 行 | ⬇️ 70% |
-| 圈复杂度 | 8-10 | 2-3 | ⬇️ 70% |
-| 单元测试覆盖率 | 30% | 85% | ⬆️ 180% |
-| 类数 | 1 | 4 | 更好的分离 |
+| 指标 | 旧架构 | 新架构 |
+|------|--------|--------|
+| 代码重复率 | 80% | 10% |
+| 平均函数长度 | 50 行 | 15 行 |
+| 圈复杂度 | 8-10 | 2-3 |
+| 单元测试覆盖率 | 30% | 85% |
+| 类数 | 1 | 4 |
 
 ## 🚀 使用指南
 
@@ -407,59 +401,6 @@ public:
 - **消息顺序**: 100% 保证 (FIFO deque)
 - **跨进程同步**: 100% 可靠 (命名互斥量 + 条件变量)
 
-## 🧪 测试
-
-### 单元测试
-
-```cpp
-// 测试 CommandValidator
-TEST(CommandValidatorTest, ValidateMappingValid) {
-    auto result = CommandValidator::validateMapping("left_arm");
-    EXPECT_TRUE(result.valid);
-}
-
-TEST(CommandValidatorTest, ValidateMappingEmpty) {
-    auto result = CommandValidator::validateMapping("");
-    EXPECT_FALSE(result.valid);
-}
-
-// 测试 CommandBuilder
-TEST(CommandBuilderTest, BuildMoveJCommand) {
-    auto cmd = CommandBuilder(0)
-        .withMode("MoveJ")
-        .withJointPositions({0.0, 0.5, 1.0, 0.2, 0.3, 0.4})
-        .build();
-
-    EXPECT_EQ(cmd.get_mode(), "MoveJ");
-    EXPECT_EQ(cmd.joint_count, 6);
-}
-
-// 集成测试
-TEST(IPC_IntegrationTest, ProducerConsumerFlow) {
-    auto shm = std::make_shared<SharedMemoryManager>();
-    shm->initialize();
-
-    auto producer = std::make_shared<CommandProducer>(shm, 0);
-
-    // 生产命令
-    auto cmd = CommandBuilder(0).withMode("MoveJ").build();
-    EXPECT_TRUE(producer->pushCommand(cmd));
-
-    // 消费命令
-    auto queue = shm->getQueue();
-    EXPECT_FALSE(queue->empty());
-}
-```
-
-### 压力测试
-
-```bash
-# 编译压力测试
-g++ -O2 stress_test.cpp -o stress_test -lboost_system -lboost_interprocess
-
-# 运行
-./stress_test --duration 60 --threads 4 --rate 10000
-```
 
 ## 🚨 故障排除
 
@@ -489,18 +430,6 @@ g++ -O2 stress_test.cpp -o stress_test -lboost_system -lboost_interprocess
     boost::interprocess::scoped_lock<...> lock(*mutex);
     // 仅执行最必要的操作
 }  // 自动解锁
-```
-
-### 问题 3: "Quaternion norm not normalized"
-
-**原因**: 四元数未归一化
-
-**解决方案**:
-```cpp
-// 在调用 moveL 前归一化
-double norm = std::sqrt(qx*qx + qy*qy + qz*qz + qw*qw);
-qx /= norm; qy /= norm; qz /= norm; qw /= norm;
-api.moveL(x, y, z, qx, qy, qz, qw, "left_arm");
 ```
 
 ## 📚 参考资源

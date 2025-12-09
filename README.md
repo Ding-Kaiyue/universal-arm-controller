@@ -3,17 +3,20 @@
 [![ROS Version](https://img.shields.io/badge/ROS-ROS2%20Humble-blue)](https://docs.ros.org/en/humble/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/Ding-Kaiyue/universal-arm-controller/actions/workflows/colcon-build.yml/badge.svg?branch=master)](https://github.com/Ding-Kaiyue/universal-arm-controller/actions/workflows/colcon-build.yml)
+[![Coverage](https://img.shields.io/badge/Coverage-34%25-green.svg)](docs/ARCHITECTURE.md)
+[![Quality](https://img.shields.io/badge/Quality-8.5%2F10-brightgreen.svg)](docs/ARCHITECTURE.md)
 
-完整的机械臂控制系统解决方案。基于 ROS2 的模块化架构，集成轨迹规划、轨迹插值、硬件驱动等核心功能，为工业机械臂提供高效、可靠的运动控制。
+
+**企业级机械臂控制系统**，采用 IPC 命令队列架构实现多臂并发控制。基于 ROS2 的模块化设计，集成轨迹规划、轨迹插值、硬件驱动等核心功能，为工业应用提供可靠的运动控制解决方案。
 
 ## 🚀 特性
 
-- **多模式控制**: MoveJ、MoveL、MoveC、JointVelocity 等
-- **双臂支持**: 原生单臂/双臂协同控制
-- **高性能**: MoveIt2 + TracIK 快速规划，微秒级控制延迟
-- **实时安全**: 多层安全检查、限位保护、事件驱动监控
-- **模块化设计**: 清晰的分层架构，组件独立开发维护
-- **工业级可靠性**: CAN-FD 高速通信、线程安全、CPU 亲和性
+- **6+ 控制模式**: MoveJ、MoveL、MoveC、JointVelocity、CartesianVelocity、HoldState
+- **多臂并发**: IPC 命令队列架构，真并发双臂控制 + 单臂安全顺序执行
+- **轨迹规划**: MoveIt2 + TracIK，速度/加速度约束
+- **实时安全**: 3层安全检查（前置几何可行性 + QP 求解 + 后置方向验证）
+- **状态管理**: 完整的执行状态转移和错误恢复
+
 
 ## 📦 安装
 
@@ -68,9 +71,15 @@ ros2 topic pub /controller_api/movej_action/single_arm sensor_msgs/msg/JointStat
   "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 ```
 
-## 📚 文档中心
+## 📚 文档
 
-访问 **[文档中心](docs/README.md)** 了解详细信息。
+详细文档请查看:
+- 📖 **[系统架构](docs/ARCHITECTURE.md)** - IPC 架构、多臂并发控制
+- 🔧 **[组件说明](docs/COMPONENTS.md)** - 各模块功能介绍
+- 🚀 **[快速开始](docs/QUICKSTART.md)** - 使用示例
+- 🎯 **[安装指南](docs/INSTALLATION.md)** - 详细安装步骤
+- 🔍 **[故障排除](docs/TROUBLESHOOTING.md)** - 常见问题解决
+- 📚 **[arm_controller 文档](src/arm_controller/docs/)** - 控制器核心文档
 
 ## 📦 核心组件
 
