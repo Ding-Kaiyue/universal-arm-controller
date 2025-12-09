@@ -34,6 +34,27 @@ CommandValidator::validateJointPositions(
 }
 
 CommandValidator::ValidationResult
+CommandValidator::validateJointVelocities(
+    const std::vector<double>& velocities) {
+    if (velocities.empty()) {
+        return {false, "Joint velocities cannot be empty"};
+    }
+    if (velocities.size() > MAX_JOINTS) {
+        return {false, "Joint count exceeds maximum"};
+    }
+    return {true, ""};
+}
+
+CommandValidator::ValidationResult
+CommandValidator::validateCartesianVelocities(
+    const std::vector<double>& velocities) {
+    if (velocities.size() != 6) {
+        return {false, "Cartesian velocities must have exactly 6 elements"};
+    }
+    return {true, ""};
+}
+
+CommandValidator::ValidationResult
 CommandValidator::validatePose(
     double x, double y, double z,
     double qx, double qy, double qz, double qw) {
@@ -86,6 +107,12 @@ CommandBuilder& CommandBuilder::withMapping(const std::string& mapping) {
 CommandBuilder& CommandBuilder::withJointPositions(
     const std::vector<double>& positions) {
     cmd_.set_parameters(positions);
+    return *this;
+}
+
+CommandBuilder& CommandBuilder::withJointVelocities(
+    const std::vector<double>& velocities) {
+    cmd_.set_parameters(velocities);
     return *this;
 }
 

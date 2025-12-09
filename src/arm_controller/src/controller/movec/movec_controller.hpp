@@ -7,7 +7,7 @@
 #include "trajectory_planning_v3/infrastructure/integration/moveit_adapter.hpp"
 #include "trajectory_interpolator/trajectory_interpolator.hpp"
 #include "arm_controller/utils/trajectory_converter.hpp"
-#include "arm_controller/command_queue_ipc.hpp"
+#include "arm_controller/ipc/command_queue_ipc.hpp"
 #include <thread>
 #include <atomic>
 

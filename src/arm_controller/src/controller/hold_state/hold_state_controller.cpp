@@ -14,9 +14,9 @@ HoldStateController::HoldStateController(const rclcpp::Node::SharedPtr& node)
 void HoldStateController::start(const std::string& mapping) {
     const std::string normalized_mapping = normalize_mapping(mapping);
 
-    // 如果已经为该 mapping 激活，直接返回（幂等）
+    // 如果已经为该 mapping 激活，直接返回
     if (mapping_contexts_.count(normalized_mapping)) {
-        RCLCPP_WARN(node_->get_logger(), "HoldStateController already active for mapping '%s'", normalized_mapping.c_str());
+        // RCLCPP_WARN(node_->get_logger(), "HoldStateController already active for mapping '%s'", normalized_mapping.c_str());
         return;
     }
 
@@ -72,7 +72,7 @@ void HoldStateController::start(const std::string& mapping) {
     // 调用基类方法设置 per-mapping 的 is_active_[mapping] = true
     UtilityControllerBase::start(normalized_mapping);
 
-    RCLCPP_INFO(node_->get_logger(), "HoldStateController activated for mapping '%s'", normalized_mapping.c_str());
+    // RCLCPP_INFO(node_->get_logger(), "HoldStateController activated for mapping '%s'", normalized_mapping.c_str());
 }
 
 bool HoldStateController::stop(const std::string& mapping) {
@@ -80,7 +80,7 @@ bool HoldStateController::stop(const std::string& mapping) {
 
     auto it = mapping_contexts_.find(normalized_mapping);
     if (it == mapping_contexts_.end()) {
-        RCLCPP_WARN(node_->get_logger(), "HoldStateController not active for mapping '%s'", normalized_mapping.c_str());
+        // RCLCPP_WARN(node_->get_logger(), "HoldStateController not active for mapping '%s'", normalized_mapping.c_str());
         return false;
     }
 
@@ -96,7 +96,7 @@ bool HoldStateController::stop(const std::string& mapping) {
     // 调用基类方法设置 per-mapping 的 is_active_[mapping] = false
     UtilityControllerBase::stop(normalized_mapping);
 
-    RCLCPP_INFO(node_->get_logger(), "HoldStateController stopped for mapping '%s'", normalized_mapping.c_str());
+    // RCLCPP_INFO(node_->get_logger(), "HoldStateController stopped for mapping '%s'", normalized_mapping.c_str());
 
     return true;
 }
@@ -158,9 +158,9 @@ bool HoldStateController::can_transition_to_target(const std::string& mapping) {
     // 只有当所有安全条件同时满足时才允许转换
     bool all_conditions_met = ctx.transition_ready && is_robot_stopped && are_joints_within_limits && is_system_healthy;
 
-    if (all_conditions_met) {
-        RCLCPP_INFO(node_->get_logger(), "All safety conditions met - transition allowed to %s", target_mode_.c_str());
-    }
+    // if (all_conditions_met) {
+    //     RCLCPP_INFO(node_->get_logger(), "All safety conditions met - transition allowed to %s", target_mode_.c_str());
+    // }
 
     return all_conditions_met;
 }

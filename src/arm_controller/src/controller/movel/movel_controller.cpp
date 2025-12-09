@@ -87,7 +87,7 @@ void MoveLController::initialize_planning_services() {
                     node_, planning_group);
 
                 if (!moveit_adapter) {
-                    RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Failed to create MoveItAdapter", mapping.c_str());
+                    // RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Failed to create MoveItAdapter", mapping.c_str());
                     continue;
                 }
 
@@ -267,8 +267,6 @@ void MoveLController::execute_trajectory(
 }
 
 void MoveLController::command_queue_consumer_thread() {
-    RCLCPP_INFO(node_->get_logger(), "🔄 MoveL: IPC queue consumer thread running");
-
     arm_controller::TrajectoryCommandIPC cmd;
     std::map<std::string, std::string> current_mode;
     std::map<std::string, arm_controller::ipc::ExecutionState> last_state;  // Track last execution state per mapping
@@ -333,6 +331,4 @@ void MoveLController::command_queue_consumer_thread() {
             }
         }
     }
-
-    RCLCPP_INFO(node_->get_logger(), "🔄 MoveL: IPC queue consumer thread stopped");
 }

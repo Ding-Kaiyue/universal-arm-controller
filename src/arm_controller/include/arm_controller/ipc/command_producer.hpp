@@ -23,6 +23,10 @@ public:
     static ValidationResult validateMapping(const std::string& mapping);
     static ValidationResult validateJointPositions(
         const std::vector<double>& positions);
+    static ValidationResult validateJointVelocities(
+        const std::vector<double>& velocities);
+    static ValidationResult validateCartesianVelocities(
+        const std::vector<double>& velocities);
     static ValidationResult validatePose(
         double x, double y, double z,
         double qx, double qy, double qz, double qw);
@@ -43,6 +47,10 @@ public:
     CommandBuilder& withMapping(const std::string& mapping);
     CommandBuilder& withJointPositions(
         const std::vector<double>& positions);
+    CommandBuilder& withJointVelocities(
+        const std::vector<double>& velocities);
+    CommandBuilder& withCartesianVelocities(
+        const std::vector<double>& velocities);
     CommandBuilder& withPose(
         double x, double y, double z,
         double qx, double qy, double qz, double qw);

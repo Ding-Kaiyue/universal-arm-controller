@@ -295,8 +295,6 @@ void MoveCController::execute_trajectory(
 }
 
 void MoveCController::command_queue_consumer_thread() {
-    RCLCPP_INFO(node_->get_logger(), "🔄 MoveC: IPC queue consumer thread running");
-
     arm_controller::TrajectoryCommandIPC cmd;
     std::map<std::string, std::string> current_mode;
     std::map<std::string, arm_controller::ipc::ExecutionState> last_state;  // Track last execution state per mapping
@@ -361,6 +359,4 @@ void MoveCController::command_queue_consumer_thread() {
             }
         }
     }
-
-    RCLCPP_INFO(node_->get_logger(), "🔄 MoveC: IPC queue consumer thread stopped");
 }

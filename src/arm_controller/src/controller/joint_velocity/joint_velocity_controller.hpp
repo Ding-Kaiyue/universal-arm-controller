@@ -3,25 +3,33 @@
 
 #include "controller_base/velocity_controller_base.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
-#include "hardware/hardware_manager.hpp"
+#include "arm_controller/ipc/command_queue_ipc.hpp"
+#include <thread>
+#include <atomic>
 
 class JointVelocityController final
     : public VelocityControllerImpl<sensor_msgs::msg::JointState> {
 public:
     explicit JointVelocityController(const rclcpp::Node::SharedPtr& node);
-    ~JointVelocityController() override;
+    ~JointVelocityController() override = default;
 
-    void start(const std::string& mapping) override;
-    bool stop(const std::string& mapping) override;
-
-protected:
-    void velocity_callback(const sensor_msgs::msg::JointState::SharedPtr msg) override;
-    bool send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities);
+    void start(const std::string& mapping = "") override;
+    bool stop(const std::string& mapping = "") override;
+    
+    bool move(const std::string& mapping, const std::vector<double>& parameters) override;
 
 private:
+    bool send_joint_velocities(const std::string& mapping, const std::vector<double>& velocities);
+
+    // 队列消费线程 - 后台处理来自C++ API的命令
+    void command_queue_consumer_thread();
+
+    // 硬件接口
     std::shared_ptr<HardwareManager> hardware_manager_;
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_;
-    std::string active_mapping_;
+    
+    // 队列消费者线程
+    std::unique_ptr<std::thread> queue_consumer_;
+    std::atomic<bool> consumer_running_{false};
 };
 
 #endif      // __JOINT_VELOCITY_CONTROLLER_HPP__

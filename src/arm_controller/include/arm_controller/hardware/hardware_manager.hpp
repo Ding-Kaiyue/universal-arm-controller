@@ -15,7 +15,7 @@
 #include "hardware_driver/interface/robot_hardware.hpp"
 #include "hardware_driver/driver/motor_driver_interface.hpp"
 #include "trajectory_interpolator/moveit_spline_adapter.hpp"
-#include "utils/motor_mode.hpp"
+#include "arm_controller/utils/motor_mode.hpp"
 
 // 关节限位结构体
 struct JointLimits {

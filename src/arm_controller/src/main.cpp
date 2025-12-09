@@ -2,7 +2,7 @@
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include "controller_manager_section.hpp"
 #include "trajectory_controller_section.hpp"
-#include "arm_controller/command_queue_ipc.hpp"
+#include "arm_controller/ipc/command_queue_ipc.hpp"
 #include <thread>
 #include <chrono>
 

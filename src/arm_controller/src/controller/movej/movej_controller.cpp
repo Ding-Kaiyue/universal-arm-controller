@@ -38,6 +38,17 @@ void MoveJController::start(const std::string& mapping) {
         );
     }
 
+    // 同步 MoveIt 状态到当前机械臂位置，防止规划从错误的起始位置开始
+    if (moveit_adapters_.find(mapping) != moveit_adapters_.end() && moveit_adapters_[mapping]) {
+        auto current_positions = hardware_manager_->get_current_joint_positions(mapping);
+        if (!current_positions.empty()) {
+            moveit_adapters_[mapping]->setStartState(current_positions);
+            RCLCPP_DEBUG(node_->get_logger(), "[%s] MoveL: Synced MoveIt state to current position", mapping.c_str());
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "[%s] MoveL: Failed to get current positions for state sync", mapping.c_str());
+        }
+    }
+    
     // 调用基类 start() 设置 per-mapping 的 is_active_[mapping] = true
     TrajectoryControllerImpl::start(mapping);
 
@@ -77,7 +88,7 @@ void MoveJController::initialize_planning_services() {
                     node_, planning_group);
 
                 if (!moveit_adapter) {
-                    RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Failed to create MoveItAdapter", mapping.c_str());
+                    // RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Failed to create MoveItAdapter", mapping.c_str());
                     continue;
                 }
 
@@ -257,8 +268,6 @@ void MoveJController::execute_trajectory(
 }
 
 void MoveJController::command_queue_consumer_thread() {
-    RCLCPP_INFO(node_->get_logger(), "🔄 MoveJ: IPC queue consumer thread running");
-
     arm_controller::TrajectoryCommandIPC cmd;
     std::map<std::string, std::string> current_mode;
     std::map<std::string, arm_controller::ipc::ExecutionState> last_state;  // Track last execution state per mapping
@@ -323,6 +332,4 @@ void MoveJController::command_queue_consumer_thread() {
             }
         }
     }
-
-    RCLCPP_INFO(node_->get_logger(), "🔄 MoveJ: IPC queue consumer thread stopped");
 }
