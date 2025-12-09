@@ -71,6 +71,7 @@ add_library(arm_controller_lib
   src/hardware/hardware_manager.cpp
   src/controller/controller_registry.cpp
   src/utils/trajectory_converter.cpp
+  src/utils/velocity_qp_solver.cpp
   src/arm_controller_api.cpp
   src/ipc/shm_manager.cpp
   src/ipc/command_producer.cpp
