@@ -78,12 +78,12 @@ add_library(arm_controller_lib
   src/ipc/controller_state_manager.cpp
   src/ipc/ipc_context.cpp
   # 只保留测试需要的控制器
-  # src/controller/joint_velocity/joint_velocity_controller.cpp
-  # src/controller/joint_velocity/joint_velocity_interface.cpp
+  src/controller/joint_velocity/joint_velocity_controller.cpp
+  src/controller/joint_velocity/joint_velocity_interface.cpp
   src/controller/hold_state/hold_state_controller.cpp
   src/controller/system_start/system_start_controller.cpp
-  # src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
-  # src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
+  src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
+  src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
   # src/controller/move2initial/move2initial_controller.cpp
   # src/controller/move2initial/move2initial_interface.cpp
   # src/controller/move2start/move2start_controller.cpp
@@ -107,10 +107,6 @@ add_library(arm_controller_lib
   # src/controller/trajectory_replay/trajectory_replay_controller.cpp
   # src/controller/trajectory_replay/trajectory_replay_interface.cpp
 )
-
-# target_link_libraries(robot_controller_lib
-#   yaml-cpp
-# )
 
 ament_target_dependencies(arm_controller_lib
   rclcpp

@@ -251,10 +251,9 @@ bool VelocityQPSolver::solve_velocity_qp(
     // 后置方向验证
     Eigen::VectorXd v_actual = J * qd_solution;
     double v_actual_norm = v_actual.norm();
-    double dir_err = 0.0;
 
     if (v_actual_norm > 1e-9) {
-        dir_err = (v_actual / v_actual_norm - v_direction).norm();
+        // Direction verification is performed later by post_verify_direction()
 
         // Safeguard: rescale if magnitude drifted
         double expected_velocity = s_opt * v_magnitude;

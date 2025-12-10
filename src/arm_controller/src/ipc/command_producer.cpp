@@ -116,6 +116,12 @@ CommandBuilder& CommandBuilder::withJointVelocities(
     return *this;
 }
 
+CommandBuilder& CommandBuilder::withCartesianVelocities(
+    const std::vector<double>& velocities) {
+    cmd_.set_parameters(velocities);
+    return *this;
+}
+
 CommandBuilder& CommandBuilder::withPose(
     double x, double y, double z,
     double qx, double qy, double qz, double qw) {
