@@ -198,17 +198,14 @@ bool Move2StartController::execute_trajectory(
     const trajectory_interpolator::Trajectory& trajectory,
     const std::string& mapping) {
     try {
-        // 获取对应的interface
-        std::string interface = hardware_manager_->get_interface(mapping);
-        if (interface.empty()) {
-            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Move2Start: No interface found for mapping", mapping.c_str());
-            return false;
-        }
+        // 使用转换工具将轨迹转换为硬件驱动格式
+        Trajectory hw_trajectory = arm_controller::utils::TrajectoryConverter::convertInterpolatorToHardwareDriver(trajectory);
 
-        // 执行轨迹
-        if (!hardware_manager_->executeTrajectory(interface, trajectory)) {
-            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to execute trajectory on interface: %s",
-                        mapping.c_str(), interface.c_str());
+        // 使用异步执行轨迹（不阻塞，并保存 execution_id 以支持暂停/恢复/取消）
+        std::string execution_id = hardware_manager_->execute_trajectory_async(mapping, hw_trajectory, true);
+        if (execution_id.empty()) {
+            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Move2Start: Failed to execute trajectory on mapping: %s",
+                        mapping.c_str(), mapping.c_str());
             return false;
         }
 

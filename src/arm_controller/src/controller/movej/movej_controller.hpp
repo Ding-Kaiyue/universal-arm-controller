@@ -40,6 +40,8 @@ private:
     // 话题订阅 - 命令接收
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_;
 
+    std::string active_mapping_;
+
     // 轨迹规划相关 - 支持多臂mapping
     std::map<std::string, std::shared_ptr<trajectory_planning::application::services::MotionPlanningService>> motion_planning_services_;
     std::map<std::string, std::shared_ptr<trajectory_planning::infrastructure::integration::MoveItAdapter>> moveit_adapters_;

@@ -238,13 +238,24 @@ void TrajectoryControllerNode::execute_trajectory(const std::shared_ptr<GoalHand
                         final_trajectory.points.size(), goal->trajectory.points.size());
         }
 
-        // 使用传入的mapping获取对应的interface
-        // std::string interface = hardware_manager_->get_interface(mapping);
+        // 使用异步执行轨迹以支持暂停/恢复/取消（不显示硬件驱动的进度条，避免重复显示）
+        Trajectory hw_trajectory = arm_controller::utils::TrajectoryConverter::convertInterpolatorToHardwareDriver(final_trajectory);
+        std::string execution_id = hardware_manager_->execute_trajectory_async(mapping, hw_trajectory, true);
 
-        // 执行轨迹
-        if (!hardware_manager_->executeTrajectory(interface, final_trajectory)) {
-            RCLCPP_ERROR(this->get_logger(), "❎ Failed to execute trajectory on interface: %s (mapping: %s)",
-                        interface.c_str(), mapping.c_str());
+        if (execution_id.empty()) {
+            RCLCPP_ERROR(this->get_logger(), "❎ Failed to start trajectory execution on mapping: %s", mapping.c_str());
+            result->error_code = FollowJointTrajectory::Result::GOAL_TOLERANCE_VIOLATED;
+            result->error_string = "Trajectory execution failed";
+            goal_handle->abort(result);
+            publish_action_event("action_failed", mapping);
+            return;
+        }
+
+        RCLCPP_INFO(this->get_logger(), "Trajectory execution started (ID: %s)", execution_id.c_str());
+
+        // 等待轨迹执行完成
+        if (!hardware_manager_->wait_for_trajectory_completion(mapping)) {
+            RCLCPP_ERROR(this->get_logger(), "❎ Failed to wait for trajectory completion");
             result->error_code = FollowJointTrajectory::Result::GOAL_TOLERANCE_VIOLATED;
             result->error_string = "Trajectory execution failed";
             goal_handle->abort(result);

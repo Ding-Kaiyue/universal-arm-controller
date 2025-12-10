@@ -6,6 +6,7 @@
 #include <any>
 #include <vector>
 #include <string>
+#include <map>
 #include <arm_controller/hardware/hardware_manager.hpp>
 
 class TrajectoryControllerBase : public ModeControllerBase {
@@ -21,6 +22,39 @@ public:
     explicit TrajectoryControllerImpl(std::string mode, rclcpp::Node::SharedPtr node) 
         : TrajectoryControllerBase(mode), node_(node) {}
     virtual ~TrajectoryControllerImpl() override = default;
+
+    // 初始化订阅 - 为指定的 mapping 创建话题订阅
+    // 在 controller 创建后、start() 调用前执行
+    void init_subscriptions(const std::string& mapping) override {
+        if (mapping.empty()) return;
+
+        // 从配置获取话题名称
+        std::string input_topic;
+        node_->get_parameter("controllers." + get_mode() + ".input_topic", input_topic);
+
+        if (input_topic.empty()) {
+            RCLCPP_WARN(node_->get_logger(), "[%s] No input_topic configured for controller", get_mode().c_str());
+            return;
+        }
+
+        // 替换 {mapping} 占位符
+        size_t pos = input_topic.find("{mapping}");
+        if (pos != std::string::npos) {
+            input_topic.replace(pos, 9, mapping);
+        }
+
+        // 创建订阅（使用映射作为键存储多个订阅）
+        subscriptions_[mapping] = node_->create_subscription<T>(
+            input_topic, rclcpp::QoS(10).reliable(),
+            [this](const typename T::SharedPtr msg) {
+                if (!is_active_) return;
+                trajectory_callback(msg);
+            }
+        );
+
+        RCLCPP_INFO(node_->get_logger(), "[%s] Subscribed to topic: %s (mapping: %s)",
+                   get_mode().c_str(), input_topic.c_str(), mapping.c_str());
+    }
 
     virtual void plan_and_execute(const std::string& mapping, const typename T::SharedPtr msg) = 0;
 
@@ -43,6 +77,24 @@ public:
 
 protected:
     rclcpp::Node::SharedPtr node_;
+
+    std::map<std::string, typename rclcpp::Subscription<T>::SharedPtr> subscriptions_;
+
+    // 清理指定 mapping 的订阅 - 在 stop() 时调用
+    void cleanup_subscriptions(const std::string& mapping) {
+        auto it = subscriptions_.find(mapping);
+        if (it != subscriptions_.end()) {
+            it->second.reset();
+            subscriptions_.erase(it);
+            RCLCPP_INFO(node_->get_logger(), "[%s] Cleaned up subscription for mapping: %s",
+                       get_mode().c_str(), mapping.c_str());
+        }
+    }
+
+    // 子类可以重写此方法以从消息中提取 mapping 信息
+    virtual std::string get_mapping_from_message([[maybe_unused]] const typename T::SharedPtr msg) {
+        return "";  // 默认实现
+    }
 };
 
 #endif  // TRAJECTORY_CONTROLLER_BASE_HPP_

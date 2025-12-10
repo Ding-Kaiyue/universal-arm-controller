@@ -17,6 +17,14 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -Wno-subobject-linkage)
 endif()
 
+# 覆盖率编译选项（仅在构建测试时启用）
+if(BUILD_TESTING)
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    add_compile_options(--coverage -fprofile-arcs -ftest-coverage)
+    link_libraries(--coverage -fprofile-arcs -ftest-coverage)
+  endif()
+endif()
+
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -140,6 +148,14 @@ target_link_libraries(arm_controller_lib
   OsqpEigen::OsqpEigen
 )
 
+# 为库本身添加覆盖率编译选项（在构建测试时）
+if(BUILD_TESTING)
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    target_compile_options(arm_controller_lib PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+    target_link_options(arm_controller_lib PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+  endif()
+endif()
+
 # Node
 add_executable(universial_arm_controller_node
   src/main.cpp
@@ -173,22 +189,37 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
 
-  ament_add_gtest(test_arm_controller_node
-    test/test_arm_controller_node.cpp
-  )
-  
-  target_link_libraries(test_arm_controller_node
-    arm_controller_lib
-  )
+  # 自动发现并编译所有测试文件
+  file(GLOB TEST_SOURCES test/test_*.cpp)
+  if(TEST_SOURCES)
+    foreach(TEST_FILE ${TEST_SOURCES})
+      get_filename_component(TEST_NAME ${TEST_FILE} NAME_WE)
 
-  ament_target_dependencies(test_arm_controller_node
-    rclcpp
-    std_msgs
-    sensor_msgs
-    geometry_msgs
-    trajectory_planning_interfaces
-    controller_interfaces
-  )
+      ament_add_gtest(${TEST_NAME} ${TEST_FILE})
+
+      target_link_libraries(${TEST_NAME}
+        arm_controller_lib
+      )
+
+      ament_target_dependencies(${TEST_NAME}
+        rclcpp
+        std_msgs
+        sensor_msgs
+        geometry_msgs
+        trajectory_msgs
+        trajectory_planning_interfaces
+        controller_interfaces
+      )
+
+      # 为测试目标添加覆盖率编译选项
+      if(CMAKE_COMPILER_IS_GNUCXX)
+        target_compile_options(${TEST_NAME} PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+        target_link_options(${TEST_NAME} PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+      endif()
+    endforeach()
+  else()
+    message(WARNING "No test files found in test/ directory")
+  endif()
 
   ament_lint_auto_find_test_dependencies()
 endif()

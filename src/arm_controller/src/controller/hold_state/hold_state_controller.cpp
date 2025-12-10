@@ -14,21 +14,9 @@ HoldStateController::HoldStateController(const rclcpp::Node::SharedPtr& node)
 void HoldStateController::start(const std::string& mapping) {
     const std::string normalized_mapping = normalize_mapping(mapping);
 
-    // 如果已经为该 mapping 激活，更新 hold 位置但不重新创建 context
+    // 如果已经为该 mapping 激活，直接返回（幂等）
     if (mapping_contexts_.count(normalized_mapping)) {
-        RCLCPP_INFO(node_->get_logger(), "HoldStateController already active for mapping '%s', updating hold position",
-                    normalized_mapping.c_str());
-
-        // 更新 hold 位置到当前位置
-        if (hardware_manager_) {
-            auto& ctx = mapping_contexts_[normalized_mapping];
-            ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
-            if (!ctx.hold_positions.empty()) {
-                hardware_manager_->send_hold_position_command(normalized_mapping, ctx.hold_positions);
-                RCLCPP_INFO(node_->get_logger(), "[%s] Updated hold position to current position",
-                           normalized_mapping.c_str());
-            }
-        }
+        RCLCPP_WARN(node_->get_logger(), "HoldStateController already active for mapping '%s'", normalized_mapping.c_str());
         return;
     }
 
@@ -36,35 +24,34 @@ void HoldStateController::start(const std::string& mapping) {
     ctx.transition_ready = true;
     ctx.system_health_check_paused = false;
 
-    // ========== 关键：根据前一个模式选择保持策略 ==========
+    // ========== 关键：检查速度，如果不为0则发送保持命令 ==========
     if (hardware_manager_) {
-        // 判断前一个模式是否为速度控制模式
-        bool is_velocity_mode = (previous_mode_ == "JointVelocity" ||
-                                 previous_mode_ == "ServoMode" ||
-                                 previous_mode_.find("Velocity") != std::string::npos);
+        // 获取当前关节位置和速度
+        ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
+        auto current_velocities = hardware_manager_->get_current_joint_velocities(normalized_mapping);
 
-        if (is_velocity_mode) {
-            // 速度模式：发送零速度命令保持
-            RCLCPP_INFO(node_->get_logger(),
-                       "[%s] HoldState using velocity hold strategy (previous mode: %s)",
-                       normalized_mapping.c_str(), previous_mode_.c_str());
-            hardware_manager_->send_hold_velocity_command(normalized_mapping);
-        } else {
-            // 位置模式：锁定当前位置
-            ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
-
-            if (!ctx.hold_positions.empty()) {
-                RCLCPP_INFO(node_->get_logger(),
-                           "[%s] HoldState using position hold strategy with %zu joints (previous mode: %s)",
-                           normalized_mapping.c_str(), ctx.hold_positions.size(), previous_mode_.c_str());
-
-                // 立即发送一次保持位置命令
-                hardware_manager_->send_hold_position_command(normalized_mapping, ctx.hold_positions);
-            } else {
-                RCLCPP_WARN(node_->get_logger(),
-                           "[%s] Failed to get current joint positions for hold state",
-                           normalized_mapping.c_str());
+        if (!ctx.hold_positions.empty()) {
+            // 检查是否所有关节速度都接近0（阈值：0.01 rad/s）
+            bool all_velocities_zero = true;
+            const double VELOCITY_THRESHOLD = 0.01;
+            for (const auto& vel : current_velocities) {
+                if (std::abs(vel) > VELOCITY_THRESHOLD) {
+                    all_velocities_zero = false;
+                    break;
+                }
             }
+
+            // 如果速度不为0，发送保持命令来停止电机；否则不需要做任何处理
+            if (!all_velocities_zero) {
+                RCLCPP_INFO(node_->get_logger(),
+                           "[%s] Robot is moving, sending hold command to stop at current position",
+                           normalized_mapping.c_str());
+                hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
+            }
+        } else {
+            RCLCPP_WARN(node_->get_logger(),
+                       "[%s] Failed to get current joint positions for hold state",
+                       normalized_mapping.c_str());
         }
     }
     // =======================================================
@@ -74,7 +61,7 @@ void HoldStateController::start(const std::string& mapping) {
         hardware_manager_->reset_system_health(normalized_mapping);
     }
 
-    // 为该 mapping 创建定时器（捕获 mapping 的副本）
+    // 为该 mapping 创建定时器（仅用于安全检查，不发送保持命令）
     ctx.safety_timer = node_->create_wall_timer(
         std::chrono::milliseconds(100),
         [this, normalized_mapping]() { this->safety_check_timer_callback(normalized_mapping); }
@@ -95,11 +82,13 @@ bool HoldStateController::stop(const std::string& mapping) {
         return false;
     }
 
-    // 取消该 mapping 的定时器并移除上下文
+    // 取消该 mapping 的定时器
     if (it->second.safety_timer) {
         it->second.safety_timer->cancel();
         it->second.safety_timer.reset();
     }
+
+    // 移除上下文
     mapping_contexts_.erase(it);
 
     RCLCPP_INFO(node_->get_logger(), "HoldStateController stopped for mapping '%s'", normalized_mapping.c_str());
@@ -191,23 +180,7 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
         return;
     }
 
-    // ========== 持续发送保持命令（根据前一个模式选择策略） ==========
-    if (hardware_manager_) {
-        // 判断前一个模式是否为速度控制模式
-        bool is_velocity_mode = (previous_mode_ == "JointVelocity" ||
-                                 previous_mode_ == "CartesianVelocity" ||
-                                 previous_mode_.find("Velocity") != std::string::npos);
-
-        if (is_velocity_mode) {
-            // 速度模式：持续发送零速度命令
-            hardware_manager_->send_hold_velocity_command(normalized_mapping);
-        } else if (!ctx.hold_positions.empty()) {
-            // 位置模式：持续发送锁定的目标位置
-            hardware_manager_->send_hold_position_command(normalized_mapping, ctx.hold_positions);
-        }
-    }
-    // ===========================================================
-
+    // ========== 仅进行安全检查，不发送保持命令 ==========
     // 如果健康检查被暂停，检查系统是否恢复健康
     if (ctx.system_health_check_paused) {
         if (hardware_manager_ && hardware_manager_->is_system_healthy(normalized_mapping)) {
@@ -224,15 +197,17 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
         // 检查是否可以安全转换到目标状态
         if (can_transition_to_target(normalized_mapping)) {
             RCLCPP_INFO(node_->get_logger(), "Safety conditions satisfied, triggering transition to %s", target_mode_.c_str());
-            transition_ready_callback_();
 
-            // 转换完成后停止定时器，避免重复触发
+            // 关键：在调用回调前停止定时器，避免竞态条件
             if (ctx.safety_timer) {
                 ctx.safety_timer->cancel();
                 ctx.safety_timer.reset();
             }
+
+            // 调用回调 - 执行实际的转换
+            transition_ready_callback_();
         }
         // 如果条件不满足，继续等待下一次检查
     }
-    // 如果没有目标模式，说明这是终止状态（如轨迹执行完成后），只保持位置，不尝试转换
-} 
+    // 如果没有目标模式，说明这是 HoldState 终止状态，保持等待
+}

@@ -264,7 +264,22 @@ std::vector<double> HardwareManager::get_current_joint_positions(const std::stri
     return std::vector<double>{};
 }
 
-bool HardwareManager::send_hold_position_command(const std::string& mapping,
+
+std::vector<double> HardwareManager::get_current_joint_velocities(const std::string& mapping) const {
+    std::lock_guard<std::mutex> lock(joint_state_mutex_);
+
+    auto it = mapping_joint_states_.find(mapping);
+    if (it != mapping_joint_states_.end()) {
+        return it->second.velocity;
+    }
+
+    RCLCPP_WARN(node_->get_logger(),
+                "[%s] Joint state not found, returning empty velocity vector",
+                mapping.c_str());
+    return std::vector<double>{};
+}
+
+bool HardwareManager::send_hold_state_command(const std::string& mapping,
                                                   const std::vector<double>& positions) {
     if (!hardware_driver_) {
         RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
@@ -308,35 +323,6 @@ bool HardwareManager::send_hold_position_command(const std::string& mapping,
     if (!success) {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
                             "[%s] ❎ Failed to send hold position command",
-                            mapping.c_str());
-    }
-
-    return success;
-}
-
-bool HardwareManager::send_hold_velocity_command(const std::string& mapping) {
-    if (!hardware_driver_) {
-        RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
-        return false;
-    }
-
-    const std::string& interface = get_interface(mapping);
-    if (interface.empty() || interface == "unknown_interface") {
-        RCLCPP_ERROR(node_->get_logger(),
-                    "[%s] ❎ Invalid interface for sending hold velocity command",
-                    mapping.c_str());
-        return false;
-    }
-
-    // 创建零速度数组
-    std::array<double, 6> zero_velocities{};
-
-    // 使用实时速度控制接口发送零速度命令
-    bool success = hardware_driver_->send_realtime_velocity_command(interface, zero_velocities);
-
-    if (!success) {
-        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
-                            "[%s] ❎ Failed to send hold velocity command",
                             mapping.c_str());
     }
 
@@ -809,4 +795,231 @@ void HardwareManager::reset_system_health(const std::string& mapping) {
 
 void HardwareManager::clear_emergency_stops(const std::string& mapping) {
     joint_emergency_stop_[mapping] = false;
+}
+
+bool HardwareManager::enable_motors(const std::string& mapping, uint8_t mode) {
+    if (!hardware_driver_) {
+        RCLCPP_ERROR(node_->get_logger(), "Hardware driver not initialized");
+        return false;
+    }
+
+    try {
+        const std::string& interface = get_interface(mapping);
+        const std::vector<uint32_t>& motor_ids = get_motors_id(mapping);
+
+        // 检查mapping是否有效
+        if (interface.empty() || motor_ids.empty()) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Mapping '%s' not found in configuration", mapping.c_str());
+            return false;
+        }
+
+        hardware_driver_->enable_motors(interface, motor_ids, mode);
+
+        // 重置系统安全状态
+        clear_emergency_stops(mapping);
+        reset_system_health(mapping);
+
+        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ All motors enabled successfully (mode: %u)", mapping.c_str(), mode);
+        return true;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to enable motors: %s", mapping.c_str(), e.what());
+        return false;
+    }
+}
+
+bool HardwareManager::disable_motors(const std::string& mapping, uint8_t mode) {
+    if (!hardware_driver_) {
+        RCLCPP_ERROR(node_->get_logger(), "Hardware driver not initialized");
+        return false;
+    }
+
+    try {
+        const std::string& interface = get_interface(mapping);
+        const std::vector<uint32_t>& motor_ids = get_motors_id(mapping);
+
+        // 检查mapping是否有效
+        if (interface.empty() || motor_ids.empty()) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Mapping '%s' not found in configuration", mapping.c_str());
+            return false;
+        }
+
+        hardware_driver_->disable_motors(interface, motor_ids, mode);
+
+        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ All motors disabled successfully (mode: %u)", mapping.c_str(), mode);
+        return true;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to disable motors: %s", mapping.c_str(), e.what());
+        return false;
+    }
+}
+
+// ============= 异步轨迹执行和控制接口实现 =============
+
+std::string HardwareManager::execute_trajectory_async(
+    const std::string& mapping,
+    const Trajectory& trajectory,
+    bool show_progress) {
+    try {
+        if (mapping_to_interface_.find(mapping) == mapping_to_interface_.end()) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Mapping '%s' not found", mapping.c_str());
+            return "";
+        }
+
+        const std::string& interface = mapping_to_interface_.at(mapping);
+
+        // 调用硬件驱动的异步执行方法
+        std::string execution_id = hardware_driver_->execute_trajectory_async(interface, trajectory, show_progress);
+
+        if (!execution_id.empty()) {
+            // 记录 mapping -> execution_id 的对应关系
+            {
+                std::lock_guard<std::mutex> lock(execution_mutex_);
+                mapping_to_execution_id_[mapping] = execution_id;
+            }
+            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Trajectory execution started (ID: %s)", mapping.c_str(), execution_id.c_str());
+        } else {
+            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to start trajectory execution", mapping.c_str());
+        }
+
+        return execution_id;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception during trajectory execution: %s", mapping.c_str(), e.what());
+        return "";
+    }
+}
+
+bool HardwareManager::pause_trajectory(const std::string& mapping) {
+    try {
+        if (!hardware_driver_) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+            return false;
+        }
+
+        // 获取该 mapping 当前的 execution_id
+        std::string execution_id;
+        {
+            std::lock_guard<std::mutex> lock(execution_mutex_);
+            auto it = mapping_to_execution_id_.find(mapping);
+            if (it == mapping_to_execution_id_.end()) {
+                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping", mapping.c_str());
+                return false;
+            }
+            execution_id = it->second;
+        }
+
+        bool success = hardware_driver_->pause_trajectory(execution_id);
+        if (success) {
+            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Trajectory paused (ID: %s)", mapping.c_str(), execution_id.c_str());
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Failed to pause trajectory (ID: %s)", mapping.c_str(), execution_id.c_str());
+        }
+        return success;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception during trajectory pause: %s", mapping.c_str(), e.what());
+        return false;
+    }
+}
+
+bool HardwareManager::resume_trajectory(const std::string& mapping) {
+    try {
+        if (!hardware_driver_) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+            return false;
+        }
+
+        // 获取该 mapping 当前的 execution_id
+        std::string execution_id;
+        {
+            std::lock_guard<std::mutex> lock(execution_mutex_);
+            auto it = mapping_to_execution_id_.find(mapping);
+            if (it == mapping_to_execution_id_.end()) {
+                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping", mapping.c_str());
+                return false;
+            }
+            execution_id = it->second;
+        }
+
+        bool success = hardware_driver_->resume_trajectory(execution_id);
+        if (success) {
+            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Trajectory resumed (ID: %s)", mapping.c_str(), execution_id.c_str());
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Failed to resume trajectory (ID: %s)", mapping.c_str(), execution_id.c_str());
+        }
+        return success;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception during trajectory resume: %s", mapping.c_str(), e.what());
+        return false;
+    }
+}
+
+bool HardwareManager::cancel_trajectory(const std::string& mapping) {
+    try {
+        if (!hardware_driver_) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+            return false;
+        }
+
+        // 获取该 mapping 当前的 execution_id
+        std::string execution_id;
+        {
+            std::lock_guard<std::mutex> lock(execution_mutex_);
+            auto it = mapping_to_execution_id_.find(mapping);
+            if (it == mapping_to_execution_id_.end()) {
+                return false;
+            }
+            execution_id = it->second;
+        }
+
+        bool success = hardware_driver_->cancel_trajectory(execution_id);
+        if (success) {
+            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Trajectory cancelled (ID: %s)", mapping.c_str(), execution_id.c_str());
+
+            // 清理执行ID映射
+            {
+                std::lock_guard<std::mutex> lock(execution_mutex_);
+                mapping_to_execution_id_.erase(mapping);
+            }
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Failed to cancel trajectory (ID: %s)", mapping.c_str(), execution_id.c_str());
+        }
+        return success;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception during trajectory cancel: %s", mapping.c_str(), e.what());
+        return false;
+    }
+}
+
+bool HardwareManager::wait_for_trajectory_completion(const std::string& mapping, int timeout_ms) {
+    try {
+        if (!hardware_driver_) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+            return false;
+        }
+
+        // 获取该 mapping 当前的 execution_id
+        std::string execution_id;
+        {
+            std::lock_guard<std::mutex> lock(execution_mutex_);
+            auto it = mapping_to_execution_id_.find(mapping);
+            if (it == mapping_to_execution_id_.end()) {
+                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping", mapping.c_str());
+                return false;
+            }
+            execution_id = it->second;
+        }
+
+        // 等待轨迹执行完成
+        bool completed = hardware_driver_->wait_for_completion(execution_id, timeout_ms);
+
+        if (completed) {
+            // 清理执行ID映射
+            std::lock_guard<std::mutex> lock(execution_mutex_);
+            mapping_to_execution_id_.erase(mapping);
+        }
+
+        return completed;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "❎ Exception waiting for trajectory completion: %s", e.what());
+        return false;
+    }
 }

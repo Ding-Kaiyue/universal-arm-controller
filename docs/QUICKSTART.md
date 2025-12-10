@@ -5,7 +5,7 @@
 ## 前提条件
 
 - ✅ Ubuntu 22.04 LTS 或更高版本
-- ✅ ROS2 Humble 已安装
+- ✅ 根据 [安装指南](INSTALLATION.md) 配置好环境
 - ✅ 网络连接正常
 
 ## 第一步：安装
@@ -57,7 +57,7 @@ ros2 service call /controller_api/controller_mode \
   controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
 
 # 发送关节目标位置
-ros2 topic pub /controller_api/movej_action sensor_msgs/msg/JointState \
+ros2 topic pub /controller_api/movej_action/single_arm sensor_msgs/msg/JointState \
   "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 ```
 

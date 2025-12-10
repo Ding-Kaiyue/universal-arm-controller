@@ -1,7 +1,7 @@
 # Request
 string mapping     # 指定要操作的映射 ("single_arm", "left_arm", "right_arm")
-string action      # 操作类型: "enable" 或 "disable"
-uint8 mode         # 使能时的模式 (仅当 action="enable" 时使用)
+string action      # 操作类型: "Enable" 或 "Disable"
+uint8 mode         # 使能时的模式 (仅当 action="Enable" 时使用)
 ---
 # Response
 bool success

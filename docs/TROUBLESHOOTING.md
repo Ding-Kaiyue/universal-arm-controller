@@ -195,7 +195,7 @@ ip link show can0
 
 # 3. 检查控制命令是否发送成功
 # 监听话题
-ros2 topic echo /controller_api/movej_action
+ros2 topic echo /controller_api/movej_action/single_arm
 
 # 4. 检查当前模式
 ros2 topic echo /controller_api/running_status

@@ -174,7 +174,7 @@ Status Feedback
 
 ```
 1. 用户发送 MoveJ 目标关节角度
-   ros2 topic pub /controller_api/movej_action sensor_msgs/msg/JointState
+   ros2 topic pub /controller_api/movej_action/single_arm sensor_msgs/msg/JointState
 
 2. Arm Controller 接收并验证
    - 检查目标是否在关节限制内

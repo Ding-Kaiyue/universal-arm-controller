@@ -10,6 +10,9 @@ public:
     explicit ModeControllerBase(std::string mode) : mode_(mode) {}
     virtual ~ModeControllerBase() = default;
 
+    // 初始化订阅 - 子类可以重写以创建话题订阅
+    virtual void init_subscriptions(const std::string& mapping = "") { (void)mapping; }
+
     virtual void start(const std::string& mapping = "") { (void)mapping; is_active_ = true; }
     virtual bool stop(const std::string& mapping = "") { (void)mapping; is_active_ = false; return is_active_;}
     

@@ -6,7 +6,7 @@
 #include <chrono>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'CartesianVelocity', mapping: 'single_arm'}"
-// ros2 topic pub --once /controller_api/cartesian_velocity_action geometry_msgs/msg/TwistStamped "{header: {stamp: {sec: 0, nanosec: 0}, frame_id: 'base_link'}, twist: {linear: {x: 0.03, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}}"
+// ros2 topic pub --once /controller_api/cartesian_velocity_action/single_arm geometry_msgs/msg/TwistStamped "{header: {stamp: {sec: 0, nanosec: 0}, frame_id: 'base_link'}, twist: {linear: {x: 0.03, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}}"
 
 CartesianVelocityController::CartesianVelocityController(const rclcpp::Node::SharedPtr& node)
     : VelocityControllerImpl<geometry_msgs::msg::TwistStamped>("CartesianVelocity", node),
@@ -49,6 +49,11 @@ void CartesianVelocityController::start(const std::string& mapping) {
     active_mapping_ = mapping;
     is_active_ = true;
 
+    // 在激活时创建话题订阅（如果还没创建的话）
+    if (subscriptions_.find(mapping) == subscriptions_.end()) {
+        init_subscriptions(mapping);
+    }
+
     // ════════════════════════════════════════════════════════════════════════════════
     // 在启动时将世界坐标系（world）设置为参考坐标系
     // 后续所有速度命令都相对于全局固定的世界坐标系计算，不受机械臂自身旋转影响
@@ -86,6 +91,9 @@ bool CartesianVelocityController::stop(const std::string& mapping) {
         std::vector<double> zero_velocities(joint_names.size(), 0.0);
         send_joint_velocities(zero_velocities);
     }
+
+    // 清理该 mapping 的话题订阅
+    cleanup_subscriptions(mapping);
 
     RCLCPP_INFO(node_->get_logger(), "[%s] CartesianVelocityController deactivated", mapping.c_str());
     return true;  // 需要钩子状态来安全停止

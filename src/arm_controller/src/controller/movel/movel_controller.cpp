@@ -4,7 +4,7 @@
 #include <set>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveL', mapping: 'single_arm'}"
-// ros2 topic pub --once /controller_api/movel_action geometry_msgs/msg/Pose "{position: {x: 0.19, y: 0.0, z: 0.63}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}}"
+// ros2 topic pub --once /controller_api/movel_action/single_arm geometry_msgs/msg/Pose "{position: {x: 0.19, y: 0.0, z: 0.63}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}}"
 
 MoveLController::MoveLController(const rclcpp::Node::SharedPtr& node)
     : TrajectoryControllerImpl<geometry_msgs::msg::Pose>("MoveL", node)
@@ -24,6 +24,8 @@ MoveLController::MoveLController(const rclcpp::Node::SharedPtr& node)
 
     // 初始化轨迹规划服务
     initialize_planning_services();
+
+    // 注意：话题订阅在 init_subscriptions() 中创建，以支持 {mapping} 占位符
 }
 
 void MoveLController::start(const std::string& mapping) {
@@ -33,6 +35,15 @@ void MoveLController::start(const std::string& mapping) {
         throw std::runtime_error(
             "❎ [" + mapping + "] MoveL: not found in hardware configuration."
         );
+    }
+
+    // 保存当前激活的 mapping
+    active_mapping_ = mapping;
+    is_active_ = true;
+
+    // 在激活时创建话题订阅（如果还没创建的话）
+    if (subscriptions_.find(mapping) == subscriptions_.end()) {
+        init_subscriptions(mapping);
     }
 
     // 同步 MoveIt 状态到当前机械臂位置，防止规划从错误的起始位置开始
@@ -53,6 +64,17 @@ void MoveLController::start(const std::string& mapping) {
 
 bool MoveLController::stop(const std::string& mapping) {
     is_active_ = false;
+
+    // 清理资源
+    active_mapping_.clear();
+
+    // 清理该 mapping 的话题订阅
+    cleanup_subscriptions(mapping);
+
+    // 注意：轨迹执行是在 ROS2 callback 中同步进行的
+    // execute_trajectory 是阻塞调用，stop() 被调用时表示上一个轨迹已执行完毕
+    // 或模式切换已等待轨迹完成
+
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveLController deactivated", mapping.c_str());
     return true;
 }
@@ -201,19 +223,20 @@ void MoveLController::execute_trajectory(
     const trajectory_interpolator::Trajectory& trajectory,
     const std::string& mapping) {
     try {
-        // 获取对应的interface
-        std::string interface = hardware_manager_->get_interface(mapping);
-        if (interface.empty()) {
-            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: No interface found for mapping", mapping.c_str());
+        // 使用转换工具将轨迹转换为硬件驱动格式
+        Trajectory hw_trajectory = arm_controller::utils::TrajectoryConverter::convertInterpolatorToHardwareDriver(trajectory);
+
+        // 使用异步执行轨迹（不阻塞，并保存 execution_id 以支持暂停/恢复/取消）
+        std::string execution_id = hardware_manager_->execute_trajectory_async(mapping, hw_trajectory, true);
+        if (execution_id.empty()) {
+            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Failed to execute trajectory on mapping: %s",
+                        mapping.c_str(), mapping.c_str());
             return;
         }
 
-        // 执行轨迹
-        if (!hardware_manager_->executeTrajectory(interface, trajectory)) {
-            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Failed to execute trajectory on interface: %s",
-                        mapping.c_str(), interface.c_str());
-            return;
-        }
+        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveL: Trajectory execution started (ID: %s)",
+                   mapping.c_str(), execution_id.c_str());
+
 
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Exception during trajectory execution: %s",

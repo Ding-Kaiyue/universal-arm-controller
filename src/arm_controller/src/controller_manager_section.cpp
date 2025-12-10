@@ -6,6 +6,8 @@
 #include "controller/controller_registry.hpp"
 #include "controller_interface.hpp"
 #include "button/button_event_handler.hpp"
+#include <algorithm>
+
 // #include "controller/move2start/move2start_controller.hpp"
 // #include "controller/move2initial/move2initial_controller.hpp"
 
@@ -34,8 +36,14 @@ void ControllerManagerNode::post_init() {
     init_button_handler();  // 初始化按键处理器
     init_controllers();
 
-    // 先启动 SystemStart 控制器使能电机（使用默认 mapping）
-    start_working_controller("SystemStart", "single_arm");
+    // 启动默认控制器
+    auto mappings = hardware_manager_->get_all_mappings();
+    for (const auto& mapping : mappings) {
+        start_working_controller("SystemStart", mapping);
+        RCLCPP_INFO(this->get_logger(), 
+            "✅ Starting default controller for mapping: %s", mapping.c_str());
+
+    }
 
     // 然后切换到 HoldState 保持当前位置
     start_working_controller("HoldState", "single_arm");
@@ -137,6 +145,9 @@ void ControllerManagerNode::init_controllers() {
         }
         auto available = get_available_controllers();
 
+        // 获取所有 mapping
+        auto all_mappings = hardware_manager_->get_all_mappings();
+
         for (const auto& entry : yaml_config_["controllers"]) {
             std::string key = entry["key"].as<std::string>();
             std::string class_name = entry["class"].as<std::string>();
@@ -160,17 +171,24 @@ void ControllerManagerNode::init_controllers() {
             auto it = available.find(class_name);
             if (it != available.end()) {
                 ControllerInterface::instance().register_class(key, it->second);
-                auto controller = it->second(this->shared_from_this());
-                controller_map_[key] = controller;
-                RCLCPP_INFO(this->get_logger(), "[controllers] Registered controller: %s (class: %s)",
-                            key.c_str(), class_name.c_str());
+
+                // 为每个 mapping 创建一个 controller 实例
+                for (const auto& mapping : all_mappings) {
+                    auto controller = it->second(this->shared_from_this());
+                    auto key_pair = std::make_pair(key, mapping);
+                    controller_map_[key_pair] = controller;
+                    RCLCPP_DEBUG(this->get_logger(), "[controllers] Created controller: %s for mapping: %s (class: %s)",
+                                key.c_str(), mapping.c_str(), class_name.c_str());
+                }
+                RCLCPP_INFO(this->get_logger(), "[controllers] Registered controller: %s (class: %s) for %zu mappings",
+                            key.c_str(), class_name.c_str(), all_mappings.size());
             } else {
                 RCLCPP_WARN(this->get_logger(), "[controllers] Controller class '%s' not found for key '%s'",
                             class_name.c_str(), key.c_str());
             }
         }
 
-        RCLCPP_INFO(this->get_logger(), "Initialized %zu controllers", controller_map_.size());
+        RCLCPP_INFO(this->get_logger(), "Initialized %zu controller instances", controller_map_.size());
     } catch (const std::exception& e) {
         RCLCPP_FATAL(this->get_logger(), "Failed to initialize controllers: %s", e.what());
         rclcpp::shutdown();
@@ -201,19 +219,30 @@ void ControllerManagerNode::handle_work_mode(
 }
 
 bool ControllerManagerNode::start_working_controller(const std::string& mode_name, const std::string& mapping) {
-    auto it = controller_map_.find(mode_name);
+    // 立即取消任何正在执行的轨迹（所有模式切换都需要这样做）
+    if (hardware_manager_) {
+        hardware_manager_->cancel_trajectory(mapping);
+    }
+
+    // 使用 (mode_name, mapping) 对查找 controller 实例
+    auto key_pair = std::make_pair(mode_name, mapping);
+    auto it = controller_map_.find(key_pair);
     if (it == controller_map_.end()) {
-        RCLCPP_ERROR(this->get_logger(), "Invalid work mode %s", mode_name.c_str());
+        RCLCPP_ERROR(this->get_logger(), "Invalid work mode %s for mapping %s", mode_name.c_str(), mapping.c_str());
         return false;
     }
 
     // 对于Disable和EmergencyStop模式，总是强制执行，即使已经在该模式（确保真正失能）
     if (mode_name == "Disable" || mode_name == "EmergencyStop") {
         // 强制停止当前控制器，不管需不需要钩子状态
-        auto current_it = controller_map_.find(current_mode_);
-        if (current_it != controller_map_.end()) {
-            current_it->second->stop(mapping);
-            RCLCPP_INFO(this->get_logger(), "Force stopped controller for mode: %s", current_mode_.c_str());
+        auto current_mode_it = mapping_to_mode_.find(mapping);
+        if (current_mode_it != mapping_to_mode_.end()) {
+            auto current_key_pair = std::make_pair(current_mode_it->second, mapping);
+            auto current_it = controller_map_.find(current_key_pair);
+            if (current_it != controller_map_.end()) {
+                current_it->second->stop(mapping);
+                RCLCPP_INFO(this->get_logger(), "[%s] Force stopped controller for mode: %s", mapping.c_str(), current_mode_it->second.c_str());
+            }
         }
         return switch_to_mode(mode_name, mapping);
     }
@@ -224,10 +253,12 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
         return true;
     }
 
-    // 如果当前处于钩子状态，记录请求但不做任何处理，让持续检查机制自动处理转换
+    // 如果当前处于钩子状态，记录请求
     if (in_hook_state_) {
-        RCLCPP_INFO(this->get_logger(), "Currently in hook state, continous safety monitoring will handle transition to mode %s",
-                    mode_name.c_str());
+        RCLCPP_INFO(this->get_logger(), "[%s] Currently in hook state, updating target mode to %s",
+                    mapping.c_str(), mode_name.c_str());
+        // 轨迹已在上面取消，更新目标模式，让持续检查机制自动处理转换
+        target_mode_ = mode_name;
         return true;
     }
 
@@ -251,10 +282,23 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
 
 bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::string& mapping) {
     need_hook = false;
-    auto it = controller_map_.find(current_mode_);
+
+    auto current_mode_it = mapping_to_mode_.find(mapping);
+    if (current_mode_it == mapping_to_mode_.end()) {
+        RCLCPP_WARN(this->get_logger(), "[%s] No active mode found for mapping", mapping.c_str());
+        return true;  // 没有活跃模式，无需停止
+    }
+
+    // 使用 (mode, mapping) 对查找 controller 实例
+    auto key_pair = std::make_pair(current_mode_it->second, mapping);
+    auto it = controller_map_.find(key_pair);
     if (it != controller_map_.end()) {
         need_hook = it->second->needs_hook_state();
         it->second->stop(mapping);
+
+        // 注意：话题订阅由控制器在 start() 中动态创建
+        // 当 stop() 调用时，控制器会停止处理消息（通过 is_active_ 标志）
+
         RCLCPP_INFO(this->get_logger(), "[%s] Stopped controller for mode: %s, needs_hook: %s",
                     mapping.c_str(), current_mode_.c_str(), need_hook ? "true" : "false");
         return true;
@@ -267,14 +311,11 @@ bool ControllerManagerNode::enter_hook_state(const std::string& target_mode, con
     target_mode_ = target_mode;
     in_hook_state_ = true;
 
-    auto hook_it = controller_map_.find("HoldState");
+    auto hook_key = std::make_pair("HoldState", mapping);
+    auto hook_it = controller_map_.find(hook_key);
     if (hook_it != controller_map_.end()) {
         auto hold_controller = std::dynamic_pointer_cast<HoldStateController>(hook_it->second);
         if (hold_controller) {
-            // 设置前一个模式（从当前模式切换到 HoldState）
-            hold_controller->set_previous_mode(current_mode_);
-            RCLCPP_DEBUG(this->get_logger(), "Set previous_mode to '%s' for HoldState", current_mode_.c_str());
-
             // 设置目标状态
             hold_controller->set_target_mode(target_mode);
 
@@ -335,7 +376,8 @@ bool ControllerManagerNode::exit_hook_state(const std::string& mapping) {
     // 如果目标模式不是HoldState，则停止当前的HoldState控制器
     // 如果目标就是HoldState，则不需要停止（避免竞态条件）
     if (target_mode_ != "HoldState") {
-        auto hook_it = controller_map_.find("HoldState");
+        auto hook_key = std::make_pair("HoldState", mapping);
+        auto hook_it = controller_map_.find(hook_key);
         if (hook_it != controller_map_.end()) {
             RCLCPP_DEBUG(this->get_logger(), "Stopping HoldState controller before switching to %s", target_mode_.c_str());
             hook_it->second->stop(mapping);
@@ -362,31 +404,23 @@ bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const s
         return false;
     }
 
-    auto it = controller_map_.find(mode_name);
+    // 使用 (mode_name, mapping) 对查找 controller 实例
+    auto key_pair = std::make_pair(mode_name, mapping);
+    auto it = controller_map_.find(key_pair);
     if (it == controller_map_.end()) {
-        RCLCPP_ERROR(this->get_logger(), "Controller not found for mode: %s", mode_name.c_str());
+        RCLCPP_ERROR(this->get_logger(), "Controller not found for mode: %s, mapping: %s", mode_name.c_str(), mapping.c_str());
         return false;
     }
 
     if (!it->second) {
-        RCLCPP_ERROR(this->get_logger(), "Controller pointer is null for mode: %s", mode_name.c_str());
+        RCLCPP_ERROR(this->get_logger(), "Controller pointer is null for mode: %s, mapping: %s", mode_name.c_str(), mapping.c_str());
         return false;
     }
 
     try {
-        // 如果切换到 HoldState，传递前一个模式
-        if (mode_name == "HoldState") {
-            auto hold_controller = std::dynamic_pointer_cast<HoldStateController>(it->second);
-            if (hold_controller) {
-                std::string prev_mode = current_mode_;  // 创建本地副本，避免竞态条件
-                hold_controller->set_previous_mode(prev_mode);
-                RCLCPP_DEBUG(this->get_logger(), "Set previous_mode to '%s' for HoldState", prev_mode.c_str());
-            }
-        }
-
         // 启动新控制器
         it->second->start(mapping);
-        current_mode_ = mode_name;
+        mapping_to_mode_[mapping] = mode_name;
 
         // 清空缓存的消息（避免切换控制器时执行旧消息导致意外运动）
         // 注意：禁用自动投递缓存消息，因为这会导致切换控制器时机械臂意外运动
@@ -435,7 +469,12 @@ void ControllerManagerNode::init_action_event_listener() {
         "/action_controller_events", rclcpp::QoS(10).reliable(),
         std::bind(&ControllerManagerNode::handle_action_event, this, std::placeholders::_1));
 
-    RCLCPP_INFO(this->get_logger(), "Action event listener initialized");
+    // 创建轨迹控制命令订阅器
+    trajectory_control_subscriber_ = this->create_subscription<controller_interfaces::msg::TrajectoryControl>(
+        "/trajectory_control", rclcpp::QoS(10).reliable(),
+        std::bind(&ControllerManagerNode::handle_trajectory_control, this, std::placeholders::_1));
+
+    RCLCPP_INFO(this->get_logger(), "Action event listener and trajectory control listener initialized");
 }
 
 void ControllerManagerNode::init_button_handler() {
@@ -497,6 +536,11 @@ void ControllerManagerNode::handle_action_event(const std_msgs::msg::String::Sha
 
     RCLCPP_INFO(this->get_logger(), "Received action event: %s (mapping: %s)", event_type.c_str(), mapping.c_str());
 
+    // 如果已经在钩子状态中（用户已主动请求切换到某个模式），不应该被action事件改变
+    if (in_hook_state_) {
+        return;
+    }
+
     if (event_type == "action_goal_accepted") {
         // 自动切换到ROS2ActionControl模式（无论之前在哪个模式）
         RCLCPP_INFO(this->get_logger(), "Action goal accepted for mapping: %s, switching to ROS2ActionControl mode", mapping.c_str());
@@ -529,60 +573,91 @@ void ControllerManagerNode::handle_action_event(const std_msgs::msg::String::Sha
     }
 }
 
-// bool ControllerManagerNode::execute_move_to_start(const std::string& mapping) {
-//     RCLCPP_INFO(this->get_logger(), "Executing move to start for mapping: %s", mapping.c_str());
+void ControllerManagerNode::handle_motor_control(
+    const std::shared_ptr<controller_interfaces::srv::MotorControl::Request> request,
+    std::shared_ptr<controller_interfaces::srv::MotorControl::Response> response) {
 
-//     // 获取Move2Start控制器
-//     auto it = controller_map_.find("Move2StartController");
-//     if (it == controller_map_.end()) {
-//         RCLCPP_ERROR(this->get_logger(), "Move2StartController not found");
-//         return false;
-//     }
+    std::string mapping = request->mapping.empty() ? "single_arm" : request->mapping;
+    std::string action = request->action;
 
-//     // 转换为Move2StartController类型
-//     auto move2start_controller = std::dynamic_pointer_cast<Move2StartController>(it->second);
-//     if (!move2start_controller) {
-//         RCLCPP_ERROR(this->get_logger(), "Failed to cast to Move2StartController");
-//         return false;
-//     }
+    RCLCPP_INFO(this->get_logger(), "Motor control request: action=%s, mapping=%s", action.c_str(), mapping.c_str());
 
-//     try {
-//         // 调用plan_and_execute_to_start方法
-//         move2start_controller->plan_and_execute_to_start(mapping);
-//         RCLCPP_INFO(this->get_logger(), "Move to start completed for mapping: %s", mapping.c_str());
-//         return true;
-//     } catch (const std::exception& e) {
-//         RCLCPP_ERROR(this->get_logger(), "Failed to execute move to start for mapping %s: %s",
-//                      mapping.c_str(), e.what());
-//         return false;
-//     }
+    if (!hardware_manager_) {
+        response->success = false;
+        response->message = "Hardware manager not initialized";
+        return;
+    }
+
+    // 电机模式
+    uint8_t mode = request->mode;
+
+    if (action == "Enable") {
+        bool success = hardware_manager_->enable_motors(mapping, mode);
+        response->success = success;
+        response->message = success ? "✅ Motors enabled successfully" : "❎ Failed to enable motors";
+    } else if (action == "Disable") {
+        // 失能电机
+        bool success = hardware_manager_->disable_motors(mapping, mode);
+        response->success = success;
+        response->message = success ? "✅ Motors disabled successfully" : "❎ Failed to disable motors";
+    } else {
+        response->success = false;
+        response->message = "Invalid action: " + action + ". Use 'Enable' or 'Disable'";
+    }
+}
+
+void ControllerManagerNode::handle_trajectory_control(const controller_interfaces::msg::TrajectoryControl::SharedPtr msg) {
+    // 安全检查
+    if (!msg) {
+        RCLCPP_WARN(this->get_logger(), "Received null trajectory control message");
+        return;
+    }
+
+    if (!hardware_manager_) {
+        RCLCPP_ERROR(this->get_logger(), "Hardware manager not initialized");
+        return;
+    }
+
+    std::string action = msg->action;
+    std::string mapping = msg->mapping.empty() ? "single_arm" : msg->mapping;
+
+    RCLCPP_INFO(this->get_logger(), "Received trajectory control command: action=%s, mapping=%s",
+                action.c_str(), mapping.c_str());
+
+    if (action == "Pause") {
+        if (hardware_manager_->pause_trajectory(mapping)) {
+            RCLCPP_INFO(this->get_logger(), "✅ Trajectory paused successfully for mapping: %s", mapping.c_str());
+        } else {
+            RCLCPP_WARN(this->get_logger(), "⚠️  Failed to pause trajectory for mapping: %s", mapping.c_str());
+        }
+    }
+    else if (action == "Resume") {
+        if (hardware_manager_->resume_trajectory(mapping)) {
+            RCLCPP_INFO(this->get_logger(), "✅ Trajectory resumed successfully for mapping: %s", mapping.c_str());
+        } else {
+            RCLCPP_WARN(this->get_logger(), "⚠️  Failed to resume trajectory for mapping: %s", mapping.c_str());
+        }
+    }
+    else if (action == "Cancel") {
+        if (hardware_manager_->cancel_trajectory(mapping)) {
+            RCLCPP_INFO(this->get_logger(), "✅ Trajectory cancelled successfully for mapping: %s", mapping.c_str());
+        } else {
+            RCLCPP_WARN(this->get_logger(), "⚠️  Failed to cancel trajectory for mapping: %s", mapping.c_str());
+        }
+    }
+    else {
+        RCLCPP_WARN(this->get_logger(), "⚠️  Unknown trajectory control action: %s", action.c_str());
+    }
+}
+
+// [已弃用] 这些函数不再被使用
+// 原因：控制器现在在自己的构造函数中创建话题订阅，而不是由ControllerManagerNode管理
+// 保留以供参考，但不应被调用
+//
+// void ControllerManagerNode::create_controller_subscriptions(const std::string& mode_key, const std::string& mapping) {
+//     // 已移到各控制器的构造函数中
 // }
-
-// bool ControllerManagerNode::execute_move_to_initial(const std::string& mapping) {
-//     RCLCPP_INFO(this->get_logger(), "Executing move to initial for mapping: %s", mapping.c_str());
-
-//     // 获取Move2Initial控制器
-//     auto it = controller_map_.find("Move2InitialController");
-//     if (it == controller_map_.end()) {
-//         RCLCPP_ERROR(this->get_logger(), "Move2InitialController not found");
-//         return false;
-//     }
-
-//     // 转换为Move2InitialController类型
-//     auto move2initial_controller = std::dynamic_pointer_cast<Move2InitialController>(it->second);
-//     if (!move2initial_controller) {
-//         RCLCPP_ERROR(this->get_logger(), "Failed to cast to Move2InitialController");
-//         return false;
-//     }
-
-//     try {
-//         // 调用plan_and_execute_to_initial方法
-//         move2initial_controller->plan_and_execute_to_initial(mapping);
-//         RCLCPP_INFO(this->get_logger(), "Move to initial completed for mapping: %s", mapping.c_str());
-//         return true;
-//     } catch (const std::exception& e) {
-//         RCLCPP_ERROR(this->get_logger(), "Failed to execute move to initial for mapping %s: %s",
-//                      mapping.c_str(), e.what());
-//         return false;
-//     }
+//
+// void ControllerManagerNode::remove_controller_subscriptions(const std::string& mode_key, const std::string& mapping) {
+//     // 不再需要
 // }

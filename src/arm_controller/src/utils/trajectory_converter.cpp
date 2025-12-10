@@ -236,4 +236,24 @@ TrajectoryConverter::TrajectoryDynamics TrajectoryConverter::calculateSafeInterp
     return safe_params;
 }
 
+Trajectory TrajectoryConverter::convertInterpolatorToHardwareDriver(
+    const trajectory_interpolator::Trajectory& interpolator_trajectory) {
+
+    Trajectory hw_trajectory;
+    hw_trajectory.joint_names = interpolator_trajectory.joint_names;
+
+    for (const auto& interpolator_point : interpolator_trajectory.points) {
+        TrajectoryPoint hw_point;
+
+        hw_point.time_from_start = interpolator_point.time_from_start;
+        hw_point.positions = interpolator_point.positions;
+        hw_point.velocities = interpolator_point.velocities;
+        hw_point.accelerations = interpolator_point.accelerations;
+
+        hw_trajectory.points.push_back(hw_point);
+    }
+
+    return hw_trajectory;
+}
+
 } // namespace arm_controller::utils
