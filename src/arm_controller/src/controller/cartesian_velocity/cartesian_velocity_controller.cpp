@@ -66,7 +66,7 @@ bool CartesianVelocityController::stop(const std::string& mapping) {
     auto joint_names = hardware_manager_->get_joint_names(mapping);
     if (!joint_names.empty()) {
         std::vector<double> zero_velocities(joint_names.size(), 0.0);
-        send_joint_velocities(zero_velocities);
+        send_joint_velocities(mapping, zero_velocities);
     }
 
     // 清理该 mapping 的话题订阅
