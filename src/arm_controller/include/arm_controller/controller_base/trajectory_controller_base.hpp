@@ -19,7 +19,7 @@ public:
 template<typename T>
 class TrajectoryControllerImpl : public TrajectoryControllerBase {
 public:
-    explicit TrajectoryControllerImpl(std::string mode, rclcpp::Node::SharedPtr node)
+    explicit TrajectoryControllerImpl(std::string mode, rclcpp::Node::SharedPtr node) 
         : TrajectoryControllerBase(mode), node_(node) {}
     virtual ~TrajectoryControllerImpl() override = default;
 
@@ -71,12 +71,13 @@ public:
 
     virtual void start(const std::string& mapping) override = 0;
     virtual bool stop(const std::string& mapping) override = 0;
-
+    
     // 轨迹控制器通常需要钩子状态来安全停止
     bool needs_hook_state() const override { return true; }
 
 protected:
     rclcpp::Node::SharedPtr node_;
+
     std::map<std::string, typename rclcpp::Subscription<T>::SharedPtr> subscriptions_;
 
     // 清理指定 mapping 的订阅 - 在 stop() 时调用

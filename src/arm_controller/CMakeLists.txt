@@ -59,6 +59,7 @@ find_package(Eigen3 REQUIRED)
 find_package(OsqpEigen REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(robot_sdk REQUIRED)
 
 
 include_directories(
@@ -79,12 +80,16 @@ add_library(arm_controller_lib
   src/hardware/hardware_manager.cpp
   src/controller/controller_registry.cpp
   src/utils/trajectory_converter.cpp
+  src/utils/joint_recorder.cpp
   src/utils/velocity_qp_solver.cpp
   # 只保留测试需要的控制器
+  src/controller/system_start/system_start_controller.cpp
+  src/controller/disable/disable_controller.cpp
+  src/controller/disable/disable_interface.cpp
   src/controller/joint_velocity/joint_velocity_controller.cpp
   src/controller/joint_velocity/joint_velocity_interface.cpp
   src/controller/hold_state/hold_state_controller.cpp
-  src/controller/system_start/system_start_controller.cpp
+  # 其他控制器暂时屏蔽用于测试
   src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
   src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
   src/controller/move2initial/move2initial_controller.cpp
@@ -102,10 +107,11 @@ add_library(arm_controller_lib
   # src/controller/point_record/point_record_interface.cpp
   # src/controller/point_replay/point_replay_controller.cpp
   # src/controller/point_replay/point_replay_interface.cpp
-  # src/controller/trajectory_record/trajectory_record_controller.cpp
-  # src/controller/trajectory_record/trajectory_record_interface.cpp
-  # src/controller/trajectory_replay/trajectory_replay_controller.cpp
-  # src/controller/trajectory_replay/trajectory_replay_interface.cpp
+  src/controller/trajectory_record/trajectory_record_controller.cpp
+  src/controller/trajectory_record/trajectory_record_interface.cpp
+  src/controller/trajectory_replay/trajectory_replay_controller.cpp
+  src/controller/trajectory_replay/trajectory_replay_interface.cpp
+  src/button/button_event_handler.cpp
 )
 
 # target_link_libraries(robot_controller_lib
@@ -134,6 +140,7 @@ ament_target_dependencies(arm_controller_lib
   OsqpEigen
   tf2_ros
   tf2_geometry_msgs
+  robot_sdk
 )
 
 # 链接硬件驱动库和 osqp 到库
@@ -151,17 +158,17 @@ if(BUILD_TESTING)
 endif()
 
 # Node
-add_executable(universal_arm_controller_node
+add_executable(universial_arm_controller_node
   src/main.cpp
   src/trajectory_controller_section.cpp
   src/controller_manager_section.cpp
 )
-target_link_libraries(universal_arm_controller_node
+target_link_libraries(universial_arm_controller_node
   arm_controller_lib
   yaml-cpp
   hardware_driver::hardware_driver_canfd
 )
-ament_target_dependencies(universal_arm_controller_node
+ament_target_dependencies(universial_arm_controller_node
   rclcpp
   std_msgs
   rclcpp_action
@@ -175,7 +182,7 @@ ament_target_dependencies(universal_arm_controller_node
 )
 
 install(TARGETS
-  universal_arm_controller_node
+  universial_arm_controller_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

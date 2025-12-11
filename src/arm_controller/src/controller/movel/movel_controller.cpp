@@ -14,6 +14,14 @@ MoveLController::MoveLController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹插值器
     trajectory_interpolator_ = std::make_unique<TrajectoryInterpolator>();
 
+    std::string input_topic;
+    node_->get_parameter("controllers.MoveL.input_topic", input_topic);
+
+    sub_ = node_->create_subscription<geometry_msgs::msg::Pose>(
+        input_topic, rclcpp::QoS(10).reliable(),
+        std::bind(&MoveLController::trajectory_callback, this, std::placeholders::_1)
+    );
+
     // 初始化轨迹规划服务
     initialize_planning_services();
 
@@ -49,11 +57,12 @@ void MoveLController::start(const std::string& mapping) {
         }
     }
 
-    RCLCPP_INFO(node_->get_logger(), "[%s] MoveLController activated", mapping.c_str());
+    // 保存当前激活的mapping
+    active_mapping_ = mapping;
+    is_active_ = true;
 }
 
 bool MoveLController::stop(const std::string& mapping) {
-    // 停止处理消息
     is_active_ = false;
 
     // 清理资源
@@ -71,10 +80,9 @@ bool MoveLController::stop(const std::string& mapping) {
 }
 
 void MoveLController::trajectory_callback(const geometry_msgs::msg::Pose::SharedPtr msg) {
-    // 只在激活时才处理消息
     if (!is_active_) return;
 
-    // 使用保存的 mapping 进行规划和执行
+    // 使用mapping进行规划和执行
     plan_and_execute(active_mapping_, msg);
 }
 

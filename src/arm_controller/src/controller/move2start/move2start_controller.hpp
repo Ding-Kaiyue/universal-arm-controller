@@ -19,8 +19,6 @@ public:
     void start(const std::string& mapping = "") override;
     bool stop(const std::string& mapping = "") override;
 
-    bool needs_hook_state() const override { return true; }
-    
 private:
      // 初始化轨迹规划服务
     void initialize_planning_services();

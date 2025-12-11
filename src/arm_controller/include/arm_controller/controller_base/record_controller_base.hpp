@@ -8,14 +8,24 @@
 
 class RecordControllerBase : public ModeControllerBase {
 public:
-    explicit RecordControllerBase(std::string mode, rclcpp::Node::SharedPtr node) 
+    explicit RecordControllerBase(std::string mode, rclcpp::Node::SharedPtr node)
         : ModeControllerBase(mode), node_(node) {}
     virtual ~RecordControllerBase() = default;
 
     void handle_message(std::any /*msg*/) override final {}
 
-    virtual void start(const std::string& mapping) override = 0;
-    virtual bool stop() override = 0;
+    // Override base class methods with default parameters
+    void start(const std::string& mapping = "") override {
+        (void)mapping;
+        is_active_ = true;
+    }
+
+    bool stop(const std::string& mapping = "") override {
+        (void)mapping;
+        is_active_ = false;
+        return true;
+    }
+
 protected:
     rclcpp::Node::SharedPtr node_;
 };

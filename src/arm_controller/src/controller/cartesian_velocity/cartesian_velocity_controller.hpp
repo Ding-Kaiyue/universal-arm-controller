@@ -43,6 +43,8 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr sub_;
     std::shared_ptr<HardwareManager> hardware_manager_;
     std::map<std::string, std::shared_ptr<trajectory_planning::infrastructure::integration::MoveItAdapter>> moveit_adapters_;
+
+    // 当前激活的mapping
     std::string active_mapping_;
 
     // TF2 坐标系转换

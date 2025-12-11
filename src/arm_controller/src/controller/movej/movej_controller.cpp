@@ -16,6 +16,15 @@ MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹插值器
     trajectory_interpolator_ = std::make_unique<TrajectoryInterpolator>();
 
+    std::string input_topic;
+    node_->get_parameter("controllers.MoveJ.input_topic", input_topic);
+    
+    sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
+        input_topic, rclcpp::QoS(10).reliable(),
+        std::bind(&MoveJController::trajectory_callback, this, std::placeholders::_1)
+    );
+
+
     // 初始化轨迹规划服务
     initialize_planning_services();
 
@@ -31,7 +40,7 @@ void MoveJController::start(const std::string& mapping) {
         );
     }
 
-    // 保存当前激活的 mapping
+    // 保存当前激活的mapping
     active_mapping_ = mapping;
     is_active_ = true;
 
@@ -41,10 +50,10 @@ void MoveJController::start(const std::string& mapping) {
     }
 
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveJController activated", mapping.c_str());
+
 }
 
 bool MoveJController::stop(const std::string& mapping) {
-    // 停止处理消息
     is_active_ = false;
 
     // 清理资源
@@ -62,8 +71,8 @@ bool MoveJController::stop(const std::string& mapping) {
 }
 
 void MoveJController::trajectory_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
-    // 只在激活时才处理消息
     if (!is_active_) return;
+
     // 使用保存的 mapping 进行规划和执行
     plan_and_execute(active_mapping_, msg);
 }

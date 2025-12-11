@@ -22,6 +22,14 @@ MoveCController::MoveCController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹插值器
     trajectory_interpolator_ = std::make_unique<TrajectoryInterpolator>();
 
+    std::string input_topic;
+    node_->get_parameter("controllers.MoveC.input_topic", input_topic);
+
+    sub_ = node_->create_subscription<geometry_msgs::msg::PoseArray>(
+        input_topic, rclcpp::QoS(10).reliable(),
+        std::bind(&MoveCController::trajectory_callback, this, std::placeholders::_1)
+    );
+
     // 初始化轨迹规划服务
     initialize_planning_services();
 
@@ -57,11 +65,12 @@ void MoveCController::start(const std::string& mapping) {
         }
     }
 
-    RCLCPP_INFO(node_->get_logger(), "[%s] MoveCController activated", mapping.c_str());
+    // 保存当前激活的mapping
+    active_mapping_ = mapping;
+    is_active_ = true;
 }
 
 bool MoveCController::stop(const std::string& mapping) {
-    // 停止处理消息
     is_active_ = false;
 
     // 清理资源
@@ -74,15 +83,15 @@ bool MoveCController::stop(const std::string& mapping) {
     // execute_trajectory 是阻塞调用，stop() 被调用时表示上一个轨迹已执行完毕
     // 或模式切换已等待轨迹完成
 
+
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveCController deactivated", mapping.c_str());
     return true;
 }
 
 void MoveCController::trajectory_callback(const geometry_msgs::msg::PoseArray::SharedPtr msg) {
-    // 只在激活时才处理消息
     if (!is_active_) return;
 
-    // 使用保存的 mapping 进行规划和执行
+    // 使用mapping进行规划和执行
     plan_and_execute(active_mapping_, msg);
 }
 

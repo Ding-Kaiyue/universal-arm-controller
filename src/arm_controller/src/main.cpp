@@ -17,10 +17,10 @@ int main(int argc, char** argv) {
         RCLCPP_INFO(rclcpp::get_logger("main"), "Initializing Controller Manager Node...");
         controller_manager->post_init();
         executor.add_node(controller_manager);
-
+        
         // 2. 短暂延迟确保硬件管理器完全初始化
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
+        
         // 3. 然后创建并初始化 TrajectoryControllerNode（使用已初始化的硬件管理器）
         auto trajectory_controller = std::make_shared<TrajectoryControllerNode>();
         RCLCPP_INFO(rclcpp::get_logger("main"), "Initializing Trajectory Controller Node...");

@@ -1,6 +1,4 @@
-# 贡献指南 (Contributing Guide)
-
-感谢你对本项目的关注！本指南将帮助你了解如何有效地为项目做出贡献。
+# 贡献指南
 
 ## 欢迎贡献！
 
@@ -16,8 +14,11 @@
 - 🚀 性能优化
 - 💡 功能建议
 
----
+### 贡献流程
 
+<<<<<<< HEAD
+1. **Fork 项目**
+=======
 ## 🌳 分支策略
 
 ### 主要分支
@@ -141,137 +142,60 @@ cppcheck src/
 ### 第6步：提交 Pull Request
 
 1. **Push 到你的 fork**
+>>>>>>> develop
    ```bash
-   git push origin feature/your-feature-name
+   git clone https://github.com/Ding-Kaiyue/universal-arm-controller.git
+   cd universal-arm-controller
    ```
 
-2. **在 GitHub 上创建 PR**
-   - Base branch: `develop` (普通功能) 或 `master` (hotfix)
-   - Head branch: `YOUR_USERNAME:feature/your-feature-name`
+2. **创建功能分支**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
 
-3. **PR 描述应包含：**
-   - 变更说明
-   - 实现思路和设计决策
-   - 关键代码片段（如果有）
-   - 测试结果
-   - 关联 Issue（如 Fixes #123）
-   - @至少两个评审者
+3. **开发您的功能**
+   - 遵循代码规范
+   - 添加必要的测试
+   - 更新相关文档
 
-### 第7步：Code Review
+4. **提交更改**
+   ```bash
+   git add .
+   git commit -m "feat: add your feature description"
+   ```
 
-1. **等待 CI/CD 通过**
-   - 所有自动化检查必须通过
-   - 代码覆盖率必须达到要求
+5. **创建 Pull Request**
+   - 详细描述您的更改
+   - 包含测试结果
+   - 等待代码审查
 
-2. **回应评审意见**
-   - 解决所有评论线程
-   - 每次更改后 push 新的 commit
-   - 不要使用 force push
+### 代码规范
 
-3. **获得核准**
-   - 需要至少 2 个 LGTM (Looks Good To Me)
-   - 维护者必须是其中之一
+- 使用 C++17 标准
+- 遵循 Google C++ 风格指南
+- 添加必要的注释
+- 确保代码通过所有测试
 
-### 第8步：合并
-
-仅当满足以下条件时，维护者才会 Squash and Merge：
-
-- ✅ 所有对话已解决
-- ✅ CI/CD 流水线通过
-- ✅ 至少 2 个核准 (LGTM)
-- ✅ 代码覆盖率 ≥ 95%
-- ✅ 通过所有代码风格检查
-
----
-
-## 📝 Commit Message 规范 (Conventional Commits)
+### 提交信息格式
 
 ```
-<type>(<scope>): <subject>
+type(scope): description
 
-<body>
+[optional body]
 
-<footer>
+[optional footer]
 ```
 
-**类型 (type):**
+类型包括：
 - `feat`: 新功能
-- `fix`: 缺陷修复
-- `refactor`: 代码重构
-- `perf`: 性能优化
-- `test`: 添加或修改测试
+- `fix`: Bug 修复
 - `docs`: 文档更新
-- `chore`: 构建或工具链变更
-- `ci`: CI/CD 配置变更
+- `style`: 代码格式
+- `refactor`: 重构
+- `test`: 测试相关
+- `chore`: 构建过程或辅助工具的变动
 
-**作用域 (scope):**
-- `arm_controller`: ARM控制器
-- `hardware_driver`: 硬件驱动
-- `trajectory_planning`: 轨迹规划
-- 等等...
-
-**示例：**
-```
-feat(hardware_driver): implement async trajectory execution
-
-- Replace blocking executeTrajectory with async thread
-- Add cancellation mechanism via should_stop flag
-- Improve ROS2 callback responsiveness
-
-Fixes #123
-```
-
----
-
-## 📋 提交前检查清单
-
-- [ ] 代码遵循项目的代码规范（C++17, Google 风格指南）
-- [ ] 为新功能或修改添加了单元测试
-- [ ] 所有测试通过 (`colcon test`)
-- [ ] 代码覆盖率达到 95% 或更高
-- [ ] 通过了所有代码风格检查
-- [ ] Commit message 遵循 Conventional Commits
-- [ ] PR 描述清晰完整
-- [ ] 没有未解决的对话线程
-- [ ] 本地已与 develop 的最新版本同步
-
----
-
-## 🚫 严格禁止
-
-- ❌ 直接 push 到 `main` 或 `develop`
-- ❌ Force push 到受保护分支
-- ❌ 绕过 code review
-- ❌ 提交代码覆盖率低于 95% 的代码
-- ❌ 违反 Conventional Commits 的 commit message
-- ❌ 未通过 CI/CD 就合并
-
----
-
-## 💡 最佳实践
-
-1. **保持分支最新**
-   ```bash
-   git fetch upstream develop
-   git rebase upstream/develop
-   ```
-
-2. **编写清晰的 commit message**
-   - 第一行 ≤ 50 字符
-   - 空一行
-   - 详细描述（可选）
-
-3. **一个 PR 一个功能**
-   - 不要在一个 PR 中混入多个不相关的功能
-
-4. **积极参与 Review**
-   - 尊重评审者的意见
-   - 解释你的设计决策
-   - 如有异议，讨论而非争执
-
----
-
-## 📞 报告问题和建议
+### 报告问题和建议
 
 我们提供了标准化的 Issue 模板来帮助您更有效地沟通：
 
@@ -280,15 +204,11 @@ Fixes #123
 - **[❓ 提出使用问题](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=usage_question.md)**
 - **[🔒 报告安全漏洞](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=security_report.md)**
 
----
-
-## 📞 联系方式
+### 联系方式
 
 - **Issues**: 通过 GitHub Issues
 - **Pull Requests**: 通过 GitHub PR
 - **商业合作**: kaiyue.ding@raysense.com
 - **技术支持**: d18292819833 (微信)
 
----
-
-感谢您的贡献！🎉 
+感谢您的贡献！ 

@@ -5,12 +5,15 @@
 #include "controller_base/velocity_controller_base.hpp"
 #include "controller/controller_registry.hpp"
 #include "controller_interface.hpp"
+#include "button/button_event_handler.hpp"
 #include <algorithm>
+
 // #include "controller/move2start/move2start_controller.hpp"
 // #include "controller/move2initial/move2initial_controller.hpp"
 
 ControllerManagerNode::ControllerManagerNode()
     : Node("controller_manager")
+    , current_mode_("HoldState")
     , in_hook_state_(false)
     , emergency_stop_active_(false)
     , safety_zone_violation_(false)
@@ -30,6 +33,7 @@ void ControllerManagerNode::post_init() {
     init_hardware();
     init_commons();
     init_action_event_listener();
+    init_button_handler();  // 初始化按键处理器
     init_controllers();
 
     // 启动默认控制器
@@ -40,6 +44,9 @@ void ControllerManagerNode::post_init() {
             "✅ Starting default controller for mapping: %s", mapping.c_str());
 
     }
+
+    // 然后切换到 HoldState 保持当前位置
+    start_working_controller("HoldState", "single_arm");
 
     RCLCPP_INFO(this->get_logger(), "Controller Manager Node post-initialization complete");
 }
@@ -112,7 +119,7 @@ void ControllerManagerNode::init_commons() {
         std::bind(&ControllerManagerNode::handle_work_mode, this,
                  std::placeholders::_1, std::placeholders::_2));
 
-    // 电机控制服务（使能/失能）
+    // 电机控制服务
     motor_control_service_ = this->create_service<controller_interfaces::srv::MotorControl>(
         get_topic_name("motor_control_service"),
         std::bind(&ControllerManagerNode::handle_motor_control, this,
@@ -202,6 +209,7 @@ void ControllerManagerNode::handle_work_mode(
     bool success = start_working_controller(new_mode, mapping);
 
     if (success) {
+        current_mode_ = new_mode;
         response->success = true;
         response->message = "✅ Switched to mode " + request->mode + " successfully.";
     } else {
@@ -239,10 +247,9 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
         return switch_to_mode(mode_name, mapping);
     }
 
-    // 如果该 mapping 已经在目标模式（且不是Disable/EmergencyStop），直接返回成功
-    auto current_mode_it = mapping_to_mode_.find(mapping);
-    if (current_mode_it != mapping_to_mode_.end() && current_mode_it->second == mode_name && !in_hook_state_) {
-        RCLCPP_INFO(this->get_logger(), "[%s] Already in mode %s", mapping.c_str(), mode_name.c_str());
+    // 如果已经在目标模式（且不是Disable/EmergencyStop），直接返回成功
+    if (current_mode_ == mode_name && !in_hook_state_) {
+        RCLCPP_INFO(this->get_logger(), "Already in mode %s", mode_name.c_str());
         return true;
     }
 
@@ -255,21 +262,18 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
         return true;
     }
 
-    // 如果当前有活跃模式，需要停止它；否则直接切换（启动时的正常情况）
+    // 停止当前控制器
     bool need_hook = false;
-    if (mapping_to_mode_.find(mapping) != mapping_to_mode_.end()) {
-        // 有当前活跃模式，需要停止
-        if (!stop_working_controller(need_hook, mapping)) {
-            RCLCPP_WARN(this->get_logger(), "[%s] Failed to stop current controller", mapping.c_str());
-            return false;
-        }
+    if (!stop_working_controller(need_hook, mapping)) {
+        RCLCPP_WARN(this->get_logger(), "Failed to stop current controller");
+        return false;
+    }
 
-        // 如果需要钩子状态，进入钩子状态并开始持续监控
-        if (need_hook) {
-            RCLCPP_INFO(this->get_logger(), "[%s] Need hook state for safe transition to %s", mapping.c_str(), mode_name.c_str());
-            enter_hook_state(mode_name, mapping);
-            return true;    // 进入等待状态，持续监控会处理实际转换
-        }
+    // 如果需要钩子状态，进入钩子状态并开始持续监控
+    if (need_hook) {
+        RCLCPP_INFO(this->get_logger(), "Need hook state for safe transition to %s", mode_name.c_str());
+        enter_hook_state(mode_name, mapping);
+        return true;    // 进入等待状态，持续监控会处理实际转换
     }
 
     // 直接切换到目标模式
@@ -278,6 +282,7 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
 
 bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::string& mapping) {
     need_hook = false;
+
     auto current_mode_it = mapping_to_mode_.find(mapping);
     if (current_mode_it == mapping_to_mode_.end()) {
         RCLCPP_WARN(this->get_logger(), "[%s] No active mode found for mapping", mapping.c_str());
@@ -295,7 +300,7 @@ bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::
         // 当 stop() 调用时，控制器会停止处理消息（通过 is_active_ 标志）
 
         RCLCPP_INFO(this->get_logger(), "[%s] Stopped controller for mode: %s, needs_hook: %s",
-                    mapping.c_str(), current_mode_it->second.c_str(), need_hook ? "true" : "false");
+                    mapping.c_str(), current_mode_.c_str(), need_hook ? "true" : "false");
         return true;
     }
     return false;
@@ -322,9 +327,9 @@ bool ControllerManagerNode::enter_hook_state(const std::string& target_mode, con
 
             // 启动 HoldState控制器（自动持续检查）
             hold_controller->start(mapping);
-            mapping_to_mode_[mapping] = "HoldState";
+            current_mode_ = "HoldState";
 
-            RCLCPP_INFO(this->get_logger(), "Entered hook state, target mode: %s [%s]", target_mode.c_str(), mapping.c_str());
+            RCLCPP_INFO(this->get_logger(), "Entered hook state, target mode: %s", target_mode.c_str());
             return true;
         } else {
             RCLCPP_ERROR(this->get_logger(), "Failed to cast HoldState controller");
@@ -424,7 +429,7 @@ bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const s
             RCLCPP_INFO(this->get_logger(), "Clearing cached messages for controller %s (auto-delivery disabled for safety)", mode_name.c_str());
             cached_messages_.erase(cached);
         }
-        RCLCPP_INFO(this->get_logger(), "✅ Switched to mode %s [%s]", mode_name.c_str(), mapping.c_str());
+        RCLCPP_INFO(this->get_logger(), "✅ Switched to mode %s", mode_name.c_str());
         return true;
     } catch (const std::exception& e) {
         RCLCPP_ERROR(this->get_logger(), "❎ Failed to switch to mode %s: %s", mode_name.c_str(), e.what());
@@ -433,13 +438,7 @@ bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const s
 }
 
 bool ControllerManagerNode::check_work_mode(const std::string& target_mode) const {
-    // Check if any mapping is in the target mode
-    for (const auto& entry : mapping_to_mode_) {
-        if (entry.second == target_mode) {
-            return true;
-        }
-    }
-    return false;
+    return current_mode_ == target_mode;
 }
 
 void ControllerManagerNode::status_timer_callback() {
@@ -448,22 +447,7 @@ void ControllerManagerNode::status_timer_callback() {
 
 void ControllerManagerNode::publish_status() {
     std_msgs::msg::String status_msg;
-
-    // Build status string with per-mapping modes
-    std::string status_str;
-    for (const auto& entry : mapping_to_mode_) {
-        if (!status_str.empty()) {
-            status_str += "; ";
-        }
-        status_str += entry.first + ":" + entry.second;
-    }
-
-    // If no mappings are active, publish default status
-    if (status_str.empty()) {
-        status_str = "no_active_mapping";
-    }
-
-    status_msg.data = status_str;
+    status_msg.data = current_mode_;
     status_publisher_->publish(status_msg);
 }
 
@@ -479,6 +463,38 @@ void ControllerManagerNode::init_action_event_listener() {
         std::bind(&ControllerManagerNode::handle_trajectory_control, this, std::placeholders::_1));
 
     RCLCPP_INFO(this->get_logger(), "Action event listener and trajectory control listener initialized");
+}
+
+void ControllerManagerNode::init_button_handler() {
+    // 创建按键事件处理器
+    button_handler_ = std::make_shared<arm_controller::ButtonEventHandler>(this->shared_from_this());
+
+    // 设置复现完成回调 - 发送FXJS信号让LED熄灭
+    button_handler_->set_replay_complete_callback([this](const std::string& interface) {
+        if (hardware_manager_ && hardware_manager_->get_hardware_driver()) {
+            hardware_manager_->get_hardware_driver()->send_button_replay_complete(interface);
+            RCLCPP_INFO(this->get_logger(), "发送复现完成信号 (FXJS) 到 %s", interface.c_str());
+        }
+    });
+
+    // 将按键处理器注册为硬件按键观察者
+    if (hardware_manager_ && hardware_manager_->get_hardware_driver()) {
+        hardware_manager_->get_hardware_driver()->add_button_observer(button_handler_);
+        RCLCPP_INFO(this->get_logger(), "按键事件处理器初始化完成");
+    } else {
+        RCLCPP_WARN(this->get_logger(), "硬件驱动未就绪，按键处理器注册延迟");
+    }
+
+    // 订阅轨迹复现状态，检测复现完成并通知按键处理器
+    replay_status_subscriber_ = this->create_subscription<std_msgs::msg::String>(
+        "/controller_api/trajectory_replay_status", 10,
+        [this](const std_msgs::msg::String::SharedPtr msg) {
+            if (msg->data == "completed" && button_handler_) {
+                // 复现完成，通知按键处理器发送FXJS信号
+                button_handler_->notify_replay_complete(button_handler_->get_last_interface());
+                RCLCPP_INFO(this->get_logger(), "轨迹复现完成，通知按键处理器");
+            }
+        });
 }
 
 void ControllerManagerNode::handle_action_event(const std_msgs::msg::String::SharedPtr msg) {

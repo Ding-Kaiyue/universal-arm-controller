@@ -1,5 +1,6 @@
 #include "arm_controller/hardware/hardware_manager.hpp"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 
@@ -36,6 +37,11 @@ bool HardwareManager::initialize(rclcpp::Node::SharedPtr node) {
         // 创建RobotHardware实例，使用观察者模式
         hardware_driver_ = std::make_shared<RobotHardware>(motor_driver, interface_motor_config,
                                                           shared_from_this());
+
+        // 初始化按键驱动 (不需要独立的总线，通过motor_driver转发数据包)
+        auto button_driver = hardware_driver::createCanFdButtonDriver(nullptr);
+        hardware_driver_->set_button_driver(button_driver);
+        RCLCPP_INFO(node_->get_logger(), "按键驱动初始化完成");
 
         // 创建关节状态发布器
         joint_state_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(
@@ -258,6 +264,7 @@ std::vector<double> HardwareManager::get_current_joint_positions(const std::stri
     return std::vector<double>{};
 }
 
+
 std::vector<double> HardwareManager::get_current_joint_velocities(const std::string& mapping) const {
     std::lock_guard<std::mutex> lock(joint_state_mutex_);
 
@@ -305,10 +312,10 @@ bool HardwareManager::send_hold_state_command(const std::string& mapping,
 
     for (size_t i = 0; i < positions.size(); ++i) {
         positions_deg[i] = positions[i] * 180.0 / M_PI;
-        velocities_deg[i] = 0.0;  // 零速度
-        efforts[i] = 0.0;          // 零力矩
-        kps[i] = 0.05;             // 位置模式参数
-        kds[i] = 0.005;            // 位置模式参数
+        velocities_deg[i] = 0.0;
+        efforts[i] = 0.0;
+        kps[i] = 0.05;
+        kds[i] = 0.005;
     }
 
     bool success = hardware_driver_->send_realtime_mit_command(interface, positions_deg, velocities_deg, efforts, kps, kds);
@@ -321,7 +328,6 @@ bool HardwareManager::send_hold_state_command(const std::string& mapping,
 
     return success;
 }
-
 
 void HardwareManager::on_motor_status_update(const std::string& interface,
                                             uint32_t motor_id,
@@ -369,14 +375,15 @@ void HardwareManager::update_joint_state(const std::string& interface, uint32_t 
         return;
     }
 
-    // 转换单位：度数 → 弧度 (硬件返回度数，ROS需要弧度)
-    double pos_rad = status.position * M_PI / 180.0;
-    mapping_joint_states_[mapping].position[local_index] = pos_rad;
-    mapping_joint_states_[mapping].velocity[local_index] = status.velocity * M_PI / 180.0;
-    mapping_joint_states_[mapping].effort[local_index] = status.effort;
+    // 更新该mapping的关节状态
+    sensor_msgs::msg::JointState& joint_state = joint_state_it->second;
+    joint_state.header.stamp = node_->now();
 
-    // 更新时间戳
-    mapping_joint_states_[mapping].header.stamp = node_->now();
+    // 转换单位：度数 → 弧度 (硬件返回度数，ROS需要弧度)
+    joint_state.position[local_index] = status.position * M_PI / 180.0;
+    joint_state.velocity[local_index] = status.velocity * M_PI / 180.0;
+    joint_state.effort[local_index] = status.effort;
+
     // 记录最新温度用于调试
     std::string motor_key = mapping + "_motor" + std::to_string(motor_id);
     motor_temperatures_[motor_key] = status.temperature;

@@ -22,6 +22,14 @@ CartesianVelocityController::CartesianVelocityController(const rclcpp::Node::Sha
     node_->get_parameter("controllers.CartesianVelocity.base_frame", base_frame_);
     RCLCPP_INFO(node_->get_logger(), "[CartesianVelocity] Base frame: %s", base_frame_.c_str());
 
+    std::string input_topic;
+    node_->get_parameter("controllers.CartesianVelocity.input_topic", input_topic);
+
+    sub_ = node_->create_subscription<geometry_msgs::msg::TwistStamped>(
+        input_topic, rclcpp::QoS(10).reliable(),
+        std::bind(&CartesianVelocityController::velocity_callback, this, std::placeholders::_1)
+    );
+
     // 预初始化所有mapping的moveit服务
     initialize_moveit_service();
 }
@@ -36,13 +44,7 @@ void CartesianVelocityController::start(const std::string& mapping) {
         );
     }
 
-    auto hardware_driver = hardware_manager_->get_hardware_driver();
-    if (!hardware_driver) {
-        RCLCPP_ERROR(node_->get_logger(), "Hardware driver not initialized");
-        return;
-    }
-
-    // 保存当前激活的 mapping
+    // 保存当前激活的mapping
     active_mapping_ = mapping;
     is_active_ = true;
 
@@ -58,14 +60,13 @@ void CartesianVelocityController::start(const std::string& mapping) {
 
 
 bool CartesianVelocityController::stop(const std::string& mapping) {
-    // 停止处理消息
     is_active_ = false;
 
     // 发送零速度命令停止机械臂
     auto joint_names = hardware_manager_->get_joint_names(mapping);
     if (!joint_names.empty()) {
         std::vector<double> zero_velocities(joint_names.size(), 0.0);
-        send_joint_velocities(mapping, zero_velocities);
+        send_joint_velocities(zero_velocities);
     }
 
     // 清理该 mapping 的话题订阅
@@ -113,8 +114,10 @@ void CartesianVelocityController::initialize_moveit_service() {
 }
 
 void CartesianVelocityController::velocity_callback(const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
-    // 只在激活时才处理消息
-    if (!is_active_) return;
+    if (!is_active_ || active_mapping_.empty()) {
+        RCLCPP_WARN(node_->get_logger(), "velocity_callback: not active or mapping empty. is_active=%d, mapping=%s", is_active_, active_mapping_.c_str());
+        return;
+    }
 
     auto joint_positions = hardware_manager_->get_current_joint_positions(active_mapping_);
     auto joint_names = hardware_manager_->get_joint_names(active_mapping_);
@@ -241,6 +244,7 @@ void CartesianVelocityController::velocity_callback(const geometry_msgs::msg::Tw
     std::vector<double> velocities(qd.data(), qd.data() + qd.size());
     send_joint_velocities(active_mapping_, velocities);
 }
+
 
 bool CartesianVelocityController::send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities) {
     if (!hardware_manager_) {

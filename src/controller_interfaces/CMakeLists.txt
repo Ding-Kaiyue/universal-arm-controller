@@ -13,6 +13,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/WorkMode.srv"
   "srv/MotorControl.srv"
+  "srv/SdkCmd.srv"
   "msg/TrajectoryControl.msg"
 )
 
