@@ -196,36 +196,41 @@ void CartesianVelocityController::velocity_callback(const geometry_msgs::msg::Tw
 
     Eigen::VectorXd v_ee(6);
 
-    // 如果参考坐标系已锁定为 world，进行坐标变换
+    // 如果参考坐标系已锁定，进行坐标变换
     if (has_reference_frame_) {
         try {
-            // 获取当前时刻的 world → base_link 变换
-            // 需要这个变换来将世界坐标系中的速度转换到 base_link 坐标系
+            // 检查用户是否在msg中指定了参考坐标系（支持灵活的frame_id）
+            // 如果msg->header.frame_id为空，使用默认的Link6（末端执行器坐标系）
+            // 如果msg->header.frame_id非空，使用用户指定的坐标系
+            std::string user_frame = msg->header.frame_id.empty() ? "Link6" : msg->header.frame_id;
+
             rclcpp::Time now = node_->get_clock()->now();
-            geometry_msgs::msg::TransformStamped tf_world_to_base_current =
-                tf_buffer_->lookupTransform("world", base_frame_, now, std::chrono::milliseconds(100));
+
+            // 获取 user_frame → base_link 的变换
+            // 这允许用户在任意坐标系（world、base_link、link6等）指定速度命令
+            geometry_msgs::msg::TransformStamped tf_user_to_base_current =
+                tf_buffer_->lookupTransform(base_frame_, user_frame, now, std::chrono::milliseconds(100));
 
             Eigen::Quaterniond q_current(
-                tf_world_to_base_current.transform.rotation.w,
-                tf_world_to_base_current.transform.rotation.x,
-                tf_world_to_base_current.transform.rotation.y,
-                tf_world_to_base_current.transform.rotation.z
+                tf_user_to_base_current.transform.rotation.w,
+                tf_user_to_base_current.transform.rotation.x,
+                tf_user_to_base_current.transform.rotation.y,
+                tf_user_to_base_current.transform.rotation.z
             );
-            Eigen::Matrix3d R_world_to_base = q_current.toRotationMatrix().transpose();
+            Eigen::Matrix3d R_user_to_base = q_current.toRotationMatrix().transpose();
 
-            // 直接使用 R_world_to_base 将世界坐标系的速度转换到 base_link 坐标系
-            // 因为参考坐标系就是 world，所以 R_world_to_ref_ 是单位矩阵
-            Eigen::Vector3d v_linear_base = R_world_to_base * v_linear_raw;
-            Eigen::Vector3d v_angular_base = R_world_to_base * v_angular_raw;
+            // 将用户指定坐标系中的速度转换到 base_link 坐标系
+            Eigen::Vector3d v_linear_base = R_user_to_base * v_linear_raw;
+            Eigen::Vector3d v_angular_base = R_user_to_base * v_angular_raw;
 
             v_ee << v_linear_base(0), v_linear_base(1), v_linear_base(2),
                     v_angular_base(0), v_angular_base(1), v_angular_base(2);
 
             RCLCPP_DEBUG(node_->get_logger(),
-                "[%s] Velocity transformed: world[%.6f,%.6f,%.6f] → base[%.6f,%.6f,%.6f]",
+                "[%s] Velocity transformed: %s[%.6f,%.6f,%.6f] → %s[%.6f,%.6f,%.6f]",
                 active_mapping_.c_str(),
-                v_linear_raw(0), v_linear_raw(1), v_linear_raw(2),
-                v_linear_base(0), v_linear_base(1), v_linear_base(2));
+                user_frame.c_str(), v_linear_raw(0), v_linear_raw(1), v_linear_raw(2),
+                base_frame_.c_str(), v_linear_base(0), v_linear_base(1), v_linear_base(2));
         } catch (const tf2::TransformException& ex) {
             RCLCPP_WARN(node_->get_logger(),
                 "[%s] ⚠️ TF lookup failed: %s. Using raw velocity.",
@@ -561,16 +566,43 @@ bool CartesianVelocityController::send_joint_velocities(const std::string& mappi
         return false;
     }
 
-    const std::string& interface = hardware_manager_->get_interface(mapping);
-    const std::vector<uint32_t>& motor_ids = hardware_manager_->get_motors_id(mapping);
+    try {
+        const std::string& interface = hardware_manager_->get_interface(mapping);
+        const std::vector<uint32_t>& motor_ids = hardware_manager_->get_motors_id(mapping);
+        const std::vector<std::string>& joint_names = hardware_manager_->get_joint_names(mapping);
 
+        // MIT模式速度控制参数
+        const double kp_velocity = 0.0;      // 速度模式：kp=0.0
+        const double kd_velocity = 0.1;     // 速度模式：kd=0.1
+        const double effort = 0.0;           // 零力矩
+        const double position = 0.0;         // 位置在纯速度模式下不使用
 
-    for (size_t i = 0; i < motor_ids.size(); ++i) {
-        double vel_deg = joint_velocities[i] * 180.0 / M_PI;  // 转为度/秒
-        hardware_driver->control_motor_in_velocity_mode(interface, motor_ids[i], vel_deg);
+        for (size_t i = 0; i < motor_ids.size(); ++i) {
+            const auto& joint_name = joint_names[i];
+            uint32_t motor_id = motor_ids[i];
+            double vel = joint_velocities[i] * 180.0 / M_PI;  // 转为度/秒
+
+            int violation_dir = hardware_manager_->get_joint_violation_direction(joint_name);
+            if (hardware_manager_->is_joint_emergency_stopped(joint_name) && ((violation_dir < 0 && vel < 0.0) || (violation_dir > 0 && vel > 0.0))) {
+                // 不允许继续违规，发送零速度
+                hardware_driver->control_motor_in_mit_mode(interface, motor_id, position, 0.0, effort, kp_velocity, kd_velocity);
+                auto clock = node_->get_clock();
+                RCLCPP_WARN_THROTTLE(
+                    node_->get_logger(),
+                    *clock,
+                    2000,
+                    "[%s] Joint '%s' emergency stopped (dir=%d), unsafe velocity %.3f -> skipping.",
+                    mapping.c_str(), joint_name.c_str(), violation_dir, vel);
+            } else {
+                hardware_driver->control_motor_in_mit_mode(interface, motor_id, position, vel, effort, kp_velocity, kd_velocity);
+            }
+        }
+
+        return true;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] Failed to send joint velocities: %s", mapping.c_str(), e.what());
+        return false;
     }
-
-    return true;
 }
 
 // ==================== 几何可行性检测（前置） ====================

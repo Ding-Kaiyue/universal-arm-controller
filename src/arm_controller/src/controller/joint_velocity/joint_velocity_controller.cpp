@@ -88,7 +88,7 @@ bool JointVelocityController::send_joint_velocities(const std::string& mapping, 
 
         // MIT模式速度控制参数
         const double kp_velocity = 0.0;      // 速度模式：kp=0.0
-        const double kd_velocity = 0.01;     // 速度模式：kd=0.01
+        const double kd_velocity = 0.1;     // 速度模式：kd=0.1
         const double effort = 0.0;           // 零力矩
         const double position = 0.0;         // 位置在纯速度模式下不使用
 
