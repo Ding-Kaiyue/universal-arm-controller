@@ -84,8 +84,6 @@ add_library(arm_controller_lib
   src/utils/velocity_qp_solver.cpp
   # 只保留测试需要的控制器
   src/controller/system_start/system_start_controller.cpp
-  src/controller/disable/disable_controller.cpp
-  src/controller/disable/disable_interface.cpp
   src/controller/joint_velocity/joint_velocity_controller.cpp
   src/controller/joint_velocity/joint_velocity_interface.cpp
   src/controller/hold_state/hold_state_controller.cpp

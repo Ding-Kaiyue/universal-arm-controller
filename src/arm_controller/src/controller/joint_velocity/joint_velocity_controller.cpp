@@ -86,7 +86,7 @@ bool JointVelocityController::send_joint_velocities(const std::string& mapping, 
         // MIT模式速度控制参数
         const double kp_velocity = 0.0;      // 速度模式：kp=0.0
         const double kd_velocity = 0.1;     // 速度模式：kd=0.1
-        const double effort = 0.0;           // 零力矩
+        const double effort = 0.0;           // 力矩在纯速度模式下不使用
         const double position = 0.0;         // 位置在纯速度模式下不使用
 
         for (size_t i = 0; i < motor_ids.size(); ++i) {
@@ -94,30 +94,20 @@ bool JointVelocityController::send_joint_velocities(const std::string& mapping, 
             uint32_t motor_id = motor_ids[i];
             double vel = joint_velocities[i] * 180.0 / M_PI;  // 转为度/秒
 
-            // 检查急停状态
-            if (hardware_manager_->is_joint_emergency_stopped(joint_name)) {
-                int violation_dir = hardware_manager_->get_joint_violation_direction(joint_name);
-
-                // 允许反方向运动或离开限位
-                if ((violation_dir < 0 && vel >= 0.0) || (violation_dir > 0 && vel <= 0.0)) {
-                    hardware_driver->control_motor_in_velocity_mode(interface, motor_id, vel);
-                    RCLCPP_INFO(node_->get_logger(),
-                        "[%s] Joint '%s' emergency stopped but moving in safe direction (%.3f deg/s).",
-                        mapping.c_str(), joint_name.c_str(), vel);
-                } else {
-                    // 不允许继续违规，发送零速度
-                    hardware_driver->control_motor_in_velocity_mode(interface, motor_id, 0.0);
-                    auto clock = node_->get_clock();
-                    RCLCPP_WARN_THROTTLE(
-                        node_->get_logger(),
-                        *clock,
-                        2000,
-                        "[%s] Joint '%s' emergency stopped (dir=%d), unsafe velocity %.3f -> skipping.",
-                        mapping.c_str(), joint_name.c_str(), violation_dir, vel);
-                }
+            int violation_dir = hardware_manager_->get_joint_violation_direction(joint_name);
+            if (hardware_manager_->is_joint_emergency_stopped(joint_name) &&
+                ((violation_dir < 0 && vel < 0.0) || (violation_dir > 0 && vel > 0.0))) {
+                // 不允许继续违规，发送零速度
+                hardware_driver->control_motor_in_mit_mode(interface, motor_id, position, 0.0, effort, kp_velocity, kd_velocity);
+                auto clock = node_->get_clock();
+                RCLCPP_WARN_THROTTLE(
+                    node_->get_logger(),
+                    *clock,
+                    2000,
+                    "[%s] Joint '%s' emergency stopped (dir=%d), unsafe velocity %.3f -> skipping.",
+                    mapping.c_str(), joint_name.c_str(), violation_dir, vel);
             } else {
-                // 未急停，直接发送速度
-                hardware_driver->control_motor_in_velocity_mode(interface, motor_id, vel);
+                hardware_driver->control_motor_in_mit_mode(interface, motor_id, position, vel, effort, kp_velocity, kd_velocity);
             }
         }
 
