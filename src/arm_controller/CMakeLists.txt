@@ -79,6 +79,7 @@ add_library(arm_controller_lib
   src/hardware/hardware_manager.cpp
   src/controller/controller_registry.cpp
   src/utils/trajectory_converter.cpp
+  src/utils/velocity_qp_solver.cpp
   # 只保留测试需要的控制器
   src/controller/joint_velocity/joint_velocity_controller.cpp
   src/controller/joint_velocity/joint_velocity_interface.cpp
