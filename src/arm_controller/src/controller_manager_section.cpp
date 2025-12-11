@@ -451,18 +451,6 @@ void ControllerManagerNode::publish_status() {
     status_publisher_->publish(status_msg);
 }
 
-void ControllerManagerNode::handle_motor_control(
-    const std::shared_ptr<controller_interfaces::srv::MotorControl::Request> request,
-    std::shared_ptr<controller_interfaces::srv::MotorControl::Response> response) {
-
-    RCLCPP_INFO(this->get_logger(), "Motor control request received: action=%s, mapping=%s",
-                request->action.c_str(), request->mapping.c_str());
-
-    // TODO: 实现电机控制逻辑
-    response->success = true;
-    response->message = "Motor control request processed";
-}
-
 void ControllerManagerNode::init_action_event_listener() {
     // 创建动作事件订阅器
     action_event_subscriber_ = this->create_subscription<std_msgs::msg::String>(

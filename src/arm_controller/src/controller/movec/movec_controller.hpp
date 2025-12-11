@@ -43,15 +43,12 @@ private:
     std::string active_mapping_;
 
     // 轨迹规划相关 - 支持多臂mapping
-    std::map<std::string, std::shared_ptr<trajectory_planning::application::services::MotionPlanningService>> motion_planning_services_; 
-    std::map<std::string, std::shared_ptr<trajectory_planning::infrastructure::integration::MoveItAdapter>> moveit_adapters_; 
-    std::map<std::string, std::string> mapping_to_planning_group_; 
+    std::map<std::string, std::shared_ptr<trajectory_planning::application::services::MotionPlanningService>> motion_planning_services_;
+    std::map<std::string, std::shared_ptr<trajectory_planning::infrastructure::integration::MoveItAdapter>> moveit_adapters_;
+    std::map<std::string, std::string> mapping_to_planning_group_;
 
     // 轨迹插值器
     std::unique_ptr<TrajectoryInterpolator> trajectory_interpolator_;
-
-    // 当前激活的mapping
-    std::string active_mapping_;
 };
 
 

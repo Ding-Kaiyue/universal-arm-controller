@@ -44,7 +44,7 @@ void SystemStartController::start(const std::string& mapping) {
         // 获取当前关节位置并发送保持命令
         auto current_positions = hardware_manager_->get_current_joint_positions(mapping);
         if (!current_positions.empty()) {
-            hardware_manager_->send_hold_position_command(mapping, current_positions);
+            hardware_manager_->send_hold_state_command(mapping, current_positions);
             RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Holding current position with %zu joints",
                        mapping.c_str(), current_positions.size());
         } else {
