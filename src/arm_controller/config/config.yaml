@@ -18,13 +18,7 @@ common:
 controllers:
   - key: SystemStart
     class: SystemStartController
-
-  - key: CartesianVelocity
-    class: CartesianVelocityController
-    input_topic:
-      name: /controller_api/cartesian_velocity_action
-      # type: geometry_msgs/msg/Twist
-
+    
   - key: HoldState
     class: HoldStateController
 
@@ -89,7 +83,6 @@ controllers:
 
   - key: TrajectoryReplay
     class: TrajectoryReplayController
-    input_dir: /home/w/work/robotic_arm_ws/trajectories
     input_topic:
       name: /controller_api/trajectory_replay_action
       type: std_msgs/msg/String

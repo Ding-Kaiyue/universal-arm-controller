@@ -1,16 +1,16 @@
 #ifndef __POINT_REPLAY_CONTROLLER_HPP__
 #define __POINT_REPLAY_CONTROLLER_HPP__
 
-#include <controller_base/record_controller_base.hpp>
+#include <controller_base/teach_controller_base.hpp>
 #include <std_msgs/msg/string.hpp>
 
-class PointReplayController final : public RecordControllerBase {
+class PointReplayController final : public TeachControllerBase {
 public:
     explicit PointReplayController(const rclcpp::Node::SharedPtr& node);
     ~PointReplayController() override = default;
 
-    void start() override;
-    bool stop() override;
+    void start(const std::string& mapping = "") override;
+    bool stop(const std::string& mapping = "") override;
  
 private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;

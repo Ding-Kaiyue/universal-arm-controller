@@ -1,22 +1,22 @@
 #ifndef __TRAJECTORY_REPLAY_CONTROLLER_HPP__
 #define __TRAJECTORY_REPLAY_CONTROLLER_HPP__
 
-#include <controller_base/record_controller_base.hpp>
-#include <std_msgs/msg/string.hpp>
-#include <trajectory_msgs/msg/joint_trajectory.hpp>
-#include <sensor_msgs/msg/joint_state.hpp>
-#include <control_msgs/action/follow_joint_trajectory.hpp>
-#include <rclcpp_action/rclcpp_action.hpp>
-#include <controller_interfaces/srv/work_mode.hpp>
-#include <arm_controller/utils/joint_recorder.hpp>
-#include <arm_controller/hardware/hardware_manager.hpp>
-#include <moveit/move_group_interface/move_group_interface.h>
+#include "controller_base/teach_controller_base.hpp"
+#include "std_msgs/msg/string.hpp"
+#include "trajectory_msgs/msg/joint_trajectory.hpp"
+#include "sensor_msgs/msg/joint_state.hpp"
+#include "control_msgs/action/follow_joint_trajectory.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
+#include "controller_interfaces/srv/work_mode.hpp"
+#include "arm_controller/utils/joint_recorder.hpp"
+#include "arm_controller/hardware/hardware_manager.hpp"
+#include "moveit/move_group_interface/move_group_interface.h"
 #include <memory>
 #include <queue>
 #include <mutex>
 #include <atomic>
 
-class TrajectoryReplayController final: public RecordControllerBase {
+class TrajectoryReplayController final: public TeachControllerBase {
 public:
     using FollowJointTrajectory = control_msgs::action::FollowJointTrajectory;
     using GoalHandleFollowJointTrajectory = rclcpp_action::ClientGoalHandle<FollowJointTrajectory>;
@@ -42,7 +42,7 @@ private:
     rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr smoothed_traj_sub_;
 
     // ===== 服务客户端 =====
-    rclcpp::Client<controller_interfaces::srv::WorkMode>::SharedPtr mode_service_client_;
+    // rclcpp::Client<controller_interfaces::srv::WorkMode>::SharedPtr mode_service_client_;
 
     // ===== 回调函数 =====
     void trajectory_replay_callback(const std_msgs::msg::String::SharedPtr msg);
@@ -81,15 +81,15 @@ private:
     rclcpp::Time traj_start_time_;
 
     // 当前action goal handle
-    GoalHandleFollowJointTrajectory::SharedPtr current_goal_handle_;
-    std::mutex goal_handle_mutex_;
+    // GoalHandleFollowJointTrajectory::SharedPtr current_goal_handle_;
+    // std::mutex goal_handle_mutex_;
 
     // MoveIt MoveGroupInterface（用于回到起点）
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_;
 
     // HardwareManager（用于直接执行轨迹）
     std::shared_ptr<HardwareManager> hardware_manager_;
-    std::string current_mapping_;  // 当前mapping
+    std::string active_mapping_;  // 当前mapping
 };
 
 #endif      // __TRAJECTORY_REPLAY_CONTROLLER_HPP__

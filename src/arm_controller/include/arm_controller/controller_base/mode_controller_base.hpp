@@ -16,7 +16,7 @@ public:
     virtual void start(const std::string& mapping = "") { (void)mapping; is_active_ = true; }
     virtual bool stop(const std::string& mapping = "") { (void)mapping; is_active_ = false; return is_active_;}
     
-    virtual void handle_message(std::any msg) = 0;
+    // virtual void handle_message(std::any msg) = 0;
 
     bool is_active() const { return is_active_; }
     

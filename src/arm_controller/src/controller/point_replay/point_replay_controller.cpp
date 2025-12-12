@@ -2,7 +2,7 @@
 #include "controller_interface.hpp"
 
 PointReplayController::PointReplayController(const rclcpp::Node::SharedPtr & node)
-    : RecordControllerBase("PointReplay", node) 
+    : TeachControllerBase("PointReplay", node) 
 {
     std::string input_topic, output_topic;
     node_->get_parameter("controllers.PointReplay.input_topic", input_topic);

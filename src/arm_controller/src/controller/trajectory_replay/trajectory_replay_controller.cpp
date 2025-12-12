@@ -3,29 +3,37 @@
 #include <filesystem>
 #include <thread>
 #include <future>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 
 TrajectoryReplayController::TrajectoryReplayController(const rclcpp::Node::SharedPtr & node)
-    : RecordControllerBase("TrajectoryReplay", node), executing_(false), waiting_for_smoothed_trajectory_(false)
+    : TeachControllerBase("TrajectoryReplay", node), executing_(false), waiting_for_smoothed_trajectory_(false)
 {
     std::string input_topic, output_topic, traj_output_topic;
     node_->get_parameter("controllers.TrajectoryReplay.input_topic", input_topic);
     node_->get_parameter("controllers.TrajectoryReplay.output_topic", output_topic);
 
-    // 使用工作空间的统一轨迹存储目录
-    record_input_dir_ = "/home/w/work/robotic_arm_ws/trajectories";
+    // 获取工作空间中的轨迹存储目录
+    try {
+        // 获取 arm_controller 包的共享目录路径
+        std::string package_share_dir = ament_index_cpp::get_package_share_directory("arm_controller");
 
-    // 检查目录是否存在
-    if (!std::filesystem::exists(record_input_dir_)) {
-        RCLCPP_WARN(node_->get_logger(), "Trajectory directory does not exist: %s", record_input_dir_.c_str());
-        try {
-            std::filesystem::create_directories(record_input_dir_);
-            RCLCPP_INFO(node_->get_logger(), "Created trajectory directory: %s", record_input_dir_.c_str());
-        } catch (const std::exception& e) {
-            RCLCPP_ERROR(node_->get_logger(), "Failed to create directory %s: %s",
-                        record_input_dir_.c_str(), e.what());
+        // 从包目录获取工作空间根目录 (install/arm_controller -> install -> workspace_root)
+        std::filesystem::path pkg_path(package_share_dir);
+        std::filesystem::path workspace_root = pkg_path.parent_path().parent_path();
+
+        // 构造轨迹目录路径: workspace_root/trajectories
+        record_input_dir_ = (workspace_root / "trajectories").string();
+
+        RCLCPP_INFO(node_->get_logger(), "Trajectory directory: %s", record_input_dir_.c_str());
+
+        // 检查目录是否存在
+        if (!std::filesystem::exists(record_input_dir_)) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Trajectory directory does not exist: %s", record_input_dir_.c_str());
+            throw std::runtime_error("Trajectory directory not found: " + record_input_dir_);
         }
-    } else {
-        RCLCPP_INFO(node_->get_logger(), "Using trajectory directory: %s", record_input_dir_.c_str());
+    } catch (const std::exception& e) {
+        record_input_dir_ = "/tmp/arm_recording_trajectories";
+        RCLCPP_WARN(node_->get_logger(), "❎ Using fallback trajectory directory: %s", record_input_dir_.c_str());
     }
 
     // 创建录制器实例（用于加载轨迹）
@@ -53,8 +61,8 @@ TrajectoryReplayController::TrajectoryReplayController(const rclcpp::Node::Share
     raw_traj_pub_ = node_->create_publisher<trajectory_msgs::msg::JointTrajectory>("/raw_joint_trajectory", 10);
 
     // 创建模式切换服务客户端
-    mode_service_client_ = node_->create_client<controller_interfaces::srv::WorkMode>(
-        "/controller_api/controller_mode");
+    // mode_service_client_ = node_->create_client<controller_interfaces::srv::WorkMode>(
+    //     "/controller_api/controller_mode");
 
     // 创建 MoveJ 命令发布器（使用 JointState 类型）
     movej_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(
@@ -75,13 +83,13 @@ TrajectoryReplayController::TrajectoryReplayController(const rclcpp::Node::Share
 }
 
 void TrajectoryReplayController::start(const std::string& mapping) {
-    current_mapping_ = mapping;
+    active_mapping_ = mapping;
     is_active_ = true;
     RCLCPP_INFO(node_->get_logger(), "TrajectoryReplayController activated with mapping: %s", mapping.c_str());
 }
 
 bool TrajectoryReplayController::stop(const std::string& mapping) {
-    (void)mapping;
+    // (void)mapping;
     is_active_ = false;
 
     // 清空轨迹池
@@ -93,6 +101,13 @@ bool TrajectoryReplayController::stop(const std::string& mapping) {
     }
 
     executing_ = false;
+
+    // 清理该 mapping 的话题订阅
+    cleanup_subscriptions(mapping);
+
+    // 清理资源
+    active_mapping_.clear();
+
     RCLCPP_INFO(node_->get_logger(), "TrajectoryReplayController deactivated");
     return true;
 }
@@ -211,7 +226,7 @@ void TrajectoryReplayController::execute_next_trajectory() {
     }
 
     // 获取配置的初始位置（而不是轨迹的起点）
-    std::vector<double> initial_position = hardware_manager_->get_initial_position(current_mapping_);
+    std::vector<double> initial_position = hardware_manager_->get_initial_position(active_mapping_);
     if (initial_position.empty()) {
         RCLCPP_WARN(node_->get_logger(), "No initial_position configured, skipping move to initial");
     }
@@ -322,15 +337,15 @@ void TrajectoryReplayController::smoothed_trajectory_callback(const trajectory_m
     }
 
     // 获取 interface
-    std::string interface = hardware_manager_->get_interface(current_mapping_);
+    std::string interface = hardware_manager_->get_interface(active_mapping_);
     if (interface.empty() || interface == "unknown_interface") {
-        RCLCPP_ERROR(node_->get_logger(), "Invalid interface for mapping: %s", current_mapping_.c_str());
+        RCLCPP_ERROR(node_->get_logger(), "Invalid interface for mapping: %s", active_mapping_.c_str());
         publish_status("error:invalid_interface");
         return;
     }
 
     RCLCPP_INFO(node_->get_logger(), "Executing trajectory on interface: %s (mapping: %s)",
-                interface.c_str(), current_mapping_.c_str());
+                interface.c_str(), active_mapping_.c_str());
 
     // 直接调用 hardware_manager 执行轨迹（阻塞调用）
     bool success = hardware_manager_->executeTrajectory(interface, hw_trajectory);
@@ -340,9 +355,9 @@ void TrajectoryReplayController::smoothed_trajectory_callback(const trajectory_m
 
         // 轨迹执行完成后，立即发送保持当前位置的命令
         // 避免 HoldState 使用旧的位置（轨迹起点）导致电机突然回到起点
-        auto current_positions = hardware_manager_->get_current_joint_positions(current_mapping_);
+        auto current_positions = hardware_manager_->get_current_joint_positions(active_mapping_);
         if (!current_positions.empty()) {
-            hardware_manager_->send_hold_state_command(current_mapping_, current_positions);
+            hardware_manager_->send_hold_state_command(active_mapping_, current_positions);
             RCLCPP_INFO(node_->get_logger(), "Sent hold command at trajectory end position");
         }
 

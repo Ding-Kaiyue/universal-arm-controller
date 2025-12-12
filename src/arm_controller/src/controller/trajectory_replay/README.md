@@ -56,15 +56,15 @@ ros2 run traj_smoother_py smoother_node
 ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'TrajectoryRecord', mapping: 'single_arm'}"
 
 # 开始录制（发送轨迹名称）
-ros2 topic pub --once /controller_api/trajectory_record std_msgs/msg/String "{data: 'my_trajectory'}"
+ros2 topic pub --once /controller_api/trajectory_record_action std_msgs/msg/String "{data: 'my_trajectory'}"
 
 # 手动拖动机械臂...
 
 # 停止录制
-ros2 topic pub --once /controller_api/trajectory_record std_msgs/msg/String "{data: 'stop'}"
+ros2 topic pub --once /controller_api/trajectory_record_action std_msgs/msg/String "{data: 'stop'}"
 ```
 
-轨迹文件保存在: `/home/w/work/robotic_arm_ws/trajectories/my_trajectory.txt`
+轨迹文件保存在: `/${WORKSPACE}/trajectories/my_trajectory.txt`
 
 ### 3. 复现轨迹
 
@@ -73,7 +73,7 @@ ros2 topic pub --once /controller_api/trajectory_record std_msgs/msg/String "{da
 ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'TrajectoryReplay', mapping: 'single_arm'}"
 
 # 开始复现（发送轨迹名称，不带.txt后缀）
-ros2 topic pub --once /controller_api/trajectory_replay_action std_msgs/msg/String "{data: 'trajectory_2'}"
+ros2 topic pub --once /controller_api/trajectory_replay_action std_msgs/msg/String "{data: 'my_trajectory'}"
 publisher: beginning loop
 publishing #1: std_msgs.msg.String(data='trajectory_2')
 ```

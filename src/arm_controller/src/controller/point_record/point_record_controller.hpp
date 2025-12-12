@@ -1,10 +1,10 @@
 #ifndef __POINT_RECORD_CONTROLLER_HPP__
 #define __POINT_RECORD_CONTROLLER_HPP__
 
-#include <controller_base/record_controller_base.hpp>
+#include <controller_base/teach_controller_base.hpp>
 #include <std_msgs/msg/string.hpp>
 
-class PointRecordController final : public RecordControllerBase {
+class PointRecordController final : public TeachControllerBase {
 public:
     explicit PointRecordController(const rclcpp::Node::SharedPtr& node);
     ~PointRecordController() override = default;

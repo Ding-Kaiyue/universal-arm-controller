@@ -2,7 +2,7 @@
 #include "controller_interface.hpp"
 
 PointRecordController::PointRecordController(const rclcpp::Node::SharedPtr & node)
-    : RecordControllerBase("PointRecord", node)
+    : TeachControllerBase("PointRecord", node)
 {
     std::string input_topic, output_topic;
     node_->get_parameter("controllers.PointRecord.input_topic", input_topic);

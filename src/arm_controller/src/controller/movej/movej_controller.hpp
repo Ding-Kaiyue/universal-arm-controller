@@ -1,7 +1,7 @@
 #ifndef __MOVEJ_CONTROLLER_HPP__
 #define __MOVEJ_CONTROLLER_HPP__
 
-#include <controller_base/trajectory_controller_base.hpp>
+#include "controller_base/trajectory_controller_base.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "trajectory_planning_v3/application/services/motion_planning_service.hpp"
 #include "trajectory_planning_v3/infrastructure/integration/moveit_adapter.hpp"

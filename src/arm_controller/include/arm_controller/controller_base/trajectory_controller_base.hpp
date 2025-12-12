@@ -13,7 +13,7 @@ class TrajectoryControllerBase : public ModeControllerBase {
 public:
     explicit TrajectoryControllerBase(std::string mode) : ModeControllerBase(mode) {}
     virtual ~TrajectoryControllerBase() = default;
-    virtual void handle_message(std::any msg) override = 0;
+    // virtual void handle_message(std::any msg) override = 0;
 };
 
 template<typename T>
@@ -60,14 +60,14 @@ public:
 
     virtual void trajectory_callback(const typename T::SharedPtr msg) = 0;
 
-    void handle_message(std::any msg) override final{
-        try {
-            auto typed_msg = std::any_cast<typename T::SharedPtr>(msg);
-            trajectory_callback(typed_msg);
-        } catch (const std::bad_any_cast& e) {
-            RCLCPP_ERROR_STREAM(rclcpp::get_logger("TrajectoryControllerImpl"), "Failed to cast message to type " << typeid(T).name());
-        }
-    }
+    // void handle_message(std::any msg) override final{
+    //     try {
+    //         auto typed_msg = std::any_cast<typename T::SharedPtr>(msg);
+    //         trajectory_callback(typed_msg);
+    //     } catch (const std::bad_any_cast& e) {
+    //         RCLCPP_ERROR_STREAM(rclcpp::get_logger("TrajectoryControllerImpl"), "Failed to cast message to type " << typeid(T).name());
+    //     }
+    // }
 
     virtual void start(const std::string& mapping) override = 0;
     virtual bool stop(const std::string& mapping) override = 0;

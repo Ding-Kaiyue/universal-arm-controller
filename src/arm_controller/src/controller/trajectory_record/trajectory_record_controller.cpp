@@ -3,56 +3,62 @@
 #include <filesystem>
 #include <thread>
 #include <chrono>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 
 TrajectoryRecordController::TrajectoryRecordController(const rclcpp::Node::SharedPtr & node)
-    : RecordControllerBase("TrajectoryRecord", node)
+    : TeachControllerBase("TrajectoryRecord", node)
 {
-    std::string input_topic, output_topic;
-    node_->get_parameter("controllers.TrajectoryRecord.input_topic", input_topic);
-    node_->get_parameter("controllers.TrajectoryRecord.output_topic", output_topic);
-
-    // 使用工作空间的统一轨迹存储目录
-    record_output_dir_ = "/home/w/work/robotic_arm_ws/trajectories";
-
-    // 检查目录是否存在，如果不存在则创建
-    if (!std::filesystem::exists(record_output_dir_)) {
-        try {
-            std::filesystem::create_directories(record_output_dir_);
-            RCLCPP_INFO(node_->get_logger(), "Created trajectory directory: %s", record_output_dir_.c_str());
-        } catch (const std::exception& e) {
-            RCLCPP_ERROR(node_->get_logger(), "Failed to create directory %s: %s",
-                        record_output_dir_.c_str(), e.what());
-            record_output_dir_ = "/tmp/arm_recordings";
-            RCLCPP_WARN(node_->get_logger(), "Fallback to: %s", record_output_dir_.c_str());
-        }
-    }
+    // 获取硬件管理器实例（用于重力补偿）
+    hardware_manager_ = HardwareManager::getInstance();
 
     // 创建录制器，录制频率为 100Hz
     recorder_ = std::make_unique<JointRecorder>(100.0);
 
-    // 获取硬件管理器实例（用于重力补偿）
-    hardware_manager_ = HardwareManager::getInstance();
+    std::string input_topic, output_topic;
+    node_->get_parameter("controllers.TrajectoryRecord.input_topic", input_topic);
+    node_->get_parameter("controllers.TrajectoryRecord.output_topic", output_topic);
+
+    // 获取工作空间中的轨迹存储目录
+    try {
+        // 获取 arm_controller 包的共享目录路径
+        std::string package_share_dir = ament_index_cpp::get_package_share_directory("arm_controller");
+
+        // 从包目录获取工作空间根目录 (install/arm_controller -> install -> workspace_root)
+        std::filesystem::path pkg_path(package_share_dir);
+        std::filesystem::path workspace_root = pkg_path.parent_path().parent_path();
+
+        // 构造轨迹目录路径: workspace_root/trajectories
+        record_output_dir_ = (workspace_root / "trajectories").string();
+
+        RCLCPP_INFO(node_->get_logger(), "Trajectory directory: %s", record_output_dir_.c_str());
+
+        // 检查目录是否存在，如果不存在则创建
+        if (!std::filesystem::exists(record_output_dir_)) {
+            try {
+                std::filesystem::create_directories(record_output_dir_);
+                RCLCPP_INFO(node_->get_logger(), "✅ Created trajectory directory: %s", record_output_dir_.c_str());
+            } catch (const std::exception& e) {
+                RCLCPP_ERROR(node_->get_logger(), "❎ Failed to create directory %s: %s",
+                            record_output_dir_.c_str(), e.what());
+                record_output_dir_ = "/tmp/arm_recording_trajectories";
+                RCLCPP_WARN(node_->get_logger(), "Fallback to: %s", record_output_dir_.c_str());
+            }
+        }
+    } catch (const std::exception& e) {
+        record_output_dir_ = "/tmp/arm_recording_trajectories";
+        RCLCPP_WARN(node_->get_logger(), "❎ Using fallback trajectory directory: %s", record_output_dir_.c_str());
+    }
 
     // 订阅轨迹录制命令
     sub_ = node_->create_subscription<std_msgs::msg::String>(
-        input_topic, 10, std::bind(&TrajectoryRecordController::trajectory_record_callback, this, std::placeholders::_1)
+        input_topic, rclcpp::QoS(10).reliable(),
+        std::bind(&TrajectoryRecordController::teach_callback, this, std::placeholders::_1)
     );
-
-    // 发布状态反馈（可选）
-    pub_ = node_->create_publisher<std_msgs::msg::String>(output_topic, 10);
 
     // 订阅关节状态用于录制
     joint_states_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
         "/joint_states", 10, std::bind(&TrajectoryRecordController::joint_states_callback, this, std::placeholders::_1)
     );
-
-    RCLCPP_INFO(node_->get_logger(), "TrajectoryRecordController initialized. Output dir: %s", record_output_dir_.c_str());
-}
-
-void TrajectoryRecordController::start(const std::string& mapping) {
-    // 保存当前激活的 mapping
-    active_mapping_ = mapping.empty() ? "single_arm" : mapping;
-    is_active_ = true;
 
     // 进入示教模式时，创建重力补偿订阅
     // 只要控制器激活就持续接收重力补偿力矩
@@ -61,12 +67,31 @@ void TrajectoryRecordController::start(const std::string& mapping) {
         std::bind(&TrajectoryRecordController::gravity_torque_callback, this, std::placeholders::_1)
     );
 
+    // 发布状态反馈（可选）
+    pub_ = node_->create_publisher<std_msgs::msg::String>(output_topic, 10);
+
+    RCLCPP_INFO(node_->get_logger(), "TrajectoryRecordController initialized. Output dir: %s", record_output_dir_.c_str());
+}
+
+void TrajectoryRecordController::start(const std::string& mapping) {
+    // 检查 mapping 是否存在于配置中
+    const auto& all_mappings = hardware_manager_->get_all_mappings();
+    if (std::find(all_mappings.begin(), all_mappings.end(), mapping) == all_mappings.end()) {
+        throw std::runtime_error(
+            "❎ [" + mapping + "] TeajectoryRecord: not found in hardware configuration."
+        );
+    }
+
+    // 保存当前激活的 mapping
+    active_mapping_ = mapping.empty() ? "single_arm" : mapping;
+    is_active_ = true;
+
     RCLCPP_INFO(node_->get_logger(), "[%s] TrajectoryRecordController activated with gravity compensation",
                 active_mapping_.c_str());
 }
 
 bool TrajectoryRecordController::stop(const std::string& mapping) {
-    (void)mapping;
+    is_active_ = false;
 
     // 停止任何正在进行的录制
     if (recorder_->isRecording()) {
@@ -76,8 +101,12 @@ bool TrajectoryRecordController::stop(const std::string& mapping) {
 
     // 退出示教模式时，销毁重力补偿订阅，停止重力补偿
     gravity_torque_sub_.reset();
+    // 清理该 mapping 的话题订阅
+    cleanup_subscriptions(mapping);
 
-    is_active_ = false;
+    // 清理资源
+    active_mapping_.clear();
+
     RCLCPP_INFO(node_->get_logger(), "[%s] TrajectoryRecordController deactivated, gravity compensation stopped",
                 active_mapping_.c_str());
     return true;
@@ -104,7 +133,7 @@ void TrajectoryRecordController::joint_states_callback(const sensor_msgs::msg::J
     }
 }
 
-void TrajectoryRecordController::trajectory_record_callback(const std_msgs::msg::String::SharedPtr msg) {
+void TrajectoryRecordController::teach_callback(const std_msgs::msg::String::SharedPtr msg) {
     if (!is_active_) return;
     if (msg->data.empty()) return;
 
