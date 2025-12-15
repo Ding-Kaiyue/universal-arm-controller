@@ -6,6 +6,7 @@
 src/hardware_driver/
 src/trajectory_interpolator/
 src/trajectory_planning/
+src/csaps/
 install/
 build/
 log/

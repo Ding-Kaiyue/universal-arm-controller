@@ -11,3 +11,7 @@ repositories:
     type: git
     url: https://github.com/Ding-Kaiyue/trajectory-interpolator.git
     version: master
+  csaps:
+    type: git
+    url: https://github.com/Ding-Kaiyue/csaps-cpp-redo.git
+    version: master
