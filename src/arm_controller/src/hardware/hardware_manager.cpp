@@ -278,6 +278,20 @@ std::vector<double> HardwareManager::get_current_joint_velocities(const std::str
     return std::vector<double>{};
 }
 
+std::vector<double> HardwareManager::get_current_joint_efforts(const std::string& mapping) const {
+    std::lock_guard<std::mutex> lock(joint_state_mutex_);
+
+    auto it = mapping_joint_states_.find(mapping);
+    if (it != mapping_joint_states_.end()) {
+        return it->second.effort;
+    }
+
+    RCLCPP_WARN(node_->get_logger(),
+                "[%s] Joint state not found, returning empty effort vector",
+                mapping.c_str());
+    return std::vector<double>{};
+}
+
 bool HardwareManager::send_hold_state_command(const std::string& mapping,
                                                   const std::vector<double>& positions) {
     if (!hardware_driver_) {
@@ -381,6 +395,8 @@ void HardwareManager::update_joint_state(const std::string& interface, uint32_t 
     // 转换单位：度数 → 弧度 (硬件返回度数，ROS需要弧度)
     joint_state.position[local_index] = status.position * M_PI / 180.0;
     joint_state.velocity[local_index] = status.velocity * M_PI / 180.0;
+
+    // TODO: 修改为当前状态的重力矩
     joint_state.effort[local_index] = status.effort;
 
     // 记录最新温度用于调试

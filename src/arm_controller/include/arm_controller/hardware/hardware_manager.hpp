@@ -72,6 +72,7 @@ public:
     // ============= 关节状态获取和控制 =============
     std::vector<double> get_current_joint_positions(const std::string& mapping) const;
     std::vector<double> get_current_joint_velocities(const std::string& mapping) const;
+    std::vector<double> get_current_joint_efforts(const std::string& mapping) const;
     bool send_hold_state_command(const std::string& mapping, const std::vector<double>& positions);
 
     // ============= 轨迹执行接口 =============
