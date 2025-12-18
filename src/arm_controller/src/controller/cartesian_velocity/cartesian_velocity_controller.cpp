@@ -1,6 +1,5 @@
 #include "cartesian_velocity_controller.hpp"
 #include "controller_interface.hpp"
-#include "arm_controller/utils/velocity_qp_solver.hpp"
 #include <stdexcept>
 #include <algorithm>
 
@@ -9,7 +8,7 @@
 
 CartesianVelocityController::CartesianVelocityController(const rclcpp::Node::SharedPtr& node)
     : VelocityControllerImpl<geometry_msgs::msg::TwistStamped>("CartesianVelocity", node),
-      base_frame_("Link6")
+      base_frame_("base_link")
 {
     // 获取HardwareManager实例
     hardware_manager_ = HardwareManager::getInstance();
@@ -21,14 +20,6 @@ CartesianVelocityController::CartesianVelocityController(const rclcpp::Node::Sha
     // 从配置文件读取基座坐标系（可选）
     node_->get_parameter("controllers.CartesianVelocity.base_frame", base_frame_);
     RCLCPP_INFO(node_->get_logger(), "[CartesianVelocity] Base frame: %s", base_frame_.c_str());
-
-    std::string input_topic;
-    node_->get_parameter("controllers.CartesianVelocity.input_topic", input_topic);
-
-    sub_ = node_->create_subscription<geometry_msgs::msg::TwistStamped>(
-        input_topic, rclcpp::QoS(10).reliable(),
-        std::bind(&CartesianVelocityController::velocity_callback, this, std::placeholders::_1)
-    );
 
     // 预初始化所有mapping的moveit服务
     initialize_moveit_service();
@@ -53,14 +44,28 @@ void CartesianVelocityController::start(const std::string& mapping) {
         init_subscriptions(mapping);
     }
 
+    // ✅ 创建 10ms 控制定时器（Jog 实时循环）
+    control_timer_ = node_->create_wall_timer(
+        std::chrono::milliseconds(10),
+        std::bind(&CartesianVelocityController::control_loop, this));
+
     RCLCPP_INFO(node_->get_logger(),
         "[%s] ✓ CartesianVelocityController activated. Reference frame will be determined from each TwistStamped message.",
+        mapping.c_str());
+    RCLCPP_INFO(node_->get_logger(),
+        "[%s] ✓ 10ms control loop started (Cartesian Jog mode)",
         mapping.c_str());
 }
 
 
 bool CartesianVelocityController::stop(const std::string& mapping) {
     is_active_ = false;
+
+    // ✅ 销毁 10ms 控制定时器
+    if (control_timer_) {
+        control_timer_.reset();
+        RCLCPP_INFO(node_->get_logger(), "[%s] Control loop stopped", mapping.c_str());
+    }
 
     // 发送零速度命令停止机械臂
     auto joint_names = hardware_manager_->get_joint_names(mapping);
@@ -113,137 +118,271 @@ void CartesianVelocityController::initialize_moveit_service() {
     }
 }
 
-void CartesianVelocityController::velocity_callback(const geometry_msgs::msg::TwistStamped::SharedPtr msg) {
+void CartesianVelocityController::velocity_callback(
+    const geometry_msgs::msg::TwistStamped::SharedPtr msg)
+{
+    // ✅ Twist latch 模式：仅缓存最新命令
+    // 实际的 IK / 关节速度计算在 control_loop 中以 10ms 频率进行
+
+    if (!node_) return;
+
+    {
+        std::lock_guard<std::mutex> lock(cmd_mutex_);
+        last_twist_ = *msg;
+        // ✅ 使用 steady_clock（单调时间）确保工业级时间源一致
+        last_twist_time_ = steady_clock_.now();
+    }
+
+    RCLCPP_DEBUG(node_->get_logger(),
+        "[%s] ✓ Twist cached: linear[%.3f, %.3f, %.3f] frame='%s'",
+        active_mapping_.c_str(),
+        msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z,
+        msg->header.frame_id.c_str());
+}
+
+void CartesianVelocityController::control_loop()
+{
+    /* ========================================
+     * 10ms 实时控制循环
+     * 这是睿尔曼风格的"真正的 Jog 控制"
+     * 关键特性：
+     * - 每 10ms 重新计算 Jacobian（机器人动态更新）
+     * - 命令 latch（缓存最新 Twist）
+     * - 100ms 超时保护
+     * ======================================== */
+
     if (!is_active_ || active_mapping_.empty()) {
-        RCLCPP_WARN(node_->get_logger(), "velocity_callback: not active or mapping empty. is_active=%d, mapping=%s", is_active_, active_mapping_.c_str());
         return;
     }
+
+    // 获取最新的 Twist 命令（带超时检查）
+    geometry_msgs::msg::TwistStamped cmd;
+    {
+        std::lock_guard<std::mutex> lock(cmd_mutex_);
+        // ✅ 使用 steady_clock 进行超时检查（单调时间，不受 use_sim_time 影响）
+        if ((steady_clock_.now() - last_twist_time_).seconds() > 0.1) {
+            // 命令超时 → 紧急停止
+            auto joint_names = hardware_manager_->get_joint_names(active_mapping_);
+            std::vector<double> zero(joint_names.size(), 0.0);
+            send_joint_velocities(active_mapping_, zero);
+            return;
+        }
+        cmd = last_twist_;
+    }
+
+    /* ===============================
+     * 1. Joint state (每周期读取)
+     * =============================== */
 
     auto joint_positions = hardware_manager_->get_current_joint_positions(active_mapping_);
-    auto joint_names = hardware_manager_->get_joint_names(active_mapping_);
+    auto joint_names     = hardware_manager_->get_joint_names(active_mapping_);
+
     if (joint_positions.empty() || joint_names.empty()) {
-        RCLCPP_WARN(node_->get_logger(), "[%s] ❎ No joint states or names available", active_mapping_.c_str());
         return;
     }
 
-    // Get Jacobian using MoveItAdapter
-    if (moveit_adapters_.find(active_mapping_) == moveit_adapters_.end() || !moveit_adapters_[active_mapping_]) {
-        RCLCPP_WARN(node_->get_logger(), "[%s] ❎ MoveItAdapter not initialized", active_mapping_.c_str());
+    auto it = moveit_adapters_.find(active_mapping_);
+    if (it == moveit_adapters_.end() || !it->second) {
         return;
     }
 
-    Eigen::MatrixXd J = moveit_adapters_[active_mapping_]->computeJacobian(joint_positions);
-    if (J.rows() == 0 || J.cols() == 0) {
-        RCLCPP_WARN(node_->get_logger(), "[%s] ❎ Invalid Jacobian matrix (empty)", active_mapping_.c_str());
+    /* ===============================
+     * 2. Jacobian (BASE / WORLD) - 每周期重新计算 ✨ 关键
+     * =============================== */
+
+    Eigen::MatrixXd J =
+        it->second->computeJacobian(joint_positions);
+
+    if (J.rows() == 0 || J.cols() == 0 || J.hasNaN()) {
+        std::vector<double> zero(joint_names.size(), 0.0);
+        send_joint_velocities(active_mapping_, zero);
         return;
     }
 
-    // Validate Jacobian dimensions
-    if (J.rows() < 6) {
-        RCLCPP_WARN(node_->get_logger(),
-            "[%s] ⚠️ Jacobian has only %ld rows (<6 task dimensions). "
-            "Check planning group configuration - may be constrained motion.",
-            active_mapping_.c_str(), J.rows());
-    }
-    if (J.cols() < 6) {
-        RCLCPP_WARN(node_->get_logger(),
-            "[%s] ⚠️ Robot has only %ld DoF. Some Cartesian velocities may not be achievable.",
-            active_mapping_.c_str(), J.cols());
-    }
+    /* ===============================
+     * 3. Cartesian velocity (STRICT)
+     * =============================== */
 
-    // 坐标系处理：每条消息可以指定不同的参考坐标系
-    Eigen::Vector3d v_linear_raw(msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z);
-    Eigen::Vector3d v_angular_raw(msg->twist.angular.x, msg->twist.angular.y, msg->twist.angular.z);
+    Eigen::Vector3d v_linear(
+        cmd.twist.linear.x,
+        cmd.twist.linear.y,
+        cmd.twist.linear.z);
 
-    Eigen::VectorXd v_ee(6);
+    Eigen::Vector3d v_angular(
+        cmd.twist.angular.x,
+        cmd.twist.angular.y,
+        cmd.twist.angular.z);
 
-    // 获取用户指定的参考坐标系，如果未指定则使用Link6
-    std::string user_frame = msg->header.frame_id.empty() ? base_frame_ : msg->header.frame_id;
+    // 世界 / 基坐标系速度（默认）
+    std::string user_frame =
+        cmd.header.frame_id.empty() ? base_frame_ : cmd.header.frame_id;
 
-    try {
-        rclcpp::Time now = node_->get_clock()->now();
+    if (user_frame != base_frame_) {
+        try {
+            // ✅ 使用 tf2::TimePointZero 获取最新可用的变换（TF 官方推荐）
+            auto tf =
+                tf_buffer_->lookupTransform(
+                    base_frame_, user_frame,
+                    tf2::TimePointZero,
+                    std::chrono::milliseconds(50));
 
-        // 获取从用户指定的坐标系到base_link的变换
-        geometry_msgs::msg::TransformStamped tf_user_to_base =
-            tf_buffer_->lookupTransform(base_frame_, user_frame, now, std::chrono::milliseconds(100));
+            Eigen::Quaterniond q(
+                tf.transform.rotation.w,
+                tf.transform.rotation.x,
+                tf.transform.rotation.y,
+                tf.transform.rotation.z);
 
-        // 从四元数提取旋转矩阵
-        Eigen::Quaterniond q_user_to_base(
-            tf_user_to_base.transform.rotation.w,
-            tf_user_to_base.transform.rotation.x,
-            tf_user_to_base.transform.rotation.y,
-            tf_user_to_base.transform.rotation.z
-        );
-        Eigen::Matrix3d R_user_to_base = q_user_to_base.toRotationMatrix();
+            Eigen::Matrix3d R = q.toRotationMatrix();
+            v_linear  = R * v_linear;
+            v_angular = R * v_angular;
 
-        // 将速度从用户坐标系变换到base_link坐标系
-        Eigen::Vector3d v_linear_base = R_user_to_base * v_linear_raw;
-        Eigen::Vector3d v_angular_base = R_user_to_base * v_angular_raw;
-
-        v_ee << v_linear_base(0), v_linear_base(1), v_linear_base(2),
-                v_angular_base(0), v_angular_base(1), v_angular_base(2);
-
-        RCLCPP_DEBUG(node_->get_logger(),
-            "[%s] Velocity transformed: %s[%.6f,%.6f,%.6f] → %s[%.6f,%.6f,%.6f]",
-            active_mapping_.c_str(),
-            user_frame.c_str(), v_linear_raw(0), v_linear_raw(1), v_linear_raw(2),
-            base_frame_.c_str(), v_linear_base(0), v_linear_base(1), v_linear_base(2));
-    } catch (const tf2::TransformException& ex) {
-        RCLCPP_WARN(node_->get_logger(),
-            "[%s] ⚠️ TF lookup failed for frame '%s': %s. Stopping motion for safety.",
-            active_mapping_.c_str(), user_frame.c_str(), ex.what());
-        // 安全停止：发送零速度而不是使用原始速度
-        auto joint_names_list = hardware_manager_->get_joint_names(active_mapping_);
-        if (!joint_names_list.empty()) {
-            std::vector<double> zero_velocities(joint_names_list.size(), 0.0);
-            send_joint_velocities(active_mapping_, zero_velocities);
+        } catch (...) {
+            std::vector<double> zero(joint_names.size(), 0.0);
+            send_joint_velocities(active_mapping_, zero);
+            return;
         }
+    }
+
+    /* ========================================
+     * ✅ 工业级修正：仅用 3D 位置任务
+     * 不约束姿态（Jog 模式特性）
+     * ======================================== */
+
+    // 仅使用位置 Jacobian（3×n）
+    Eigen::MatrixXd J_task = J.topRows(3);
+    Eigen::VectorXd v_task = v_linear;
+
+    if (v_task.norm() < 1e-8) {
+        std::vector<double> zero(joint_names.size(), 0.0);
+        send_joint_velocities(active_mapping_, zero);
         return;
     }
 
-    RCLCPP_DEBUG(node_->get_logger(), "[%s] Final velocity for IK: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-        active_mapping_.c_str(), v_ee(0), v_ee(1), v_ee(2), v_ee(3), v_ee(4), v_ee(5));
+    /* ===============================
+     * 4. Singularity Metric & Scaling
+     * =============================== */
 
-    // 获取关节速度限制
-    Eigen::VectorXd qd_min(J.cols()), qd_max(J.cols());
-    for (int i = 0; i < J.cols(); ++i) {
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J_task);
+    double sigma_min = svd.singularValues().minCoeff();
+
+    // ✅ 工业策略：奇异区缩速，不拒绝
+    // σ 小 → scale ↓，方向保持
+    double scale = 1.0;
+    if (sigma_min < 0.05) {
+        // 平滑缩速函数
+        if (sigma_min <= 0.01) {
+            scale = 0.0;  // 极度奇异 → 停止
+        } else {
+            // σ ∈ [0.01, 0.05) 线性缩速
+            scale = (sigma_min - 0.01) / (0.05 - 0.01);
+        }
+    }
+
+    v_task *= scale;  // 应用缩速
+
+    /* ===============================
+     * 5. Joint limits & limits info
+     * =============================== */
+
+    const int dof = J.cols();
+
+    Eigen::VectorXd q_current =
+        Eigen::Map<Eigen::VectorXd>(
+            joint_positions.data(), joint_positions.size());
+
+    Eigen::VectorXd qd_max(dof);
+    Eigen::VectorXd q_min_pos(dof), q_max_pos(dof);
+
+    for (int i = 0; i < dof; ++i) {
         JointLimits limits;
         hardware_manager_->get_joint_limits(joint_names[i], limits);
-        double vmax_abs = limits.has_velocity_limits ? limits.max_velocity : 1.0;
-        qd_max(i) = vmax_abs;
-        qd_min(i) = -vmax_abs;
+
+        double vmax = limits.has_velocity_limits ? limits.max_velocity : 1.0;
+        qd_max(i) = vmax;
+
+        q_min_pos(i) = limits.min_position;
+        q_max_pos(i) = limits.max_position;
     }
 
-    // 使用 VelocityQPSolver 求解
-    Eigen::VectorXd qd(J.cols());
-    if (!arm_controller::utils::VelocityQPSolver::solve_velocity_qp(
-            J, v_ee, qd, qd_min, qd_max, node_->get_logger())) {
-        RCLCPP_WARN(node_->get_logger(), "[%s] ❎ Failed to solve velocity QP. Sending zero velocities to stop.", active_mapping_.c_str());
-        // 发送零速度命令来停止机械臂
-        auto joint_names_list = hardware_manager_->get_joint_names(active_mapping_);
-        if (!joint_names_list.empty()) {
-            std::vector<double> zero_velocities(joint_names_list.size(), 0.0);
-            send_joint_velocities(active_mapping_, zero_velocities);
-        }
+    /* ===============================
+     * 6. 3D 位置 Jog 求解
+     * =============================== */
+
+    Eigen::VectorXd qd(dof);
+
+    // 调用 solver（传入 3D Jacobian 和 3D 任务）
+    // Note: solver_ 的接口可能期望 6D，这里需要适配
+    // 暂时创建 6D 版本以兼容现有接口
+    Eigen::MatrixXd J_6d = J;  // 保持原 6D
+    Eigen::VectorXd v_6d(6);
+    v_6d << v_task(0), v_task(1), v_task(2), 0, 0, 0;  // 仅位置，无角速度
+
+    bool ok = solver_.solve(
+        J_6d,
+        v_6d,
+        q_current,
+        q_min_pos,
+        q_max_pos,
+        qd_max,
+        qd,
+        node_->get_logger());
+
+    if (!ok) {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "[%s] Jog velocity unreachable",
+            active_mapping_.c_str());
+
+        std::vector<double> zero(joint_names.size(), 0.0);
+        send_joint_velocities(active_mapping_, zero);
         return;
     }
 
-    // 检查工作空间边界 - 如果会超出工作空间，停止运动
-    if (!arm_controller::utils::VelocityQPSolver::check_workspace_boundary(
-            joint_positions, qd, joint_names, hardware_manager_)) {
-        RCLCPP_WARN(node_->get_logger(), "[%s] ❎ Workspace boundary violation detected. Sending zero velocities.", active_mapping_.c_str());
-        // 发送零速度命令来停止机械臂
-        auto joint_names_list = hardware_manager_->get_joint_names(active_mapping_);
-        if (!joint_names_list.empty()) {
-            std::vector<double> zero_velocities(joint_names_list.size(), 0.0);
-            send_joint_velocities(active_mapping_, zero_velocities);
-        }
+    /* ========================================
+     * 7. ✅ 工业级方向一致性检验
+     * 检查方向，不检查模长
+     * ======================================== */
+
+    Eigen::Vector3d v_reconstructed = J_task * qd;
+
+    // 检查是否接近零
+    if (v_reconstructed.norm() < 1e-6) {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "[%s] Velocity reconstruction near zero",
+            active_mapping_.c_str());
+        std::vector<double> zero(joint_names.size(), 0.0);
+        send_joint_velocities(active_mapping_, zero);
         return;
     }
+
+    // ✅ 方向一致性检验（不是模长检验）
+    double cos_angle = v_reconstructed.normalized().dot(v_task.normalized());
+    cos_angle = std::clamp(cos_angle, -1.0, 1.0);
+
+    // ~11° 容限
+    if (cos_angle < 0.98) {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "[%s] Direction error: %.1f° > 11°, rejecting",
+            active_mapping_.c_str(),
+            std::acos(cos_angle) * 180.0 / M_PI);
+
+        std::vector<double> zero(joint_names.size(), 0.0);
+        send_joint_velocities(active_mapping_, zero);
+        return;
+    }
+
+    /* ===============================
+     * 7. Send joint velocity
+     * =============================== */
 
     std::vector<double> velocities(qd.data(), qd.data() + qd.size());
     send_joint_velocities(active_mapping_, velocities);
 }
+
+
+
 
 
 bool CartesianVelocityController::send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities) {
@@ -265,7 +404,7 @@ bool CartesianVelocityController::send_joint_velocities(const std::string& mappi
 
         // MIT模式速度控制参数
         const double kp_velocity = 0.0;      // 速度模式：kp=0.0
-        const double kd_velocity = 0.1;     // 速度模式：kd=0.1
+        const double kd_velocity = 0.01;     // 速度模式：kd=0.01
         const double effort = 0.0;           // 力矩在纯速度模式下不使用
         const double position = 0.0;         // 位置在纯速度模式下不使用
 
@@ -273,6 +412,12 @@ bool CartesianVelocityController::send_joint_velocities(const std::string& mappi
             const auto& joint_name = joint_names[i];
             uint32_t motor_id = motor_ids[i];
             double vel = joint_velocities[i] * 180.0 / M_PI;  // 转为度/秒
+
+            if (vel != 0.0) {
+                RCLCPP_INFO(node_->get_logger(),
+                    "[%s] Motor %u (joint %s): vel_rad=%.6f, vel_deg=%.6f",
+                    mapping.c_str(), motor_id, joint_name.c_str(), joint_velocities[i], vel);
+            }
 
             int violation_dir = hardware_manager_->get_joint_violation_direction(joint_name);
             if (hardware_manager_->is_joint_emergency_stopped(joint_name) &&

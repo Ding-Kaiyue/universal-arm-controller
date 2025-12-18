@@ -38,10 +38,9 @@ bool HardwareManager::initialize(rclcpp::Node::SharedPtr node) {
         hardware_driver_ = std::make_shared<RobotHardware>(motor_driver, interface_motor_config,
                                                           shared_from_this());
 
-        // 初始化按键驱动 (不需要独立的总线，通过motor_driver转发数据包)
+        // 初始化按键驱动 (不需要独立的总线，通过button_driver转发数据包)
         auto button_driver = hardware_driver::createCanFdButtonDriver(nullptr);
         hardware_driver_->set_button_driver(button_driver);
-        RCLCPP_INFO(node_->get_logger(), "按键驱动初始化完成");
 
         // 创建关节状态发布器
         joint_state_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(
@@ -687,9 +686,9 @@ void HardwareManager::check_safety_limits(const std::string& interface, uint32_t
 
     // 未触发急停但接近软限位，打印预警
     if (!currently_emergency && (near_min_limit || near_max_limit)) {
-        RCLCPP_WARN(node_->get_logger(),
-                    "[%s] Joint %s is near position limit: %.3f rad",
-                    mapping.c_str(), joint_name.c_str(), position);
+        // RCLCPP_WARN(node_->get_logger(),
+        //             "[%s] Joint %s is near position limit: %.3f rad",
+        //             mapping.c_str(), joint_name.c_str(), position);
     }
 
     if (safety_violation) {
@@ -735,7 +734,7 @@ void HardwareManager::emergency_stop_joint(const std::string& interface, uint32_
 
     try {
         // TODO: 🌟 修改急停策略, hardware_driver提供一个急停的方法, 当前发送零速度命令来停止电机
-        hardware_driver_->control_motor_in_velocity_mode(interface, motor_id, 0.0);
+        hardware_driver_->control_motor_in_mit_mode(interface, motor_id, 0.0, 0.0, 0.0, 0.0, 0.01);
 
         RCLCPP_WARN(node_->get_logger(),
                    "Emergency stop executed for motor %u on interface %s",

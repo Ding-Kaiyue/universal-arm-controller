@@ -22,7 +22,7 @@
   <depend>trajectory_planning_v3</depend>
   <depend>trajectory_interpolator</depend>
   <depend>hardware_driver</depend>
-  <depend>robot_sdk</depend>
+  <depend>csaps</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

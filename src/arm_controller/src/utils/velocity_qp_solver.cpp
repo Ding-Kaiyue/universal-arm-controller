@@ -5,69 +5,19 @@
 
 namespace arm_controller::utils {
 
-void VelocityQPSolver::check_direction_feasibility(
-    const Eigen::MatrixXd &J,
-    const Eigen::VectorXd &v_ee,
-    double &out_feasibility_ratio,
-    double &out_residual_norm,
-    double &out_alignment,
-    double &out_cond)
-{
-    // SVD 分解
-    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J, Eigen::ComputeThinU | Eigen::ComputeThinV);
-    Eigen::VectorXd sv = svd.singularValues();
-    double min_sv = sv.size() ? sv(sv.size()-1) : 0.0;
-    double max_sv = sv.size() ? sv(0) : 0.0;
+static constexpr double W_TASK   = 1.0;
+static constexpr double W_QDOT   = 1e-4;
+static constexpr double W_LAMBDA = 1e-2;
+static constexpr double W_SMOOTH = 0.2;
+static constexpr double W_POSTURE = 0.05;
 
-    // 条件数
-    out_cond = (min_sv > EPSILON_SV) ? (max_sv / min_sv) : 1e12;
+static constexpr double DT = 0.01;
+static constexpr double DAMPING = 0.01;
 
-    // 投影到 Jacobian 列空间
-    Eigen::VectorXd v_proj = Eigen::VectorXd::Zero(v_ee.size());
-    if (svd.matrixU().cols() > 0) {
-        v_proj = svd.matrixU() * (svd.matrixU().transpose() * v_ee);
-    }
-
-    // 计算可行性指标
-    out_residual_norm = (v_ee - v_proj).norm();
-    out_feasibility_ratio = (v_proj.norm() / std::max(EPSILON_SV, v_ee.norm()));
-    out_alignment = (v_proj.norm() > EPSILON_SV) ? (v_proj.dot(v_ee) / (v_proj.norm() * v_ee.norm())) : 0.0;
-}
-
-bool VelocityQPSolver::post_verify_direction(
-    const Eigen::MatrixXd &J,
-    const Eigen::VectorXd &qd_solution,
-    const Eigen::VectorXd &v_ee,
-    double allowed_angle_deg,
-    const rclcpp::Logger& logger)
-{
-    Eigen::VectorXd v_actual = J * qd_solution;
-    double v_actual_norm = v_actual.norm();
-    double v_des_norm = v_ee.norm();
-
-    // 如果速度太小，认为是停的（正常）
-    if (v_actual_norm < 1e-9 || v_des_norm < 1e-9) {
-        return true;  // 视为安全
-    }
-
-    // 计算夹角余弦
-    double cos_thresh = std::cos(allowed_angle_deg * M_PI / 180.0);
-    double cos_val = v_actual.dot(v_ee) / (v_actual_norm * v_des_norm);
-
-    if (cos_val < cos_thresh) {
-        RCLCPP_WARN(logger,
-            "❗ Direction mismatch after QP: cos=%.6f < %.6f (angle=%.2f°). Stopping motion.",
-            cos_val, cos_thresh,
-            std::acos(std::min(1.0, std::max(-1.0, cos_val))) * 180.0 / M_PI);
-        return false;  // 方向偏离过大，不允许运动
-    }
-
-    return true;  // 方向一致，允许运动
-}
 
 bool VelocityQPSolver::check_workspace_boundary(
     const std::vector<double>& joint_positions,
-    const Eigen::VectorXd& qd_command,
+    const Eigen::VectorXd& qd,
     const std::vector<std::string>& joint_names,
     const std::shared_ptr<HardwareManager>& hardware_manager,
     double dt)
@@ -76,200 +26,376 @@ bool VelocityQPSolver::check_workspace_boundary(
         return false;
     }
 
-    // 预测下一个关节位置
-    Eigen::VectorXd q_current = Eigen::Map<const Eigen::VectorXd>(joint_positions.data(), joint_positions.size());
-    Eigen::VectorXd q_next = q_current + qd_command * dt;
+    for (size_t i = 0; i < joint_names.size(); ++i) {
+        JointLimits lim;
+        hardware_manager->get_joint_limits(joint_names[i], lim);
+        if (!lim.has_position_limits) continue;
 
-    std::vector<double> q_next_vec(q_next.data(), q_next.data() + q_next.size());
-
-    // 检查预测的关节位置是否在关节限制范围内
-    bool would_violate_limits = false;
-
-    for (size_t i = 0; i < q_next_vec.size() && i < joint_names.size(); ++i) {
-        JointLimits limits;
-        hardware_manager->get_joint_limits(joint_names[i], limits);
-
-        if (limits.has_position_limits) {
-            // 检查当前位置是否已经超出限制
-            bool current_exceeds_min = joint_positions[i] < limits.min_position;
-            bool current_exceeds_max = joint_positions[i] > limits.max_position;
-
-            // 检查下一个位置是否会超出限制
-            bool next_exceeds_min = q_next_vec[i] < limits.min_position;
-            bool next_exceeds_max = q_next_vec[i] > limits.max_position;
-
-            // 只在以下情况下阻止：
-            // 1. 当前已经超出，但命令会继续违反（进一步超出）
-            if ((current_exceeds_min && next_exceeds_min && q_next_vec[i] < joint_positions[i]) ||
-                (current_exceeds_max && next_exceeds_max && q_next_vec[i] > joint_positions[i])) {
-                would_violate_limits = true;
-                break;
-            }
-
-            // 2. 当前在限制内，但命令会导致超出
-            if (!current_exceeds_min && !current_exceeds_max &&
-                (next_exceeds_min || next_exceeds_max)) {
-                would_violate_limits = true;
-                break;
-            }
+        double q_next = joint_positions[i] + qd[i] * dt;
+        if (q_next < lim.min_position || q_next > lim.max_position) {
+            return false;
         }
     }
+    return true;
+}
 
-    return !would_violate_limits;
+Eigen::MatrixXd VelocityQPSolver::dampedPseudoInverse(
+    const Eigen::MatrixXd& J, double lambda)
+{
+    Eigen::MatrixXd JJt = J * J.transpose();
+    Eigen::MatrixXd I =
+        Eigen::MatrixXd::Identity(JJt.rows(), JJt.cols());
+    return J.transpose() * (JJt + lambda * lambda * I).inverse();
+}
+
+double VelocityQPSolver::computeMinSingularValue(const Eigen::MatrixXd& J)
+{
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    Eigen::VectorXd sv = svd.singularValues();
+    if (sv.size() == 0) return 0.0;
+    return sv(sv.size() - 1);
 }
 
 bool VelocityQPSolver::solve_velocity_qp(
     const Eigen::MatrixXd &J,
     const Eigen::VectorXd &v_ee,
-    Eigen::VectorXd &qd_solution,
+    Eigen::VectorXd &qd_out,
     const Eigen::VectorXd &qd_min,
     const Eigen::VectorXd &qd_max,
     const rclcpp::Logger& logger)
 {
-    const int dof = J.cols();
-    const int task_dim = J.rows();
+    const int n = J.cols();
+    // const int m = J.rows();  // Not used in this legacy solver
 
-    double v_magnitude = v_ee.norm();
-    if (v_magnitude < 1e-9) {
-        qd_solution = Eigen::VectorXd::Zero(dof);
+    if (qd_prev_.size() != n) {
+        qd_prev_ = Eigen::VectorXd::Zero(n);
+    }
+
+    if (v_ee.norm() < 1e-9) {
+        qd_out = Eigen::VectorXd::Zero(n);
+        qd_prev_ = qd_out;
         return true;
     }
-    Eigen::VectorXd v_direction = v_ee / v_magnitude;
 
-    // 前置几何可行性检测
-    double feasibility_ratio, residual_norm, alignment, cond;
-    check_direction_feasibility(J, v_ee, feasibility_ratio, residual_norm, alignment, cond);
+    const int nv = n + 1;   // qdot + lambda
 
-    if (feasibility_ratio < FEASIBILITY_RATIO_THRESHOLD ||
-        residual_norm > RESIDUAL_RATIO_THRESHOLD * v_magnitude ||
-        cond > CONDITION_NUMBER_THRESHOLD) {
-        RCLCPP_WARN(logger,
-            "❎ Direction not geometrically feasible (feasibility=%.3f, residual=%.3f, cond=%.3g). Stopping motion.",
-            feasibility_ratio, residual_norm, cond);
-        qd_solution = Eigen::VectorXd::Zero(dof);
-        return true;  // 返回 true 表示"安全地停止了"
-    }
+    // ============== Hessian matrix ==============
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(nv, nv);
 
-    // ===== QP 求解 =====
-    const int n_var = dof + 1;
-    const int n_constr = task_dim + dof + 1;
+    H.topLeftCorner(n, n) =
+        2.0 * (W_TASK * J.transpose() * J +
+               W_QDOT * Eigen::MatrixXd::Identity(n, n) +
+               W_SMOOTH * Eigen::MatrixXd::Identity(n, n));
 
-    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(n_var, n_var);
-    H.topLeftCorner(dof, dof) = QDOT_REGULARIZATION * Eigen::MatrixXd::Identity(dof, dof);
-    H(dof, dof) = EPSILON_S;
+    H.topRightCorner(n, 1) = -2.0 * W_TASK * J.transpose() * v_ee;
+    H.bottomLeftCorner(1, n) = H.topRightCorner(n, 1).transpose();
+    H(n, n) = 2.0 * (W_TASK * v_ee.squaredNorm() + W_LAMBDA);
 
-    Eigen::VectorXd f = Eigen::VectorXd::Zero(n_var);
-    f(dof) = -1.0;  // Coefficient for s variable (negative to maximize)
+    // ============== Gradient vector ==============
+    Eigen::VectorXd f = Eigen::VectorXd::Zero(nv);
+    f.head(n) = -2.0 * W_SMOOTH * qd_prev_;
+    f(n) = -2.0 * W_LAMBDA;
 
-    Eigen::MatrixXd A = Eigen::MatrixXd::Zero(n_constr, n_var);
+    // ============== Constraints ==============
+    const int nc = 4 * n + 2;
+    Eigen::MatrixXd A = Eigen::MatrixXd::Zero(nc, nv);
+    Eigen::VectorXd lb = Eigen::VectorXd::Zero(nc);
+    Eigen::VectorXd ub = Eigen::VectorXd::Zero(nc);
 
-    // Task equality constraint: J·q̇ - s·v = 0
-    A.topLeftCorner(task_dim, dof) = J;
-    A.topRightCorner(task_dim, 1) = -v_ee;
+    int r = 0;
 
-    // Joint velocity box constraint matrix
-    A.block(task_dim, 0, dof, dof).setIdentity();
+    // qdot limits
+    A.block(r, 0, n, n).setIdentity();
+    lb.segment(r, n) = qd_min;
+    ub.segment(r, n) = qd_max;
+    r += n;
 
-    // Scaling variable constraint coefficient
-    A(task_dim + dof, dof) = 1.0;
+    // position prediction
+    A.block(r, 0, n, n) = DT * Eigen::MatrixXd::Identity(n, n);
+    lb.segment(r, n).setConstant(-1e3);
+    ub.segment(r, n).setConstant(1e3);
+    r += n;
 
-    // Setup bounds
-    Eigen::VectorXd lb = Eigen::VectorXd::Constant(n_constr, -OsqpEigen::INFTY);
-    Eigen::VectorXd ub = Eigen::VectorXd::Constant(n_constr, OsqpEigen::INFTY);
+    // lambda
+    A(r, n) = 1.0;
+    lb(r) = 0.0;
+    ub(r) = 1.0;
+    r += 1;
 
-    lb.head(task_dim).setZero();
-    ub.head(task_dim).setZero();
-
-    lb.segment(task_dim, dof) = qd_min;
-    ub.segment(task_dim, dof) = qd_max;
-
-    lb(task_dim + dof) = 0.0;
-    ub(task_dim + dof) = 1.0;
-
-    // Setup and solve QP
+    // ============== Solve QP ==============
     OsqpEigen::Solver solver;
     solver.settings()->setWarmStart(true);
     solver.settings()->setVerbosity(false);
-    solver.data()->setNumberOfVariables(n_var);
-    solver.data()->setNumberOfConstraints(n_constr);
 
+    solver.data()->setNumberOfVariables(nv);
+    solver.data()->setNumberOfConstraints(r);
+
+    // 转换为compressed sparse format (CSR)
     Eigen::SparseMatrix<double> H_sparse = H.sparseView();
-    Eigen::SparseMatrix<double> A_sparse = A.sparseView();
+    Eigen::SparseMatrix<double> A_sparse = A.topRows(r).sparseView();
 
-    if (!solver.data()->setHessianMatrix(H_sparse) ||
-        !solver.data()->setGradient(f) ||
-        !solver.data()->setLinearConstraintsMatrix(A_sparse) ||
-        !solver.data()->setLowerBound(lb) ||
-        !solver.data()->setUpperBound(ub)) {
-        RCLCPP_ERROR(logger, "❎ QP setup failed");
-        return false;
-    }
+    solver.data()->setHessianMatrix(H_sparse);
+    solver.data()->setGradient(f);
+    solver.data()->setLinearConstraintsMatrix(A_sparse);
+    solver.data()->setLowerBound(lb.head(r));
+    solver.data()->setUpperBound(ub.head(r));
 
     if (!solver.initSolver()) {
         RCLCPP_ERROR(logger, "❎ QP init failed");
         return false;
     }
 
-    auto exitflag = solver.solveProblem();
-    if (exitflag != OsqpEigen::ErrorExitFlag::NoError) {
-        RCLCPP_WARN(logger, "⚠️ QP failed (flag=%d). Trying geometric scaling fallback...", static_cast<int>(exitflag));
+    if (solver.solveProblem() != OsqpEigen::ErrorExitFlag::NoError) {
+        RCLCPP_WARN(logger, "❎ QP solve failed, forcing stop");
+        qd_out = Eigen::VectorXd::Zero(n);
+        return false;
+    }
 
-        // Fallback: geometric scaling
-        const double scale = 0.9;
-        bool solved = false;
+    Eigen::VectorXd sol = solver.getSolution();
+    qd_out = sol.head(n);
+    qd_prev_ = qd_out;
 
-        for (int iter = 0; iter < 10; ++iter) {
-            Eigen::VectorXd v_scaled = v_ee * std::pow(scale, iter + 1);
-            A.topRightCorner(task_dim, 1) = -v_scaled;
-            Eigen::SparseMatrix<double> A2 = A.sparseView();
+    return true;
+}
 
-            if (!solver.updateLinearConstraintsMatrix(A2)) break;
 
-            lb.head(task_dim).setZero();
-            ub.head(task_dim).setZero();
+bool VelocityQPSolver::solve_velocity_hqp(
+    const Eigen::MatrixXd& J,
+    const Eigen::VectorXd& v_ee,
+    const Eigen::VectorXd& q,
+    Eigen::VectorXd& qd_out,
+    const Eigen::VectorXd& qd_min,
+    const Eigen::VectorXd& qd_max,
+    const std::vector<std::string>& joint_names,
+    const std::shared_ptr<HardwareManager>& hardware_manager,
+    const rclcpp::Logger& logger)
+{
+    const int n = J.cols();
+    const int task_dim = J.rows();
 
-            if (!solver.updateLowerBound(lb) || !solver.updateUpperBound(ub)) break;
+    if (qd_prev_.size() != n)
+        qd_prev_ = Eigen::VectorXd::Zero(n);
 
-            exitflag = solver.solveProblem();
-            if (exitflag == OsqpEigen::ErrorExitFlag::NoError) {
-                solved = true;
-                RCLCPP_INFO(logger, "Fallback solved at iter=%d, scale=%.3f", iter, std::pow(scale, iter + 1));
-                break;
-            }
-        }
+    if (v_ee.norm() < 1e-9) {
+        qd_out.setZero();
+        qd_prev_ = qd_out;
+        return true;
+    }
 
-        if (!solved) {
-            RCLCPP_ERROR(logger, "❎ Fallback scaling also failed");
+    double v_mag = v_ee.norm();
+    Eigen::VectorXd v_dir = v_ee / v_mag;
+
+    /* ===================================================================
+     * FOUR-STAGE INDUSTRIAL JOG CONTROL
+     * Philosophy: "宁可不动，也绝不允许偏离这个方向"
+     * ===================================================================
+     */
+
+    /* ========== STAGE 1: Compute Singularity Metrics ==========
+     *
+     * Compute σ_min for later use in velocity scaling
+     * No hard stop logic - continuous deceleration handles all singularity levels
+     */
+
+    double sigma_min = computeMinSingularValue(J);
+
+    /* ========== STAGE 2: Direction-Preserving QP ==========
+     *
+     * CRITICAL: Must minimize ||q̇|| to prevent "joint cancellation" artifacts
+     * Without this, QP would use large opposite velocities to satisfy constraints
+     *
+     * Objective:
+     *   min  EPS_QDOT * ||q̇||² − λ
+     * s.t. J·q̇ = λ·v_dir
+     *      q̇_min ≤ q̇ ≤ q̇_max
+     *      0 ≤ λ ≤ v_mag
+     */
+
+    const int nv = n + 1;
+    static constexpr double EPS_QDOT = 1e-3;  // Regularization to prevent joint explosion (increased for high-DOF systems)
+
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(nv, nv);
+    // q̇ regularization: prevents QP from using massive opposite joint velocities
+    H.topLeftCorner(n, n) = EPS_QDOT * Eigen::MatrixXd::Identity(n, n);
+    // Note: H(n,n) = 0 for λ because we want to maximize it via linear term
+
+    Eigen::VectorXd f = Eigen::VectorXd::Zero(nv);
+    f(n) = -1.0;  // Maximize λ (negative coefficient to minimize -λ)
+
+    const int nc = task_dim + n + 1;
+    Eigen::MatrixXd A = Eigen::MatrixXd::Zero(nc, nv);
+    Eigen::VectorXd lb(nc), ub(nc);
+
+    int r = 0;
+
+    A.block(r, 0, task_dim, n) = J;
+    A.block(r, n, task_dim, 1) = -v_dir;
+    lb.segment(r, task_dim).setZero();
+    ub.segment(r, task_dim).setZero();
+    r += task_dim;
+
+    A.block(r, 0, n, n).setIdentity();
+    lb.segment(r, n) = qd_min;
+    ub.segment(r, n) = qd_max;
+    r += n;
+
+    // Lambda bounds: allow full range
+    // QP will naturally reduce lambda when constraints cannot be satisfied
+    // No pre-emptive scaling based on singularity
+    A(r, n) = 1.0;
+    lb(r) = 0.0;
+    ub(r) = v_mag;
+    r++;
+
+    hqp_solver_.settings()->setWarmStart(true);
+    hqp_solver_.settings()->setVerbosity(false);
+    hqp_solver_.settings()->setMaxIteration(100);
+    hqp_solver_.settings()->setAbsoluteTolerance(1e-4);  // Tighten tolerance
+    hqp_solver_.settings()->setRelativeTolerance(1e-4);
+
+    hqp_solver_.data()->setNumberOfVariables(nv);
+    hqp_solver_.data()->setNumberOfConstraints(r);
+
+    Eigen::SparseMatrix<double> H_sparse = H.sparseView();
+    Eigen::SparseMatrix<double> A_sparse = A.topRows(r).sparseView();
+
+    // Clear previous matrices if solver was already initialized (warm start mode)
+    if (solver_initialized_) {
+        hqp_solver_.data()->clearHessianMatrix();
+        hqp_solver_.data()->clearLinearConstraintsMatrix();
+    }
+
+    hqp_solver_.data()->setHessianMatrix(H_sparse);
+    hqp_solver_.data()->setGradient(f);
+    hqp_solver_.data()->setLinearConstraintsMatrix(A_sparse);
+    hqp_solver_.data()->setLowerBound(lb.head(r));
+    hqp_solver_.data()->setUpperBound(ub.head(r));
+
+    // Debug: Print QP setup
+    RCLCPP_DEBUG(logger, "[HQP-S2] QP setup: nv=%d, nc=%d, v_mag=%.4f", nv, r, v_mag);
+    RCLCPP_DEBUG(logger, "[HQP-S2] H(n,n)=%.2e, f(n)=%.4f", H(n,n), f(n));
+
+    if (!solver_initialized_) {
+        if (!hqp_solver_.initSolver()) {
+            RCLCPP_ERROR(logger, "[HQP] OSQP init failed");
+            qd_out.setZero();
             return false;
         }
+        solver_initialized_ = true;
     }
 
-    Eigen::VectorXd solution = solver.getSolution();
-    qd_solution = solution.head(dof);
-    double s_opt = solution(dof);
+    if (hqp_solver_.solveProblem() != OsqpEigen::ErrorExitFlag::NoError) {
+        RCLCPP_WARN(logger, "[HQP-S2] QP solve failed");
+        qd_out.setZero();
+        qd_prev_ = qd_out;
+        return true;
+    }
 
-    // 后置方向验证
-    Eigen::VectorXd v_actual = J * qd_solution;
-    double v_actual_norm = v_actual.norm();
+    Eigen::VectorXd sol = hqp_solver_.getSolution();
+    x_prev_ = sol;
 
-    if (v_actual_norm > 1e-9) {
-        // Direction verification is performed later by post_verify_direction()
+    Eigen::VectorXd qd1 = sol.head(n);
+    double lambda = sol(n);
 
-        // Safeguard: rescale if magnitude drifted
-        double expected_velocity = s_opt * v_magnitude;
-        if (expected_velocity > 1e-9 && v_actual_norm > 1e-9) {
-            double velocity_scale = expected_velocity / v_actual_norm;
-            if (velocity_scale > 0.5 && velocity_scale < 2.0) {
-                qd_solution *= velocity_scale;
-                v_actual *= velocity_scale;
+    RCLCPP_INFO(logger, "[HQP-S2] QP solved: λ=%.4f, |qd1|=%.4f, σ=%.4f",
+                lambda, qd1.norm(), sigma_min);
+
+    // Near singularity warning only
+    if (sigma_min < 0.03) {
+        RCLCPP_WARN(logger, "[HQP-S2] Near singularity (σ=%.4f). Lambda reduced to %.1f%%.",
+                    sigma_min, (lambda / v_mag) * 100.0);
+    }
+
+    /* ========== STAGE 3: Null-Space Optimization (Conditional) ==========
+     *
+     * Only apply if λ is near maximum
+     * Otherwise trust the QP constraint solution
+     */
+
+    const double lambda_ratio = (v_mag > 1e-9) ? (lambda / v_mag) : 0.0;
+
+    // Softer threshold (0.6 instead of 0.8) allows null-space to participate more
+    // This helps with configuration improvement near singularities
+    if (lambda_ratio < 0.6) {
+        qd_out = qd1;
+    } else {
+        Eigen::MatrixXd J_pinv = dampedPseudoInverse(J, DAMPING);
+        Eigen::MatrixXd N = Eigen::MatrixXd::Identity(n, n) - J_pinv * J;
+
+        Eigen::VectorXd q_nominal = q;
+        if (hardware_manager) {
+            for (int i = 0; i < n && i < (int)joint_names.size(); ++i) {
+                JointLimits lim;
+                hardware_manager->get_joint_limits(joint_names[i], lim);
+                if (lim.has_position_limits) {
+                    q_nominal(i) = 0.5 * (lim.min_position + lim.max_position);
+                }
             }
+        }
+
+        static constexpr double Kp_posture = 0.5;
+        Eigen::VectorXd grad =
+            W_SMOOTH * (qd_prev_ - qd1) +
+            W_POSTURE * Kp_posture * (q_nominal - q);
+
+        Eigen::VectorXd delta_qd = N * grad;
+
+        // Null-space injection magnitude limit
+        // Prevent null-space from becoming the dominant force
+        static constexpr double NS_MAX_RATIO = 0.2;
+        double max_ns = NS_MAX_RATIO * qd1.norm();
+
+        if (delta_qd.norm() > max_ns && max_ns > 1e-9) {
+            delta_qd *= max_ns / delta_qd.norm();
+        }
+
+        qd_out = qd1 + delta_qd;
+
+        for (int i = 0; i < n; ++i) {
+            qd_out(i) = std::clamp(qd_out(i), qd_min(i), qd_max(i));
         }
     }
 
-    // Final safety check: if direction misalignment exceeds threshold, force stop
-    if (!post_verify_direction(J, qd_solution, v_ee, ALLOWED_ANGLE_DEG, logger)) {
-        qd_solution = Eigen::VectorXd::Zero(dof);
+    /* ========== STAGE 4: Direction Integrity Check ==========
+     *
+     * Final safety guard: verify direction hasn't drifted
+     * If violated, EMERGENCY STOP
+     */
+
+    /* ========== STAGE 4: Direction Integrity Monitoring (No Hard Stop) ==========
+     *
+     * Monitor direction error but don't hard-stop
+     * Velocity is already naturally reduced via lambda_max scaling
+     * Direction constraint is satisfied by QP equality constraint
+     */
+
+    Eigen::VectorXd v_actual = J * qd_out;
+
+    // Use angle error instead of norm error - more physically intuitive
+    // Measures actual deviation from desired direction
+    double v_actual_norm = v_actual.norm();
+    double cos_angle = (v_actual_norm > 1e-9) ?
+        (v_actual.dot(v_dir) / v_actual_norm) : 1.0;
+
+    // Clamp to [-1, 1] to avoid numerical issues with acos
+    cos_angle = std::clamp(cos_angle, -1.0, 1.0);
+    double angle_error_rad = std::acos(cos_angle);
+    double angle_error_deg = angle_error_rad * 180.0 / M_PI;
+
+    // Warn if direction deviates significantly
+    // ~11° threshold corresponds to cos(11°) ≈ 0.98
+    double cos_threshold = 0.98;  // ~11 degree tolerance
+    if (cos_angle < cos_threshold && lambda > 1e-6) {
+        RCLCPP_WARN(logger, "[HQP-S4] Direction error: %.1f°. Accepting reduced control authority.",
+                    angle_error_deg);
     }
+
+    qd_prev_ = qd_out;
+
+    RCLCPP_DEBUG(
+        logger,
+        "[HQP] λ=%.3f(%.0f%%) | σ=%.4f | |qd|=%.3f | dir_err=%.1f°",
+        lambda, lambda_ratio*100, sigma_min, qd_out.norm(), angle_error_deg);
 
     return true;
 }

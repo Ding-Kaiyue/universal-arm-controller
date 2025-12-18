@@ -14,18 +14,9 @@ MoveLController::MoveLController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹插值器
     trajectory_interpolator_ = std::make_unique<TrajectoryInterpolator>();
 
-    std::string input_topic;
-    node_->get_parameter("controllers.MoveL.input_topic", input_topic);
-
-    sub_ = node_->create_subscription<geometry_msgs::msg::Pose>(
-        input_topic, rclcpp::QoS(10).reliable(),
-        std::bind(&MoveLController::trajectory_callback, this, std::placeholders::_1)
-    );
-
     // 初始化轨迹规划服务
     initialize_planning_services();
 
-    // 注意：话题订阅在 init_subscriptions() 中创建，以支持 {mapping} 占位符
 }
 
 void MoveLController::start(const std::string& mapping) {
@@ -56,10 +47,6 @@ void MoveLController::start(const std::string& mapping) {
             RCLCPP_WARN(node_->get_logger(), "[%s] MoveL: Failed to get current positions for state sync", mapping.c_str());
         }
     }
-
-    // 保存当前激活的mapping
-    active_mapping_ = mapping;
-    is_active_ = true;
 }
 
 bool MoveLController::stop(const std::string& mapping) {
@@ -70,10 +57,6 @@ bool MoveLController::stop(const std::string& mapping) {
 
     // 清理该 mapping 的话题订阅
     cleanup_subscriptions(mapping);
-
-    // 注意：轨迹执行是在 ROS2 callback 中同步进行的
-    // execute_trajectory 是阻塞调用，stop() 被调用时表示上一个轨迹已执行完毕
-    // 或模式切换已等待轨迹完成
 
     RCLCPP_INFO(node_->get_logger(), "[%s] MoveLController deactivated", mapping.c_str());
     return true;

@@ -72,20 +72,20 @@ controllers:
   #     name: /controller_api/point_replay_action
   #     type: std_msgs/msg/String
 
-  - key: TrajectoryRecord
-    class: TrajectoryRecordController
-    input_topic:
-      name: /controller_api/trajectory_record_action
-      type: std_msgs/msg/String
-    output_topic:
-      name: /controller_api/trajectory_record_status
-      type: std_msgs/msg/String
+  # - key: TrajectoryRecord
+  #   class: TrajectoryRecordController
+  #   input_topic:
+  #     name: /controller_api/trajectory_record_action
+  #     type: std_msgs/msg/String
+  #   output_topic:
+  #     name: /controller_api/trajectory_record_status
+  #     type: std_msgs/msg/String
 
-  - key: TrajectoryReplay
-    class: TrajectoryReplayController
-    input_topic:
-      name: /controller_api/trajectory_replay_action
-      type: std_msgs/msg/String
-    output_topic:
-      name: /controller_api/trajectory_replay_status
-      type: std_msgs/msg/String
+  # - key: TrajectoryReplay
+  #   class: TrajectoryReplayController
+  #   input_topic:
+  #     name: /controller_api/trajectory_replay_action
+  #     type: std_msgs/msg/String
+  #   output_topic:
+  #     name: /controller_api/trajectory_replay_status
+  #     type: std_msgs/msg/String

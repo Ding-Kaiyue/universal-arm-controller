@@ -16,8 +16,6 @@ JointVelocityController::JointVelocityController(const rclcpp::Node::SharedPtr& 
     RCLCPP_INFO(node_->get_logger(), "JointVelocityController initialized");
 }
 
-JointVelocityController::~JointVelocityController() { }
-
 void JointVelocityController::start(const std::string& mapping) {
     // 检查 mapping 是否存在于配置中
     const auto& all_mappings = hardware_manager_->get_all_mappings();
@@ -85,7 +83,7 @@ bool JointVelocityController::send_joint_velocities(const std::string& mapping, 
 
         // MIT模式速度控制参数
         const double kp_velocity = 0.0;      // 速度模式：kp=0.0
-        const double kd_velocity = 0.1;     // 速度模式：kd=0.1
+        const double kd_velocity = 0.01;     // 速度模式：kd=0.01
         const double effort = 0.0;           // 力矩在纯速度模式下不使用
         const double position = 0.0;         // 位置在纯速度模式下不使用
 

@@ -9,7 +9,7 @@ class JointVelocityController final
     : public VelocityControllerImpl<sensor_msgs::msg::JointState> {
 public:
     explicit JointVelocityController(const rclcpp::Node::SharedPtr& node);
-    ~JointVelocityController() override;
+    ~JointVelocityController() override = default;
 
     void start(const std::string& mapping) override;
     bool stop(const std::string& mapping) override;

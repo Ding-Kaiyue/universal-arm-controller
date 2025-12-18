@@ -59,7 +59,7 @@ find_package(Eigen3 REQUIRED)
 find_package(OsqpEigen REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
-find_package(robot_sdk REQUIRED)
+find_package(csaps REQUIRED)
 
 
 include_directories(
@@ -82,6 +82,8 @@ add_library(arm_controller_lib
   src/utils/trajectory_converter.cpp
   src/utils/joint_recorder.cpp
   src/utils/velocity_qp_solver.cpp
+  src/utils/velocity_abb_solver.cpp
+  src/utils/velocity_strict_solver.cpp
   # 只保留测试需要的控制器
   src/controller/system_start/system_start_controller.cpp
   src/controller/joint_velocity/joint_velocity_controller.cpp
@@ -109,7 +111,6 @@ add_library(arm_controller_lib
   src/controller/trajectory_record/trajectory_record_interface.cpp
   src/controller/trajectory_replay/trajectory_replay_controller.cpp
   src/controller/trajectory_replay/trajectory_replay_interface.cpp
-  src/button/button_event_handler.cpp
 )
 
 # target_link_libraries(robot_controller_lib
@@ -138,13 +139,14 @@ ament_target_dependencies(arm_controller_lib
   OsqpEigen
   tf2_ros
   tf2_geometry_msgs
-  robot_sdk
+  csaps
 )
 
-# 链接硬件驱动库和 osqp 到库
+# 链接硬件驱动库、osqp 和 csaps 到库
 target_link_libraries(arm_controller_lib
   hardware_driver::hardware_driver_canfd
   OsqpEigen::OsqpEigen
+  csaps::csaps
 )
 
 # 为库本身添加覆盖率编译选项（在构建测试时）

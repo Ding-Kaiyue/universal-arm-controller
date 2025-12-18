@@ -8,6 +8,9 @@
 int main(int argc, char** argv) {
     rclcpp::init(argc, argv);
 
+    RCLCPP_INFO(rclcpp::get_logger("main"), "Context valid: %d",
+            rclcpp::contexts::get_global_default_context()->is_valid());
+
     try {
         // 创建多线程执行器
         rclcpp::executors::MultiThreadedExecutor executor;
@@ -34,7 +37,7 @@ int main(int argc, char** argv) {
         
     } catch (const std::exception& e) {
         RCLCPP_FATAL(rclcpp::get_logger("main"), "Arm Controller failed: %s", e.what());
-        return 1;
+        // return 1;
     }
 
     rclcpp::shutdown();

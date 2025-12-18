@@ -11,6 +11,7 @@
 #include "arm_controller/utils/joint_recorder.hpp"
 #include "arm_controller/hardware/hardware_manager.hpp"
 #include "moveit/move_group_interface/move_group_interface.h"
+#include <csaps.h>  // C++ CSAPS库，用于轨迹平滑
 #include <memory>
 #include <queue>
 #include <mutex>
@@ -31,29 +32,32 @@ private:
     // ===== 订阅者 =====
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_states_sub_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mode_status_sub_;
+    // rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mode_status_sub_;
 
     // ===== 发布者 =====
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-    rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr raw_traj_pub_;  // 发布原始轨迹（给平滑节点）
+    // rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr raw_traj_pub_;  // [已移除] 不再使用ROS话题平滑
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr movej_pub_;  // MoveJ 命令发布器
 
-    // ===== 平滑轨迹订阅者（接收smoother_node发布的平滑后轨迹）=====
-    rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr smoothed_traj_sub_;
+    // [已移除] 使用C++直接csaps平滑，不再需要ROS话题通信
+    // rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr smoothed_traj_sub_;
 
     // ===== 服务客户端 =====
     // rclcpp::Client<controller_interfaces::srv::WorkMode>::SharedPtr mode_service_client_;
 
     // ===== 回调函数 =====
-    void trajectory_replay_callback(const std_msgs::msg::String::SharedPtr msg);
+    void teach_callback(const std_msgs::msg::String::SharedPtr msg) override;
+    // void trajectory_replay_callback(const std_msgs::msg::String::SharedPtr msg);
     void joint_states_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
-    void mode_status_callback(const std_msgs::msg::String::SharedPtr msg);
-    void smoothed_trajectory_callback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg);
+    // void mode_status_callback(const std_msgs::msg::String::SharedPtr msg);
+    // [已移除] void smoothed_trajectory_callback(...)  // 使用C++直接csaps平滑，不再需要此回调
 
     // ===== 核心功能 =====
-    bool is_recording_active();  // 检查是否在录制模式
+    // bool is_recording_active();  // 检查是否在录制模式
     bool move_to_start_position(const std::vector<double>& start_pos);  // 回到起点
     void execute_next_trajectory();  // 执行下一个轨迹
+    trajectory_msgs::msg::JointTrajectory smooth_trajectory(
+        const trajectory_msgs::msg::JointTrajectory& raw_traj);  // 使用csaps平滑轨迹
 
     // ===== 辅助函数 =====
     void publish_status(const std::string& status);
@@ -67,8 +71,8 @@ private:
     std::mutex joint_states_mutex_;
 
     // 当前模式状态
-    std::string current_mode_;
-    std::mutex mode_mutex_;
+    // std::string current_mode_;
+    // std::mutex mode_mutex_;
 
     // 轨迹池（支持多轨迹排队）
     std::queue<trajectory_msgs::msg::JointTrajectory> traj_pool_;
