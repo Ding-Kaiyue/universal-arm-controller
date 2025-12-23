@@ -37,9 +37,6 @@ private:
     // 硬件接口
     std::shared_ptr<HardwareManager> hardware_manager_;
 
-    // 话题订阅 - 命令接收
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sub_;
-
     std::string active_mapping_;
 
     // 轨迹规划相关 - 支持多臂mapping

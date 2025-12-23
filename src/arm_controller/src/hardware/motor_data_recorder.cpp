@@ -1,4 +1,4 @@
-#include "motor_data_recorder.hpp"
+#include "arm_controller/hardware/motor_data_recorder.hpp"
 #include <cstdio>
 #include <cstring>
 #include <errno.h>
@@ -8,6 +8,59 @@ MotorDataRecorder::MotorDataRecorder(const std::string& output_file,
                                     size_t buffer_size)
     : output_file_(output_file), mapping_(mapping), fd_(-1), mmap_buffer_(nullptr),
       total_buffer_size_(buffer_size), buffer_pos_(0) {
+
+    // 打开或创建文件 - 需要 O_RDWR 来支持 MAP_SHARED
+    fd_ = open(output_file.c_str(), O_CREAT | O_RDWR | O_TRUNC, 0644);
+    if (fd_ < 0) {
+        perror("❎ Failed to open file for mmap");
+        fprintf(stderr, "❎ Cannot open file: %s (errno: %d)\n", output_file.c_str(), errno);
+        return;
+    }
+    fprintf(stderr, "✅ File opened: %s (fd: %d)\n", output_file.c_str(), fd_);
+
+    // 预分配文件大小（快速）
+    if (lseek(fd_, buffer_size - 1, SEEK_SET) < 0) {
+        perror("❎ lseek failed");
+        close(fd_);
+        fd_ = -1;
+        return;
+    }
+    if (write(fd_, "", 1) < 0) {
+        perror("❎ write failed");
+        close(fd_);
+        fd_ = -1;
+        return;
+    }
+    fprintf(stderr, "✅ File pre-allocated: %zu bytes\n", buffer_size);
+
+    // 映射到内存
+    // 使用 O_RDWR 打开文件，现在可以使用 MAP_SHARED
+    mmap_buffer_ = (char*)mmap(nullptr, buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
+    if (mmap_buffer_ == MAP_FAILED) {
+        perror("❎ mmap failed");
+        fprintf(stderr, "❎ mmap failed (errno: %d)\n", errno);
+        close(fd_);
+        fd_ = -1;
+        mmap_buffer_ = nullptr;
+        return;
+    }
+    fprintf(stderr, "✅ mmap successful (MAP_SHARED), buffer: %p\n", (void*)mmap_buffer_);
+
+    // 写入 CSV 表头
+    const char header[] = "timestamp,interface,motor_id,position,velocity,effort,temperature,enable_flag,motor_mode\n";
+    size_t header_len = strlen(header);
+    memcpy(mmap_buffer_, header, header_len);
+    buffer_pos_ = header_len;
+
+    start_time_ = std::chrono::steady_clock::now();
+}
+
+MotorDataRecorder::MotorDataRecorder(const std::string& output_file,
+                                    const std::string& mapping,
+                                    const std::vector<uint32_t>& motor_ids,
+                                    size_t buffer_size)
+    : output_file_(output_file), mapping_(mapping), fd_(-1), mmap_buffer_(nullptr),
+      total_buffer_size_(buffer_size), buffer_pos_(0), expected_motor_ids_(motor_ids) {
 
     // 打开或创建文件 - 需要 O_RDWR 来支持 MAP_SHARED
     fd_ = open(output_file.c_str(), O_CREAT | O_RDWR | O_TRUNC, 0644);
@@ -116,5 +169,25 @@ void MotorDataRecorder::on_motor_status_update(
 
     if (written > 0) {
         buffer_pos_ += written;
+
+        // ✅ 单数据模式：记录所有电机各一条数据后自动暂停
+        if (single_record_mode_ && !expected_motor_ids_.empty()) {
+            // 标记此电机已记录
+            recorded_motor_ids_.insert(motor_id);
+
+            // 检查是否所有电机都已记录
+            bool all_recorded = true;
+            for (uint32_t expected_id : expected_motor_ids_) {
+                if (recorded_motor_ids_.find(expected_id) == recorded_motor_ids_.end()) {
+                    all_recorded = false;
+                    break;
+                }
+            }
+
+            // 如果所有电机都已记录，暂停
+            if (all_recorded) {
+                is_paused_[mapping_] = true;
+            }
+        }
     }
 }

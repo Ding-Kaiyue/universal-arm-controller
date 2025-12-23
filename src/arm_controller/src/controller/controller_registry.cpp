@@ -11,7 +11,7 @@
 #include "movec/movec_controller.hpp"
 #include "movej/movej_controller.hpp"
 #include "movel/movel_controller.hpp"
-// #include "point_record/point_record_controller.hpp"
+#include "point_record/point_record_controller.hpp"
 // #include "point_replay/point_replay_controller.hpp"
 #include "trajectory_record/trajectory_record_controller.hpp"
 // #include "trajectory_replay/trajectory_replay_controller.hpp"
@@ -39,8 +39,8 @@ std::unordered_map<std::string, ControllerInterface::Creator> get_available_cont
             return std::make_shared<MoveJController>(node); }},
         {"MoveLController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<MoveLController>(node); }},
-        // {"PointRecordController", [](rclcpp::Node::SharedPtr node) {
-        //     return std::make_shared<PointRecordController>(node); }},
+        {"PointRecordController", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<PointRecordController>(node); }},
         // {"PointReplayController", [](rclcpp::Node::SharedPtr node) {
         //     return std::make_shared<PointReplayController>(node); }},
         {"TrajectoryRecordController", [](rclcpp::Node::SharedPtr node) {

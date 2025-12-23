@@ -78,6 +78,7 @@ add_library(arm_controller_lib
   src/controller_manager_section.cpp
   src/trajectory_controller_section.cpp
   src/hardware/hardware_manager.cpp
+  src/hardware/motor_data_recorder.cpp
   src/controller/controller_registry.cpp
   src/utils/trajectory_converter.cpp
   src/utils/joint_recorder.cpp
@@ -103,13 +104,12 @@ add_library(arm_controller_lib
   src/controller/movej/movej_interface.cpp
   src/controller/movel/movel_controller.cpp
   src/controller/movel/movel_interface.cpp
-  # src/controller/point_record/point_record_controller.cpp
-  # src/controller/point_record/point_record_interface.cpp
+  src/controller/point_record/point_record_controller.cpp
+  src/controller/point_record/point_record_interface.cpp
   # src/controller/point_replay/point_replay_controller.cpp
   # src/controller/point_replay/point_replay_interface.cpp
   src/controller/trajectory_record/trajectory_record_controller.cpp
   src/controller/trajectory_record/trajectory_record_interface.cpp
-  src/controller/trajectory_record/motor_data_recorder.cpp
   src/controller/trajectory_replay/trajectory_replay_controller.cpp
   src/controller/trajectory_replay/trajectory_replay_interface.cpp
 )

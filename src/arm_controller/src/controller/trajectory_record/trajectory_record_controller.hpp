@@ -4,7 +4,7 @@
 #include "controller_base/teach_controller_base.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "arm_controller/hardware/hardware_manager.hpp"
-#include "motor_data_recorder.hpp"
+#include "arm_controller/hardware/motor_data_recorder.hpp"
 #include <memory>
 
 class TrajectoryRecordController final: public TeachControllerBase {
@@ -24,16 +24,15 @@ public:
 private:
     void teach_callback(const std_msgs::msg::String::SharedPtr msg) override;
     void on_teaching_control(const std_msgs::msg::String::SharedPtr msg) override;
-    
-    // 话题订阅 - 命令接收
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;    // 接收文件名
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr teach_ctrl_sub_; // 接收录制控制命令
 
     // ✅ 电机数据记录器实例（观察者模式）
     std::shared_ptr<MotorDataRecorder> motor_recorder_;
 
     // 录制输出目录
     std::string record_output_dir_;
+
+    // 当前录制的文件路径（用于 cancel 时删除）
+    std::string current_recording_file_path_;
 
     // 硬件接口
     std::shared_ptr<HardwareManager> hardware_manager_;

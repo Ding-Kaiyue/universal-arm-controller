@@ -5,6 +5,8 @@
 #include <chrono>
 #include <memory>
 #include <map>
+#include <vector>
+#include <unordered_set>
 #include <cstring>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -29,6 +31,18 @@ public:
      */
     explicit MotorDataRecorder(const std::string& output_file,
                               const std::string& mapping,
+                              size_t buffer_size = 100 * 1024 * 1024);
+
+    /**
+     * @brief 构造函数 - 带电机列表的初始化（用于单数据模式）
+     * @param output_file 输出文件路径
+     * @param mapping 当前 mapping 名称
+     * @param motor_ids 该mapping的所有电机ID列表
+     * @param buffer_size mmap 缓冲区大小
+     */
+    explicit MotorDataRecorder(const std::string& output_file,
+                              const std::string& mapping,
+                              const std::vector<uint32_t>& motor_ids,
                               size_t buffer_size = 100 * 1024 * 1024);
 
     /**
@@ -96,6 +110,17 @@ public:
      */
     const std::string& get_mapping() const { return mapping_; }
 
+    /**
+     * @brief 检查是否已记录至少一条数据
+     */
+    bool has_data_recorded() const { return buffer_pos_ > 78; }  // 78 是表头长度
+
+    /**
+     * @brief 设置单数据模式（记录第一条数据后自动暂停）
+     * 用于 PointRecord 等只需要记录当前状态的场景
+     */
+    void set_single_record_mode(bool enabled) { single_record_mode_ = enabled; }
+
 private:
     std::string output_file_;
     std::string mapping_;                           // 当前 mapping 名称
@@ -105,6 +130,9 @@ private:
     size_t buffer_pos_;                         // 当前写入位置
     std::chrono::steady_clock::time_point start_time_;
     std::unordered_map<std::string, bool> is_paused_ = {{mapping_, false}};  // 暂停标志
+    bool single_record_mode_ = false;  // 单数据模式标志（记录所有电机各一条后自动暂停）
+    std::vector<uint32_t> expected_motor_ids_;  // 预期的电机ID列表（单数据模式时使用）
+    std::unordered_set<uint32_t> recorded_motor_ids_;  // 已记录的电机ID
 };
 
 #endif  // __MOTOR_DATA_RECORDER_HPP__

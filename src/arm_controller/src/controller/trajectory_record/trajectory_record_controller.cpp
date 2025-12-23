@@ -10,31 +10,21 @@ TrajectoryRecordController::TrajectoryRecordController(const rclcpp::Node::Share
     // 获取硬件管理器实例
     hardware_manager_ = HardwareManager::getInstance();
 
-    // ✅ 参数由 TeachControllerBase::init_subscriptions() 自动处理
+    // 参数由 TeachControllerBase::init_subscriptions() 自动处理
     // input_topic0: 文件名输入话题（teach_callback）
     // input_topic1: 录制控制话题（on_teaching_control）
 
     /* ---------- trajectory directory ---------- */
     try {
         std::string pkg_dir = ament_index_cpp::get_package_share_directory("arm_controller");
-        fprintf(stderr, "📦 Package directory: %s\n", pkg_dir.c_str());
 
-        // pkg_dir = /path/to/install/arm_controller/share/arm_controller
-        // parent_path() = /path/to/install/arm_controller/share
-        // parent_path() = /path/to/install/arm_controller
-        // parent_path() = /path/to/install
         std::filesystem::path workspace_root =
             std::filesystem::path(pkg_dir).parent_path().parent_path().parent_path();
 
-        fprintf(stderr, "🏠 Workspace root: %s\n", workspace_root.c_str());
-
         record_output_dir_ = (workspace_root / "trajectories").string();
-        fprintf(stderr, "📁 Output directory: %s\n", record_output_dir_.c_str());
 
         std::filesystem::create_directories(record_output_dir_);
-        fprintf(stderr, "✅ Directory created/exists: %s\n", record_output_dir_.c_str());
     } catch (const std::exception& e) {
-        fprintf(stderr, "❌ Exception creating directory: %s\n", e.what());
         record_output_dir_ = "/tmp/arm_recording_trajectories";
         std::filesystem::create_directories(record_output_dir_);
         fprintf(stderr, "⚠️  Fallback to: %s\n", record_output_dir_.c_str());
@@ -86,6 +76,7 @@ bool TrajectoryRecordController::stop(const std::string& mapping) {
     recording_ = false;
     paused_ = false;
     active_mapping_.clear();
+    current_recording_file_path_.clear();
 
     RCLCPP_INFO(node_->get_logger(), "[%s] TrajectoryRecordController deactivated",
                 mapping.c_str());
@@ -103,18 +94,21 @@ void TrajectoryRecordController::teach_callback(const std_msgs::msg::String::Sha
     }
 
     /* -------- start new recording -------- */
-    std::string file_path = record_output_dir_ + "/" + msg->data + ".csv";
+    current_recording_file_path_ = record_output_dir_ + "/" + msg->data + ".csv";
 
-    // ✅ 创建新的 MotorDataRecorder 实例
-    motor_recorder_ = std::make_shared<MotorDataRecorder>(file_path, active_mapping_);
+    // 创建新的 MotorDataRecorder 实例
+    motor_recorder_ = std::make_shared<MotorDataRecorder>(current_recording_file_path_, active_mapping_);
 
     if (!motor_recorder_->is_open()) {
-        RCLCPP_ERROR(node_->get_logger(), "❎ Failed to open trajectory file: %s", file_path.c_str());
+        RCLCPP_ERROR(node_->get_logger(), "❎ Failed to open trajectory file: %s", current_recording_file_path_.c_str());
         motor_recorder_.reset();
         return;
     }
 
-    // ✅ 简化方案：将 MotorDataRecorder 作为观察者注册到 HardwareManager
+    // 禁用单数据模式 - TrajectoryRecord 需要持续记录所有数据
+    motor_recorder_->set_single_record_mode(false);
+
+    // 简化方案：将 MotorDataRecorder 作为观察者注册到 HardwareManager
     // HardwareManager 本身实现了 MotorStatusObserver，我们让它转发给 motor_recorder_
     if (!hardware_manager_->register_motor_recorder(motor_recorder_)) {
         RCLCPP_ERROR(node_->get_logger(), "❎ Failed to register motor recorder observer");
@@ -126,7 +120,7 @@ void TrajectoryRecordController::teach_callback(const std_msgs::msg::String::Sha
     recording_ = true;
     paused_ = false;
 
-    RCLCPP_INFO(node_->get_logger(), "✅ Started trajectory recording: %s", file_path.c_str());
+    RCLCPP_INFO(node_->get_logger(), "✅ Started trajectory recording: %s", current_recording_file_path_.c_str());
 }
 
 void TrajectoryRecordController::on_teaching_control(const std_msgs::msg::String::SharedPtr msg) {
@@ -145,7 +139,7 @@ void TrajectoryRecordController::on_teaching_control(const std_msgs::msg::String
     }
 }
 
-// ✅ 虚方法实现 - 来自 TeachControllerBase 接口
+// 虚方法实现 - 来自 TeachControllerBase 接口
 void TrajectoryRecordController::pause(const std::string& mapping) {
     if (!recording_ || paused_) return;
 
@@ -170,7 +164,16 @@ void TrajectoryRecordController::cancel(const std::string& mapping) {
     recording_ = false;
     paused_ = false;
 
-    RCLCPP_INFO(node_->get_logger(), "✅ Trajectory recording cancelled (mapping: %s)", mapping.c_str());
+    // 删除已录制的文件
+    if (!current_recording_file_path_.empty()) {
+        try {
+            std::filesystem::remove(current_recording_file_path_);
+            RCLCPP_INFO(node_->get_logger(), "✅ Trajectory recording cancelled and file deleted: %s", mapping.c_str());
+        } catch (const std::exception& e) {
+            RCLCPP_WARN(node_->get_logger(), "⚠️  Failed to delete file: %s", e.what());
+        }
+        current_recording_file_path_.clear();
+    }
 }
 
 void TrajectoryRecordController::complete(const std::string& mapping) {
@@ -180,6 +183,9 @@ void TrajectoryRecordController::complete(const std::string& mapping) {
     motor_recorder_.reset();  // 观察者会自动停止接收更新
     recording_ = false;
     paused_ = false;
+    if (!current_recording_file_path_.empty()) {
+        current_recording_file_path_.clear();
+    }
 
     RCLCPP_INFO(node_->get_logger(), "✅ Trajectory recording completed (mapping: %s)", mapping.c_str());
 }

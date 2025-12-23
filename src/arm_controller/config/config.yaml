@@ -61,11 +61,13 @@ controllers:
       name: /controller_api/movel_action/{mapping}
       type: geometry_msgs/msg/Pose
 
-  # - key: PointRecord
-  #   class: PointRecordController
-  #   input_topic:
-  #     name: /controller_api/point_record_action
-  #     type: std_msgs/msg/String
+  - key: PointRecord
+    class: PointRecordController
+    input_topics:
+      - name: /controller_api/point_record_action/{mapping}
+        type: std_msgs/msg/String
+      - name: /controller_api/point_record_control/{mapping}
+        type: std_msgs/msg/String
   # - key: PointReplay
   #   class: PointReplayController
   #   input_topic:
@@ -77,7 +79,7 @@ controllers:
     input_topics:
       - name: /controller_api/trajectory_record_action/{mapping}
         type: std_msgs/msg/String
-      - name: /controller_api/record_control/{mapping}
+      - name: /controller_api/trajectory_record_control/{mapping}
         type: std_msgs/msg/String
 
   # - key: TrajectoryReplay
