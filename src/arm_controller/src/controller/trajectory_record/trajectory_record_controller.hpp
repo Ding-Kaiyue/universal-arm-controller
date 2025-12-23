@@ -3,9 +3,8 @@
 
 #include "controller_base/teach_controller_base.hpp"
 #include "std_msgs/msg/string.hpp"
-#include "sensor_msgs/msg/joint_state.hpp"
-#include "arm_controller/utils/joint_recorder.hpp"
 #include "arm_controller/hardware/hardware_manager.hpp"
+#include "motor_data_recorder.hpp"
 #include <memory>
 
 class TrajectoryRecordController final: public TeachControllerBase {
@@ -16,30 +15,22 @@ public:
     void start(const std::string& mapping = "") override;
     bool stop(const std::string& mapping = "") override;
 
+    // ✅ 虚方法实现：用于控制录制过程（符合 TeachControllerBase 接口）
+    void pause(const std::string& mapping = "") override;
+    void resume(const std::string& mapping = "") override;
+    void cancel(const std::string& mapping = "") override;
+    void complete(const std::string& mapping = "") override;
+
 private:
-
-    void teach_callback(const std_msgs::msg::String::SharedPtr msg);
-    void joint_states_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
-    void publish_trajectory_record_name(const std::string &name);
-
-    // ============= 重力补偿相关 =============
-    // 重力力矩订阅（进入示教模式时创建）
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr gravity_torque_sub_;
-    // 重力补偿回调函数
-    void gravity_torque_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
-    // 发送重力补偿力矩到电机
-    bool send_gravity_compensation(const std::string& mapping, const std::vector<double>& efforts);
-
+    void teach_callback(const std_msgs::msg::String::SharedPtr msg) override;
+    void on_teaching_control(const std_msgs::msg::String::SharedPtr msg) override;
+    
     // 话题订阅 - 命令接收
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_states_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;    // 接收文件名
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr teach_ctrl_sub_; // 接收录制控制命令
 
-    // 关节录制器实例
-    std::unique_ptr<JointRecorder> recorder_;
-
-    // 用于启动录制的最新关节状态
-    sensor_msgs::msg::JointState::SharedPtr latest_joint_states_;
+    // ✅ 电机数据记录器实例（观察者模式）
+    std::shared_ptr<MotorDataRecorder> motor_recorder_;
 
     // 录制输出目录
     std::string record_output_dir_;
@@ -49,6 +40,9 @@ private:
 
     // 当前激活的 mapping
     std::string active_mapping_;
+
+    bool recording_ = false;   // 是否正在录制
+    bool paused_ = false;      // 录制是否暂停
 };
 
 #endif      // __TRAJECTORY_RECORD_CONTROLLER_HPP__

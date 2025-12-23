@@ -55,10 +55,6 @@ private:
         const std::shared_ptr<controller_interfaces::srv::MotorControl::Request> request,
         std::shared_ptr<controller_interfaces::srv::MotorControl::Response> response);
 
-    // 特殊控制器执行方法
-    // bool execute_move_to_start(const std::string& mapping);
-    // bool execute_move_to_initial(const std::string& mapping);
-
     // 状态监控
     void publish_status();
     void status_timer_callback();

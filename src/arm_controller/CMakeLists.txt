@@ -109,6 +109,7 @@ add_library(arm_controller_lib
   # src/controller/point_replay/point_replay_interface.cpp
   src/controller/trajectory_record/trajectory_record_controller.cpp
   src/controller/trajectory_record/trajectory_record_interface.cpp
+  src/controller/trajectory_record/motor_data_recorder.cpp
   src/controller/trajectory_replay/trajectory_replay_controller.cpp
   src/controller/trajectory_replay/trajectory_replay_interface.cpp
 )

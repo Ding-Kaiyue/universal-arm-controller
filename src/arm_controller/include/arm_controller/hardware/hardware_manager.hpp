@@ -101,6 +101,9 @@ public:
     bool enable_motors(const std::string& mapping, uint8_t mode);
     bool disable_motors(const std::string& mapping, uint8_t mode);
 
+    // ============= 录制观察者接口 =============
+    bool register_motor_recorder(std::shared_ptr<hardware_driver::motor_driver::MotorStatusObserver> recorder);
+
     // ============= MotorStatusObserver接口实现 =============
     void on_motor_status_update(const std::string& interface,
                                uint32_t motor_id,
@@ -159,6 +162,9 @@ private:
     // ============= 轨迹执行管理 =============
     mutable std::mutex execution_mutex_;
     std::map<std::string, std::string> mapping_to_execution_id_;  // mapping -> 当前执行ID（同一时间每个mapping只有一个轨迹执行）
+
+    // ============= 录制观察者 =============
+    std::shared_ptr<hardware_driver::motor_driver::MotorStatusObserver> motor_recorder_;  // 电机数据录制观察者
 
     // ============= 内部方法 =============
     void update_joint_state(const std::string& interface, uint32_t motor_id,

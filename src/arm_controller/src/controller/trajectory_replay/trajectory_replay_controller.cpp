@@ -199,6 +199,23 @@ void TrajectoryReplayController::teach_callback(const std_msgs::msg::String::Sha
     }
 }
 
+// ✅ 处理录制控制命令（暂停/恢复/取消/完成）
+void TrajectoryReplayController::on_teaching_control(const std_msgs::msg::String::SharedPtr msg) {
+    if (!is_active_ || msg->data.empty()) return;
+
+    if (msg->data == "pause") {
+        pause(active_mapping_);
+    } else if (msg->data == "resume") {
+        resume(active_mapping_);
+    } else if (msg->data == "cancel") {
+        cancel(active_mapping_);
+    } else if (msg->data == "complete") {
+        complete(active_mapping_);
+    } else {
+        RCLCPP_WARN(node_->get_logger(), "❎ Unknown teaching control command: %s", msg->data.c_str());
+    }
+}
+
 void TrajectoryReplayController::execute_next_trajectory() {
     std::lock_guard<std::mutex> lock(traj_pool_mutex_);
 
@@ -415,4 +432,32 @@ trajectory_msgs::msg::JointTrajectory TrajectoryReplayController::smooth_traject
                 n_joints, n_points);
 
     return smoothed_traj;
+}
+
+// ✅ 虚方法实现 - 来自 TeachControllerBase 接口
+void TrajectoryReplayController::pause(const std::string& mapping) {
+    RCLCPP_DEBUG(node_->get_logger(), "pause() called for mapping: %s", mapping.c_str());
+    executing_ = false;
+}
+
+void TrajectoryReplayController::resume(const std::string& mapping) {
+    RCLCPP_DEBUG(node_->get_logger(), "resume() called for mapping: %s", mapping.c_str());
+    executing_ = true;
+}
+
+void TrajectoryReplayController::cancel(const std::string& mapping) {
+    RCLCPP_DEBUG(node_->get_logger(), "cancel() called for mapping: %s", mapping.c_str());
+    executing_ = false;
+    // 清空轨迹队列
+    {
+        std::lock_guard<std::mutex> lock(traj_pool_mutex_);
+        while (!traj_pool_.empty()) {
+            traj_pool_.pop();
+        }
+    }
+}
+
+void TrajectoryReplayController::complete(const std::string& mapping) {
+    RCLCPP_DEBUG(node_->get_logger(), "complete() called for mapping: %s", mapping.c_str());
+    executing_ = false;
 }

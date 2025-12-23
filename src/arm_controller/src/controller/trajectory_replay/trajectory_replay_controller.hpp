@@ -28,6 +28,12 @@ public:
     void start(const std::string& mapping = "") override;
     bool stop(const std::string& mapping = "") override;
 
+    // ✅ 虚方法实现：用于控制复现过程（符合 TeachControllerBase 接口）
+    void pause(const std::string& mapping = "") override;
+    void resume(const std::string& mapping = "") override;
+    void cancel(const std::string& mapping = "") override;
+    void complete(const std::string& mapping = "") override;
+
 private:
     // ===== 订阅者 =====
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
@@ -47,6 +53,7 @@ private:
 
     // ===== 回调函数 =====
     void teach_callback(const std_msgs::msg::String::SharedPtr msg) override;
+    void on_teaching_control(const std_msgs::msg::String::SharedPtr msg) override;
     // void trajectory_replay_callback(const std_msgs::msg::String::SharedPtr msg);
     void joint_states_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
     // void mode_status_callback(const std_msgs::msg::String::SharedPtr msg);

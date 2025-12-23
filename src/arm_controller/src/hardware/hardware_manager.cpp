@@ -68,6 +68,15 @@ std::shared_ptr<RobotHardware> HardwareManager::get_hardware_driver() const {
     return hardware_driver_;
 }
 
+bool HardwareManager::register_motor_recorder(std::shared_ptr<hardware_driver::motor_driver::MotorStatusObserver> recorder) {
+    if (!recorder) {
+        return false;
+    }
+
+    // 保存 recorder 供 on_motor_status_update 转发使用
+    motor_recorder_ = recorder;
+    return true;
+}
 
 bool HardwareManager::is_robot_stopped(const std::string& mapping) const {
     const double velocity_threshold = 0.01; // rad/s
@@ -345,6 +354,11 @@ bool HardwareManager::send_hold_state_command(const std::string& mapping,
 void HardwareManager::on_motor_status_update(const std::string& interface,
                                             uint32_t motor_id,
                                             const hardware_driver::motor_driver::Motor_Status& status) {
+    // ✅ 转发给录制观察者（如果已注册）
+    if (motor_recorder_) {
+        motor_recorder_->on_motor_status_update(interface, motor_id, status);
+    }
+
     update_joint_state(interface, motor_id, status);
 
     // 实时安全检查

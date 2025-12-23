@@ -3,6 +3,7 @@
 #include "controller_base/utility_controller_base.hpp"
 #include "controller_base/trajectory_controller_base.hpp"
 #include "controller_base/velocity_controller_base.hpp"
+#include "controller_base/teach_controller_base.hpp"
 #include "controller/controller_registry.hpp"
 #include "controller_interface.hpp"
 #include <algorithm>
@@ -145,11 +146,25 @@ void ControllerManagerNode::init_controllers() {
 
             // 从 YAML 提取默认 topic 值
             std::string default_input_topic, default_output_topic;
+
+            // ✅ 支持 input_topic（单个）或 input_topics（多个数组）
             if (entry["input_topic"] && entry["input_topic"]["name"]) {
                 default_input_topic = entry["input_topic"]["name"].as<std::string>();
-            }
-            if (!default_input_topic.empty()) {
-                this->declare_parameter("controllers." + key + ".input_topic", default_input_topic);
+                if (!default_input_topic.empty()) {
+                    this->declare_parameter("controllers." + key + ".input_topic", default_input_topic);
+                }
+            } else if (entry["input_topics"] && entry["input_topics"].IsSequence()) {
+                // 处理 input_topics 数组 - 声明为 input_topic0, input_topic1 等（不带点号）
+                int idx = 0;
+                for (const auto& topic_entry : entry["input_topics"]) {
+                    if (topic_entry["name"]) {
+                        std::string topic_name = topic_entry["name"].as<std::string>();
+                        this->declare_parameter("controllers." + key + ".input_topic" + std::to_string(idx), topic_name);
+                        RCLCPP_DEBUG(this->get_logger(), "[controllers] Declared input_topic%d for '%s': %s",
+                                    idx, key.c_str(), topic_name.c_str());
+                        idx++;
+                    }
+                }
             }
 
             if (entry["output_topic"] && entry["output_topic"]["name"]) {
@@ -596,15 +611,3 @@ void ControllerManagerNode::handle_trajectory_control(const controller_interface
         RCLCPP_WARN(this->get_logger(), "⚠️  Unknown trajectory control action: %s", action.c_str());
     }
 }
-
-// [已弃用] 这些函数不再被使用
-// 原因：控制器现在在自己的构造函数中创建话题订阅，而不是由ControllerManagerNode管理
-// 保留以供参考，但不应被调用
-//
-// void ControllerManagerNode::create_controller_subscriptions(const std::string& mode_key, const std::string& mapping) {
-//     // 已移到各控制器的构造函数中
-// }
-//
-// void ControllerManagerNode::remove_controller_subscriptions(const std::string& mode_key, const std::string& mapping) {
-//     // 不再需要
-// }

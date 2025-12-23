@@ -403,7 +403,7 @@ bool CartesianVelocityController::send_joint_velocities(const std::string& mappi
         const double kp_velocity = 0.0;      // 速度模式：kp=0.0
         const double kd_velocity = 0.01;     // 速度模式：kd=0.01
 
-        // TODO: 替换为hardware_driver里获取的重力矩
+        // TODO: 替换为hardware_manager里获取的重力矩
         const double effort = 0.0;           // 力矩在纯速度模式下不使用
         const double position = 0.0;         // 位置在纯速度模式下不使用
 
