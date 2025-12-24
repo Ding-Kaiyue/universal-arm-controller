@@ -16,6 +16,7 @@
 #include "hardware_driver/driver/motor_driver_interface.hpp"
 #include "trajectory_interpolator/moveit_spline_adapter.hpp"
 #include "utils/motor_mode.hpp"
+#include "arm_controller/dynamics/gravity_compensator.hpp"
 
 // 关节限位结构体
 struct JointLimits {
@@ -74,6 +75,12 @@ public:
     std::vector<double> get_current_joint_velocities(const std::string& mapping) const;
     std::vector<double> get_current_joint_efforts(const std::string& mapping) const;
     bool send_hold_state_command(const std::string& mapping, const std::vector<double>& positions);
+
+    // ============= 重力矩计算接口 =============
+    // 根据当前关节位置计算重力矩 (使用 pinocchio)
+    std::vector<double> compute_gravity_torques(const std::string& mapping);
+    // 根据指定关节位置计算重力矩
+    std::vector<double> compute_gravity_torques(const std::string& mapping, const std::vector<double>& joint_positions);
 
     // ============= 轨迹执行接口 =============
     bool executeTrajectory(const std::string& interface, const trajectory_interpolator::Trajectory& trajectory);
@@ -138,7 +145,10 @@ private:
     std::map<std::string, std::vector<double>> start_position_config_;      // mapping -> start position
     std::map<std::string, JointLimits> joint_limits_config_;                // mapping -> joint limits
     std::map<std::string, std::string> robot_type_config_;                  // mapping -> robot type
+    std::map<std::string, std::string> urdf_path_config_;                   // mapping -> URDF file path
 
+    // ============= 重力补偿计算器 =============
+    std::shared_ptr<arm_controller::dynamics::GravityCompensator> gravity_compensator_;
 
     // =============  状态监控变量 =============
     mutable std::mutex status_mutex_;

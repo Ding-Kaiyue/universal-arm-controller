@@ -23,10 +23,10 @@ private:
     void publish_trajectory_record_name(const std::string &name);
 
     // ============= 重力补偿相关 =============
-    // 重力力矩订阅（进入示教模式时创建）
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr gravity_torque_sub_;
-    // 重力补偿回调函数
-    void gravity_torque_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
+    // 重力补偿定时器 (使用 pinocchio 内部计算)
+    rclcpp::TimerBase::SharedPtr gravity_compensation_timer_;
+    // 重力补偿定时器回调
+    void gravity_compensation_timer_callback();
     // 发送重力补偿力矩到电机
     bool send_gravity_compensation(const std::string& mapping, const std::vector<double>& efforts);
 

@@ -60,11 +60,10 @@ TrajectoryRecordController::TrajectoryRecordController(const rclcpp::Node::Share
         "/joint_states", 10, std::bind(&TrajectoryRecordController::joint_states_callback, this, std::placeholders::_1)
     );
 
-    // 进入示教模式时，创建重力补偿订阅
-    // 只要控制器激活就持续接收重力补偿力矩
-    gravity_torque_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
-        "/gravity_torque", 10,
-        std::bind(&TrajectoryRecordController::gravity_torque_callback, this, std::placeholders::_1)
+    // 创建重力补偿定时器 (100Hz)，使用 pinocchio 内部计算重力矩
+    gravity_compensation_timer_ = node_->create_wall_timer(
+        std::chrono::milliseconds(10),  // 100Hz
+        std::bind(&TrajectoryRecordController::gravity_compensation_timer_callback, this)
     );
 
     // 发布状态反馈（可选）
@@ -99,8 +98,7 @@ bool TrajectoryRecordController::stop(const std::string& mapping) {
         RCLCPP_INFO(node_->get_logger(), "Stopped ongoing recording");
     }
 
-    // 退出示教模式时，销毁重力补偿订阅，停止重力补偿
-    gravity_torque_sub_.reset();
+    // 注意：定时器会在 is_active_ = false 时自动跳过重力补偿
     // 清理该 mapping 的话题订阅
     cleanup_subscriptions(mapping);
 
@@ -188,19 +186,23 @@ void TrajectoryRecordController::publish_trajectory_record_name(const std::strin
     pub_->publish(msg);
 }
 
-void TrajectoryRecordController::gravity_torque_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
+void TrajectoryRecordController::gravity_compensation_timer_callback() {
     // 只在控制器激活时处理重力补偿
     if (!is_active_) return;
+    if (active_mapping_.empty()) return;
+
+    // 使用 pinocchio 计算当前关节位置对应的重力矩
+    std::vector<double> gravity_torques = hardware_manager_->compute_gravity_torques(active_mapping_);
 
     // 验证力矩数据
-    if (msg->effort.empty()) {
+    if (gravity_torques.empty()) {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000,
-            "Received empty gravity torque message");
+            "Computed empty gravity torques");
         return;
     }
 
     // 发送重力补偿力矩到电机
-    send_gravity_compensation(active_mapping_, msg->effort);
+    send_gravity_compensation(active_mapping_, gravity_torques);
 }
 
 bool TrajectoryRecordController::send_gravity_compensation(const std::string& mapping, const std::vector<double>& efforts) {
