@@ -138,7 +138,7 @@ bool Move2InitialController::move_to_initial_position(const std::string& mapping
     }
 
     // 检查轨迹点数
-    if (planning_result.trajectory.size() < 2) {
+    if (planning_result.trajectory.size() < 3) {
         RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Move2Initial: Already at initial position, no movement needed",
                    mapping.c_str());
         return true;

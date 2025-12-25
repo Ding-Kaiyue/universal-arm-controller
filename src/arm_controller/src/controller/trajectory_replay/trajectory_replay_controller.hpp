@@ -3,104 +3,79 @@
 
 #include "controller_base/teach_controller_base.hpp"
 #include "std_msgs/msg/string.hpp"
-#include "trajectory_msgs/msg/joint_trajectory.hpp"
-#include "sensor_msgs/msg/joint_state.hpp"
-#include "control_msgs/action/follow_joint_trajectory.hpp"
-#include "rclcpp_action/rclcpp_action.hpp"
-#include "controller_interfaces/srv/work_mode.hpp"
-#include "arm_controller/utils/joint_recorder.hpp"
 #include "arm_controller/hardware/hardware_manager.hpp"
-#include "moveit/move_group_interface/move_group_interface.h"
-#include <csaps.h>  // C++ CSAPS库，用于轨迹平滑
+#include "arm_controller/hardware/motor_data_reloader.hpp"
+#include "trajectory_segmenter.hpp"
+#include "trajectory_smoother.hpp"
+#include "trajectory_interpolator/trajectory_interpolator.hpp"
+#include "trajectory_planning_v3/application/services/motion_planning_service.hpp"
+#include "trajectory_planning_v3/infrastructure/integration/moveit_adapter.hpp"
 #include <memory>
-#include <queue>
-#include <mutex>
+#include <thread>
 #include <atomic>
+#include <mutex>
 
-class TrajectoryReplayController final: public TeachControllerBase {
+class TrajectoryReplayController final : public TeachControllerBase {
 public:
-    using FollowJointTrajectory = control_msgs::action::FollowJointTrajectory;
-    using GoalHandleFollowJointTrajectory = rclcpp_action::ClientGoalHandle<FollowJointTrajectory>;
-
     explicit TrajectoryReplayController(const rclcpp::Node::SharedPtr& node);
     ~TrajectoryReplayController() override = default;
 
     void start(const std::string& mapping = "") override;
     bool stop(const std::string& mapping = "") override;
 
-    // ✅ 虚方法实现：用于控制复现过程（符合 TeachControllerBase 接口）
     void pause(const std::string& mapping = "") override;
     void resume(const std::string& mapping = "") override;
     void cancel(const std::string& mapping = "") override;
     void complete(const std::string& mapping = "") override;
 
 private:
-    // ===== 订阅者 =====
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
-    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_states_sub_;
-    // rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mode_status_sub_;
-
-    // ===== 发布者 =====
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-    // rclcpp::Publisher<trajectory_msgs::msg::JointTrajectory>::SharedPtr raw_traj_pub_;  // [已移除] 不再使用ROS话题平滑
-    rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr movej_pub_;  // MoveJ 命令发布器
-
-    // [已移除] 使用C++直接csaps平滑，不再需要ROS话题通信
-    // rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr smoothed_traj_sub_;
-
-    // ===== 服务客户端 =====
-    // rclcpp::Client<controller_interfaces::srv::WorkMode>::SharedPtr mode_service_client_;
-
-    // ===== 回调函数 =====
+    // 初始化轨迹规划服务
+    void initialize_planning_services();
     void teach_callback(const std_msgs::msg::String::SharedPtr msg) override;
     void on_teaching_control(const std_msgs::msg::String::SharedPtr msg) override;
-    // void trajectory_replay_callback(const std_msgs::msg::String::SharedPtr msg);
-    void joint_states_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
-    // void mode_status_callback(const std_msgs::msg::String::SharedPtr msg);
-    // [已移除] void smoothed_trajectory_callback(...)  // 使用C++直接csaps平滑，不再需要此回调
 
-    // ===== 核心功能 =====
-    // bool is_recording_active();  // 检查是否在录制模式
-    bool move_to_start_position(const std::vector<double>& start_pos);  // 回到起点
-    void execute_next_trajectory();  // 执行下一个轨迹
-    trajectory_msgs::msg::JointTrajectory smooth_trajectory(
-        const trajectory_msgs::msg::JointTrajectory& raw_traj);  // 使用csaps平滑轨迹
+    // 后台回放线程
+    void replay_thread_func(const std::string& file_path);
 
-    // ===== 辅助函数 =====
-    void publish_status(const std::string& status);
+    // 私有辅助方法
+    void move_to_start_point(const std::vector<double>& start_position, const std::string& mapping);
 
-    // ===== 成员变量 =====
-    std::unique_ptr<JointRecorder> recorder_;  // 关节录制器实例（用于加载轨迹）
-    std::string record_input_dir_;  // 录制输入目录
+    trajectory_interpolator::Trajectory interpolate_trajectory(
+        const trajectory_interpolator::Trajectory& interpolator_trajectory,
+        double max_velocity,
+        double max_acceleration,
+        double max_jerk,
+        const std::string& mapping);
 
-    // 当前关节状态
-    sensor_msgs::msg::JointState::SharedPtr latest_joint_states_;
-    std::mutex joint_states_mutex_;
+    void execute_trajectory(
+        const trajectory_interpolator::Trajectory& interpolator_traj,
+        const std::string& mapping);
 
-    // 当前模式状态
-    // std::string current_mode_;
-    // std::mutex mode_mutex_;
-
-    // 轨迹池（支持多轨迹排队）
-    std::queue<trajectory_msgs::msg::JointTrajectory> traj_pool_;
-    std::mutex traj_pool_mutex_;
-    std::atomic<bool> executing_;  // 是否正在执行轨迹
-    std::atomic<bool> waiting_for_smoothed_trajectory_;  // 是否正在等待平滑后的轨迹
-
-    // 当前轨迹和执行时间
-    trajectory_msgs::msg::JointTrajectory current_traj_;
-    rclcpp::Time traj_start_time_;
-
-    // 当前action goal handle
-    // GoalHandleFollowJointTrajectory::SharedPtr current_goal_handle_;
-    // std::mutex goal_handle_mutex_;
-
-    // MoveIt MoveGroupInterface（用于回到起点）
-    std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_;
-
-    // HardwareManager（用于直接执行轨迹）
+    std::string replay_dir_;
     std::shared_ptr<HardwareManager> hardware_manager_;
-    std::string active_mapping_;  // 当前mapping
+    std::string active_mapping_;
+
+    std::atomic<bool> replaying_{false};
+    std::atomic<bool> paused_{false};
+    std::unique_ptr<std::thread> replay_thread_;
+
+    // 当前执行的轨迹ID
+    std::string current_execution_id_;
+
+    // 轨迹规划相关 - 支持多臂mapping
+    std::map<std::string, std::shared_ptr<trajectory_planning::application::services::MotionPlanningService>> motion_planning_services_;
+    std::map<std::string, std::shared_ptr<trajectory_planning::infrastructure::integration::MoveItAdapter>> moveit_adapters_;
+    std::map<std::string, std::string> mapping_to_planning_group_;
+
+    // 轨迹插值器
+    std::unique_ptr<TrajectoryInterpolator> trajectory_interpolator_;
+
+    // 模块成员变量
+    std::unique_ptr<MotorDataReloader> motor_data_reloader_;
+    std::unique_ptr<TrajectorySegmenter> trajectory_segmenter_;
+    std::unique_ptr<TrajectorySmoother> trajectory_smoother_;
+
+    const double TIME_STEP = 0.05; // 执行的时间间隔
 };
 
-#endif      // __TRAJECTORY_REPLAY_CONTROLLER_HPP__
+#endif

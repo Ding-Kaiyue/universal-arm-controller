@@ -103,6 +103,7 @@ public:
 
     // ============= 录制观察者接口 =============
     bool register_motor_recorder(std::shared_ptr<hardware_driver::motor_driver::MotorStatusObserver> recorder);
+    bool unregister_motor_recorder();
 
     // ============= MotorStatusObserver接口实现 =============
     void on_motor_status_update(const std::string& interface,

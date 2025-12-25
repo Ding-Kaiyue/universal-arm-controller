@@ -78,6 +78,11 @@ bool HardwareManager::register_motor_recorder(std::shared_ptr<hardware_driver::m
     return true;
 }
 
+bool HardwareManager::unregister_motor_recorder() {
+    motor_recorder_.reset();
+    return true;
+}
+
 bool HardwareManager::is_robot_stopped(const std::string& mapping) const {
     const double velocity_threshold = 0.01; // rad/s
     
@@ -1031,8 +1036,8 @@ bool HardwareManager::wait_for_trajectory_completion(const std::string& mapping,
             std::lock_guard<std::mutex> lock(execution_mutex_);
             auto it = mapping_to_execution_id_.find(mapping);
             if (it == mapping_to_execution_id_.end()) {
-                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping", mapping.c_str());
-                return false;
+                RCLCPP_DEBUG(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping (already completed or not started)", mapping.c_str());
+                return true;  // ✅ 改为返回 true：没有活跃轨迹意味着已完成
             }
             execution_id = it->second;
         }

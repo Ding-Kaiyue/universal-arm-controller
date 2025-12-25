@@ -1,6 +1,7 @@
 #include "arm_controller/hardware/motor_data_recorder.hpp"
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include <errno.h>
 
 MotorDataRecorder::MotorDataRecorder(const std::string& output_file,
@@ -46,8 +47,8 @@ MotorDataRecorder::MotorDataRecorder(const std::string& output_file,
     }
     fprintf(stderr, "✅ mmap successful (MAP_SHARED), buffer: %p\n", (void*)mmap_buffer_);
 
-    // 写入 CSV 表头
-    const char header[] = "timestamp,interface,motor_id,position,velocity,effort,temperature,enable_flag,motor_mode\n";
+    // 写入 CSV 表头 - 一行包含全部6个电机的数据
+    const char header[] = "timestamp,interface,position1,position2,position3,position4,position5,position6,velocity1,velocity2,velocity3,velocity4,velocity5,velocity6,effort1,effort2,effort3,effort4,effort5,effort6\n";
     size_t header_len = strlen(header);
     memcpy(mmap_buffer_, header, header_len);
     buffer_pos_ = header_len;
@@ -99,8 +100,8 @@ MotorDataRecorder::MotorDataRecorder(const std::string& output_file,
     }
     fprintf(stderr, "✅ mmap successful (MAP_SHARED), buffer: %p\n", (void*)mmap_buffer_);
 
-    // 写入 CSV 表头
-    const char header[] = "timestamp,interface,motor_id,position,velocity,effort,temperature,enable_flag,motor_mode\n";
+    // 写入 CSV 表头 - 一行包含全部6个电机的数据
+    const char header[] = "timestamp,interface,position0,position1,position2,position3,position4,position5,velocity0,velocity1,velocity2,velocity3,velocity4,velocity5,effort0,effort1,effort2,effort3,effort4,effort5\n";
     size_t header_len = strlen(header);
     memcpy(mmap_buffer_, header, header_len);
     buffer_pos_ = header_len;
@@ -150,44 +151,77 @@ void MotorDataRecorder::on_motor_status_update(
         return;
     }
 
-    // ✅ 超快速格式化数据到缓冲区
-    // 使用 snprintf 避免缓冲区溢出，性能仍然很好（<10μs）
-    int written = snprintf(
-        &mmap_buffer_[buffer_pos_],
-        512,
-        "%.6f,%s,%u,%.6f,%.6f,%.6f,%.1f,%d,%d\n",
-        elapsed,
-        interface.c_str(),
-        motor_id,
-        status.position,
-        status.velocity,
-        status.effort,
-        static_cast<int>(status.temperature) / 10.0,
-        static_cast<int>(status.enable_flag),
-        static_cast<int>(status.motor_mode)
-    );
+    // 检查 motor_id 有效范围 (1-6)
+    if (motor_id < 1 || motor_id > 6) {
+        fprintf(stderr, "❌ Invalid motor_id: %u (expected 1-6)\n", motor_id);
+        return;
+    }
 
-    if (written > 0) {
-        buffer_pos_ += written;
+    // 将 motor_id (1-6) 映射到数组索引 (0-5)
+    uint32_t motor_index = motor_id - 1;
 
-        // ✅ 单数据模式：记录所有电机各一条数据后自动暂停
-        if (single_record_mode_ && !expected_motor_ids_.empty()) {
-            // 标记此电机已记录
-            recorded_motor_ids_.insert(motor_id);
+    // 缓存当前电机的数据（按照 motor_id 顺序 1-6，映射到索引 0-5）
+    MotorData data;
+    data.position = status.position;
+    data.velocity = status.velocity;
+    data.effort = status.effort;
+    motor_buffer_[motor_index] = data;
+    last_timestamp_ = elapsed;
 
-            // 检查是否所有电机都已记录
-            bool all_recorded = true;
-            for (uint32_t expected_id : expected_motor_ids_) {
-                if (recorded_motor_ids_.find(expected_id) == recorded_motor_ids_.end()) {
-                    all_recorded = false;
-                    break;
-                }
+    // ✅ 当收集齐6个电机数据后立即写入一行
+    if (motor_buffer_.size() == 6) {
+        // 写入完整一行数据：timestamp,interface,pos1-6,vel1-6,eff1-6
+        int written = snprintf(
+            &mmap_buffer_[buffer_pos_],
+            512,
+            "%.6f,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+            last_timestamp_,
+            interface.c_str(),
+            motor_buffer_[0].position,
+            motor_buffer_[1].position,
+            motor_buffer_[2].position,
+            motor_buffer_[3].position,
+            motor_buffer_[4].position,
+            motor_buffer_[5].position,
+            motor_buffer_[0].velocity,
+            motor_buffer_[1].velocity,
+            motor_buffer_[2].velocity,
+            motor_buffer_[3].velocity,
+            motor_buffer_[4].velocity,
+            motor_buffer_[5].velocity,
+            motor_buffer_[0].effort,
+            motor_buffer_[1].effort,
+            motor_buffer_[2].effort,
+            motor_buffer_[3].effort,
+            motor_buffer_[4].effort,
+            motor_buffer_[5].effort
+        );
+
+        if (written > 0) {
+            buffer_pos_ += written;
+        }
+
+        // 清空缓冲区，准备接收下一组6个电机的数据
+        motor_buffer_.clear();
+    }
+
+    // ✅ 单数据模式：记录所有电机各一条数据后自动暂停
+    if (single_record_mode_ && !expected_motor_ids_.empty()) {
+        // 标记此电机已记录
+        recorded_motor_ids_.insert(motor_id);
+
+        // 检查是否所有电机都已记录
+        bool all_recorded = true;
+        for (uint32_t expected_id : expected_motor_ids_) {
+            if (recorded_motor_ids_.find(expected_id) == recorded_motor_ids_.end()) {
+                all_recorded = false;
+                break;
             }
+        }
 
-            // 如果所有电机都已记录，暂停
-            if (all_recorded) {
-                is_paused_[mapping_] = true;
-            }
+        // 如果所有电机都已记录，暂停
+        if (all_recorded) {
+            is_paused_[mapping_] = true;
         }
     }
 }

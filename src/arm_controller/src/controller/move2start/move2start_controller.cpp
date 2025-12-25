@@ -131,7 +131,7 @@ bool Move2StartController::move_to_start_position(const std::string& mapping) {
     auto planning_result = motion_planning_services_[mapping]->planJointMotion(target_joint_state);
     
     // 检查轨迹点数
-    if (planning_result.trajectory.size() < 2) {
+    if (planning_result.trajectory.size() < 3) {
         RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Move2Start: Already at target position, no movement needed",
                    mapping.c_str());
         return true;

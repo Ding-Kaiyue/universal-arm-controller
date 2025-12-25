@@ -29,7 +29,7 @@ private:
     std::shared_ptr<MotorDataRecorder> motor_recorder_;
 
     // 录制输出目录
-    std::string record_output_dir_;
+    std::string record_dir_;
 
     // 当前录制的文件路径（用于 cancel 时删除）
     std::string current_recording_file_path_;
@@ -40,8 +40,8 @@ private:
     // 当前激活的 mapping
     std::string active_mapping_;
 
-    bool recording_ = false;   // 是否正在录制
-    bool paused_ = false;      // 录制是否暂停
+    std::atomic<bool> recording_ = false;   // 是否正在录制
+    std::atomic<bool> paused_ = false;      // 录制是否暂停
 };
 
 #endif      // __TRAJECTORY_RECORD_CONTROLLER_HPP__

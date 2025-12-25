@@ -59,6 +59,10 @@ bool PointRecordController::stop(const std::string& mapping) {
     // ✅ 清理电机数据记录器
     if (motor_recorder_) {
         motor_recorder_->sync_to_disk();
+
+        // ✅ 先从 HardwareManager 中注销观察者，防止悬垂指针
+        hardware_manager_->unregister_motor_recorder();
+
         motor_recorder_.reset();
     }
 
@@ -115,6 +119,10 @@ void PointRecordController::teach_callback(const std_msgs::msg::String::SharedPt
     // 记录完成，同步到磁盘并清理
     if (motor_recorder_) {
         motor_recorder_->sync_to_disk();
+
+        // ✅ 先从 HardwareManager 中注销观察者，防止悬垂指针
+        hardware_manager_->unregister_motor_recorder();
+
         motor_recorder_.reset();
     }
 
@@ -152,6 +160,11 @@ void PointRecordController::resume(const std::string& mapping) {
 }
 
 void PointRecordController::cancel(const std::string& mapping) {
+    // ✅ 先从 HardwareManager 中注销观察者，防止悬垂指针
+    if (motor_recorder_) {
+        hardware_manager_->unregister_motor_recorder();
+    }
+
     motor_recorder_.reset();
 
     // 删除已记录的点文件

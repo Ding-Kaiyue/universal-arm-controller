@@ -82,11 +82,10 @@ controllers:
       - name: /controller_api/trajectory_record_control/{mapping}
         type: std_msgs/msg/String
 
-  # - key: TrajectoryReplay
-  #   class: TrajectoryReplayController
-  #   input_topic:
-  #     name: /controller_api/trajectory_replay_action
-  #     type: std_msgs/msg/String
-  #   output_topic:
-  #     name: /controller_api/trajectory_replay_status
-  #     type: std_msgs/msg/String
+  - key: TrajectoryReplay
+    class: TrajectoryReplayController
+    input_topics:
+      - name: /controller_api/trajectory_replay_action/{mapping}
+        type: std_msgs/msg/String
+      - name: /controller_api/trajectory_replay_control/{mapping}
+        type: std_msgs/msg/String

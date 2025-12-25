@@ -14,9 +14,11 @@ MoveLController::MoveLController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹插值器
     trajectory_interpolator_ = std::make_unique<TrajectoryInterpolator>();
 
+    // ✅ 加载插值器配置
+    load_interpolator_config(*trajectory_interpolator_);
+
     // 初始化轨迹规划服务
     initialize_planning_services();
-
 }
 
 void MoveLController::start(const std::string& mapping) {
@@ -143,7 +145,7 @@ void MoveLController::plan_and_execute(const std::string& mapping, const geometr
     }
 
     // 检查轨迹点数
-    if (planning_result.trajectory.size() < 2) {
+    if (planning_result.trajectory.size() < 3) {
         RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveL: Already at target position, no movement needed",
                    mapping.c_str());
         return;

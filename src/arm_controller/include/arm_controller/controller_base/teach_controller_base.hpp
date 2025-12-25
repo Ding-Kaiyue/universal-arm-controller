@@ -2,7 +2,10 @@
 #define __TEACH_CONTROLLER_BASE_HPP__
 
 #include "arm_controller/controller_base/mode_controller_base.hpp"
+#include <trajectory_interpolator/trajectory_interpolator.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <yaml-cpp/yaml.h>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <any>
 
@@ -82,6 +85,41 @@ protected:
             subscriptions_.erase(it);
             RCLCPP_INFO(node_->get_logger(), "[%s] Cleaned up subscription for mapping: %s",
                        get_mode().c_str(), mapping.c_str());
+        }
+    }
+
+    // ✅ 加载插值器配置的辅助方法
+    void load_interpolator_config(TrajectoryInterpolator& interpolator) {
+        try {
+            std::string pkg_path = ament_index_cpp::get_package_share_directory("arm_controller");
+            std::string config_path = pkg_path + "/config/interpolator_config.yaml";
+            YAML::Node config = YAML::LoadFile(config_path);
+
+            if (config["interpolation"]["default"]) {
+                auto default_config = config["interpolation"]["default"];
+                trajectory_interpolator::SplineConfig spline_config;
+
+                if (default_config["target_dt"]) {
+                    spline_config.target_dt = default_config["target_dt"].as<double>();
+                }
+                if (default_config["max_velocity"]) {
+                    spline_config.max_velocity = default_config["max_velocity"].as<double>();
+                }
+                if (default_config["max_acceleration"]) {
+                    spline_config.max_acceleration = default_config["max_acceleration"].as<double>();
+                }
+                if (default_config["max_jerk"]) {
+                    spline_config.max_jerk = default_config["max_jerk"].as<double>();
+                }
+
+                interpolator.setInterpolationConfig(spline_config);
+                RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Loaded interpolator config - dt:%.3fs vel:%.2f acc:%.2f jerk:%.2f",
+                            get_mode().c_str(), spline_config.target_dt, spline_config.max_velocity,
+                            spline_config.max_acceleration, spline_config.max_jerk);
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Failed to load interpolator config: %s, using defaults",
+                       get_mode().c_str(), e.what());
         }
     }
 };

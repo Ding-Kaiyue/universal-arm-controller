@@ -21,16 +21,16 @@ TrajectoryRecordController::TrajectoryRecordController(const rclcpp::Node::Share
         std::filesystem::path workspace_root =
             std::filesystem::path(pkg_dir).parent_path().parent_path().parent_path();
 
-        record_output_dir_ = (workspace_root / "trajectories").string();
+        record_dir_ = (workspace_root / "trajectories").string();
 
-        std::filesystem::create_directories(record_output_dir_);
+        std::filesystem::create_directories(record_dir_);
     } catch (const std::exception& e) {
-        record_output_dir_ = "/tmp/arm_recording_trajectories";
-        std::filesystem::create_directories(record_output_dir_);
-        fprintf(stderr, "⚠️  Fallback to: %s\n", record_output_dir_.c_str());
+        record_dir_ = "/tmp/arm_recording_trajectories";
+        std::filesystem::create_directories(record_dir_);
+        fprintf(stderr, "⚠️  Fallback to: %s\n", record_dir_.c_str());
     }
 
-    RCLCPP_INFO(node_->get_logger(), "TrajectoryRecordController initialized. Output dir: %s", record_output_dir_.c_str());
+    RCLCPP_INFO(node_->get_logger(), "TrajectoryRecordController initialized. Output dir: %s", record_dir_.c_str());
 }
 
 
@@ -57,6 +57,29 @@ void TrajectoryRecordController::start(const std::string& mapping) {
     if (subscriptions_.find(mapping) == subscriptions_.end()) {
         init_subscriptions(mapping);
     }
+
+    auto hardware_driver = hardware_manager_->get_hardware_driver();
+    if (!hardware_driver) {
+        RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+        return;
+    }
+
+    try {
+        const std::string& interface = hardware_manager_->get_interface(mapping);
+        const std::vector<uint32_t>& motor_ids = hardware_manager_->get_motors_id(mapping);
+
+        // MIT模式速度控制参数
+        const double kp_velocity = 0.0;      // 速度模式：kp=0.0
+        const double kd_velocity = 0.0;     // 速度模式：kd=0.0
+
+        for (size_t i = 0; i < motor_ids.size(); ++i) {
+            uint32_t motor_id = motor_ids[i];            
+            hardware_driver->control_motor_in_mit_mode(interface, motor_id, 0.0, 0.0, 0.0, kp_velocity, kd_velocity);
+        }
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] Failed to send joint velocities: %s", mapping.c_str(), e.what());
+        return;
+    }
 }
 
 bool TrajectoryRecordController::stop(const std::string& mapping) {
@@ -65,7 +88,11 @@ bool TrajectoryRecordController::stop(const std::string& mapping) {
     // ✅ 清理电机数据记录器
     if (motor_recorder_) {
         motor_recorder_->sync_to_disk();
-        motor_recorder_.reset();  // 观察者会自动停止接收更新
+
+        // ✅ 先从 HardwareManager 中注销观察者，防止悬垂指针
+        hardware_manager_->unregister_motor_recorder();
+
+        motor_recorder_.reset();
         RCLCPP_INFO(node_->get_logger(), "Motor data recording stopped");
     }
 
@@ -94,7 +121,7 @@ void TrajectoryRecordController::teach_callback(const std_msgs::msg::String::Sha
     }
 
     /* -------- start new recording -------- */
-    current_recording_file_path_ = record_output_dir_ + "/" + msg->data + ".csv";
+    current_recording_file_path_ = record_dir_ + "/" + msg->data + ".csv";
 
     // 创建新的 MotorDataRecorder 实例
     motor_recorder_ = std::make_shared<MotorDataRecorder>(current_recording_file_path_, active_mapping_);
@@ -108,7 +135,7 @@ void TrajectoryRecordController::teach_callback(const std_msgs::msg::String::Sha
     // 禁用单数据模式 - TrajectoryRecord 需要持续记录所有数据
     motor_recorder_->set_single_record_mode(false);
 
-    // 简化方案：将 MotorDataRecorder 作为观察者注册到 HardwareManager
+    // 将 MotorDataRecorder 作为观察者注册到 HardwareManager
     // HardwareManager 本身实现了 MotorStatusObserver，我们让它转发给 motor_recorder_
     if (!hardware_manager_->register_motor_recorder(motor_recorder_)) {
         RCLCPP_ERROR(node_->get_logger(), "❎ Failed to register motor recorder observer");
@@ -160,6 +187,9 @@ void TrajectoryRecordController::resume(const std::string& mapping) {
 void TrajectoryRecordController::cancel(const std::string& mapping) {
     if (!recording_) return;
 
+    // ✅ 先从 HardwareManager 中注销观察者，防止悬垂指针
+    hardware_manager_->unregister_motor_recorder();
+
     motor_recorder_.reset();  // 观察者会自动停止接收更新
     recording_ = false;
     paused_ = false;
@@ -180,7 +210,11 @@ void TrajectoryRecordController::complete(const std::string& mapping) {
     if (!recording_) return;
 
     motor_recorder_->sync_to_disk();
-    motor_recorder_.reset();  // 观察者会自动停止接收更新
+
+    // ✅ 先从 HardwareManager 中注销观察者，防止悬垂指针
+    hardware_manager_->unregister_motor_recorder();
+
+    motor_recorder_.reset();  // 销毁本地的记录器对象
     recording_ = false;
     paused_ = false;
     if (!current_recording_file_path_.empty()) {

@@ -133,6 +133,16 @@ private:
     bool single_record_mode_ = false;  // 单数据模式标志（记录所有电机各一条后自动暂停）
     std::vector<uint32_t> expected_motor_ids_;  // 预期的电机ID列表（单数据模式时使用）
     std::unordered_set<uint32_t> recorded_motor_ids_;  // 已记录的电机ID
+
+    // 用于缓冲电机数据，直到收集齐6个电机
+    struct MotorData {
+        double position;
+        double velocity;
+        double effort;
+    };
+
+    std::unordered_map<uint32_t, MotorData> motor_buffer_;  // 缓存当前时间戳的6个电机数据
+    double last_timestamp_ = -1.0;  // 上一条记录的时间戳
 };
 
 #endif  // __MOTOR_DATA_RECORDER_HPP__

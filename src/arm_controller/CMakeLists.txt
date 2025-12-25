@@ -79,9 +79,9 @@ add_library(arm_controller_lib
   src/trajectory_controller_section.cpp
   src/hardware/hardware_manager.cpp
   src/hardware/motor_data_recorder.cpp
+  src/hardware/motor_data_reloader.cpp
   src/controller/controller_registry.cpp
   src/utils/trajectory_converter.cpp
-  src/utils/joint_recorder.cpp
   src/utils/velocity_qp_solver.cpp
   src/utils/velocity_abb_solver.cpp
   src/utils/velocity_strict_solver.cpp
@@ -112,6 +112,8 @@ add_library(arm_controller_lib
   src/controller/trajectory_record/trajectory_record_interface.cpp
   src/controller/trajectory_replay/trajectory_replay_controller.cpp
   src/controller/trajectory_replay/trajectory_replay_interface.cpp
+  src/controller/trajectory_replay/trajectory_segmenter.cpp
+  src/controller/trajectory_replay/trajectory_smoother.cpp
 )
 
 # target_link_libraries(robot_controller_lib
