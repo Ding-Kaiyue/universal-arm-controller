@@ -66,8 +66,6 @@ jobs:
             echo "TracIK already present or will be provided by deps.repos"
           fi
 
-
-<<<<<<< HEAD
       - name: Build and install OSQP
         run: |
           mkdir -p /tmp/osqp-build
@@ -90,8 +88,6 @@ jobs:
           make -j$(nproc)
           sudo make install
 
-=======
->>>>>>> origin/master
       - name: Install ROS dependencies
         run: |
           source /opt/ros/humble/setup.bash

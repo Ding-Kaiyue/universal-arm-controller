@@ -72,9 +72,12 @@ void TrajectoryRecordController::start(const std::string& mapping) {
         const double kp_velocity = 0.0;      // 速度模式：kp=0.0
         const double kd_velocity = 0.0;     // 速度模式：kd=0.0
 
+        std::vector<double> gravity_torques = hardware_manager_->compute_gravity_torques(mapping);
+        
         for (size_t i = 0; i < motor_ids.size(); ++i) {
-            uint32_t motor_id = motor_ids[i];            
-            hardware_driver->control_motor_in_mit_mode(interface, motor_id, 0.0, 0.0, 0.0, kp_velocity, kd_velocity);
+            uint32_t motor_id = motor_ids[i]; 
+            double effort = (i < gravity_torques.size()) ? gravity_torques[i] : 0.0;        // 重力补偿力矩
+            hardware_driver->control_motor_in_mit_mode(interface, motor_id, 0.0, 0.0, effort, kp_velocity, kd_velocity);
         }
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] Failed to send joint velocities: %s", mapping.c_str(), e.what());

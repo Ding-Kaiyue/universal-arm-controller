@@ -6,7 +6,7 @@ repositories:
   hardware_driver:
     type: git
     url: https://github.com/Ding-Kaiyue/hardware-driver.git
-    version: feature/gripper_control
+    version: master
   trajectory_interpolator:
     type: git
     url: https://github.com/Ding-Kaiyue/trajectory-interpolator.git
