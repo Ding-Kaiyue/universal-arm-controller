@@ -4,7 +4,7 @@
 #include <algorithm>
 
 // ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'CartesianVelocity', mapping: 'single_arm'}"
-// ros2 topic pub --once /controller_api/cartesian_velocity_action/single_arm geometry_msgs/msg/TwistStamped "{header: {stamp: {sec: 0, nanosec: 0}, frame_id: 'base_link'}, twist: {linear: {x: 0.03, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}}"
+// ros2 topic pub /controller_api/cartesian_velocity_action/single_arm geometry_msgs/msg/TwistStamped "{header: {stamp: {sec: 0, nanosec: 0}, frame_id: 'base_link'}, twist: {linear: {x: 0.03, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.1}}}"
 
 CartesianVelocityController::CartesianVelocityController(const rclcpp::Node::SharedPtr& node)
     : VelocityControllerImpl<geometry_msgs::msg::TwistStamped>("CartesianVelocity", node),
@@ -133,10 +133,11 @@ void CartesianVelocityController::velocity_callback(
         last_twist_time_ = steady_clock_.now();
     }
 
-    RCLCPP_DEBUG(node_->get_logger(),
-        "[%s] ✓ Twist cached: linear[%.3f, %.3f, %.3f] frame='%s'",
+    RCLCPP_INFO(node_->get_logger(),
+        "[%s] ✓ Twist received: linear[%.3f, %.3f, %.3f] angular[%.3f, %.3f, %.3f] frame='%s'",
         active_mapping_.c_str(),
         msg->twist.linear.x, msg->twist.linear.y, msg->twist.linear.z,
+        msg->twist.angular.x, msg->twist.angular.y, msg->twist.angular.z,
         msg->header.frame_id.c_str());
 }
 
@@ -244,13 +245,21 @@ void CartesianVelocityController::control_loop()
     }
 
     /* ========================================
-     * ✅ 工业级修正：仅用 3D 位置任务
-     * 不约束姿态（Jog 模式特性）
+     * ✅ 完整 6D 笛卡尔速度控制
+     * 支持位置和姿态（位置 + 旋转）
      * ======================================== */
 
-    // 仅使用位置 Jacobian（3×n）
-    Eigen::MatrixXd J_task = J.topRows(3);
-    Eigen::VectorXd v_task = v_linear;
+    // 使用完整 6D Jacobian（6×n）：3个线速度 + 3个角速度
+    Eigen::MatrixXd J_task = J;
+    Eigen::VectorXd v_task(6);
+    v_task << v_linear(0), v_linear(1), v_linear(2),
+              v_angular(0), v_angular(1), v_angular(2);
+
+    RCLCPP_INFO(node_->get_logger(),
+        "[%s] Target velocity - linear[%.3f, %.3f, %.3f] angular[%.3f, %.3f, %.3f]",
+        active_mapping_.c_str(),
+        v_linear(0), v_linear(1), v_linear(2),
+        v_angular(0), v_angular(1), v_angular(2));
 
     if (v_task.norm() < 1e-8) {
         std::vector<double> zero(joint_names.size(), 0.0);
@@ -305,21 +314,15 @@ void CartesianVelocityController::control_loop()
     }
 
     /* ===============================
-     * 6. 3D 位置 Jog 求解
+     * 6. 6D 笛卡尔速度求解（位置 + 姿态）
      * =============================== */
 
     Eigen::VectorXd qd(dof);
 
-    // 调用 solver（传入 3D Jacobian 和 3D 任务）
-    // Note: solver_ 的接口可能期望 6D，这里需要适配
-    // 暂时创建 6D 版本以兼容现有接口
-    Eigen::MatrixXd J_6d = J;  // 保持原 6D
-    Eigen::VectorXd v_6d(6);
-    v_6d << v_task(0), v_task(1), v_task(2), 0, 0, 0;  // 仅位置，无角速度
-
+    // 调用 solver（传入完整 6D Jacobian 和 6D 任务速度）
     bool ok = solver_.solve(
-        J_6d,
-        v_6d,
+        J_task,
+        v_task,
         q_current,
         q_min_pos,
         q_max_pos,
@@ -339,11 +342,11 @@ void CartesianVelocityController::control_loop()
     }
 
     /* ========================================
-     * 7. ✅ 工业级方向一致性检验
+     * 7. ✅ 工业级方向一致性检验（6D）
      * 检查方向，不检查模长
      * ======================================== */
 
-    Eigen::Vector3d v_reconstructed = J_task * qd;
+    Eigen::VectorXd v_reconstructed = J_task * qd;
 
     // 检查是否接近零
     if (v_reconstructed.norm() < 1e-6) {
@@ -356,7 +359,7 @@ void CartesianVelocityController::control_loop()
         return;
     }
 
-    // ✅ 方向一致性检验（不是模长检验）
+    // ✅ 方向一致性检验（6D 速度空间）
     double cos_angle = v_reconstructed.normalized().dot(v_task.normalized());
     cos_angle = std::clamp(cos_angle, -1.0, 1.0);
 
