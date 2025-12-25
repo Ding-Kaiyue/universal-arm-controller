@@ -403,14 +403,16 @@ bool CartesianVelocityController::send_joint_velocities(const std::string& mappi
         const double kp_velocity = 0.0;      // 速度模式：kp=0.0
         const double kd_velocity = 0.01;     // 速度模式：kd=0.01
 
-        // TODO: 替换为hardware_manager里获取的重力矩
-        const double effort = 0.0;           // 力矩在纯速度模式下不使用
         const double position = 0.0;         // 位置在纯速度模式下不使用
+
+        // 获取当前关节位置对应的重力矩
+        std::vector<double> gravity_torques = hardware_manager_->compute_gravity_torques(mapping);
 
         for (size_t i = 0; i < motor_ids.size(); ++i) {
             const auto& joint_name = joint_names[i];
             uint32_t motor_id = motor_ids[i];
             double vel = joint_velocities[i] * 180.0 / M_PI;  // 转为度/秒
+            double effort = (i < gravity_torques.size()) ? gravity_torques[i] : 0.0;  // 重力补偿力矩
 
             if (vel != 0.0) {
                 RCLCPP_INFO(node_->get_logger(),

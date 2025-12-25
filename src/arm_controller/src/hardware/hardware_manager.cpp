@@ -3,6 +3,9 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
 
 std::shared_ptr<HardwareManager> HardwareManager::getInstance() {
     std::lock_guard<std::mutex> lock(instance_mutex_);
@@ -245,6 +248,14 @@ bool HardwareManager::executeTrajectory(const std::string& interface, const traj
         RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
         return false;
     }
+
+    // 通过 interface 获取 mapping
+    std::string mapping;
+    auto it = interface_to_mapping_.find(interface);
+    if (it != interface_to_mapping_.end()) {
+        mapping = it->second;
+    }
+
     // 转换 trajectory_interpolator::Trajectory 到 ::Trajectory
     ::Trajectory hw_trajectory;
     hw_trajectory.joint_names = trajectory.joint_names;
@@ -256,6 +267,18 @@ bool HardwareManager::executeTrajectory(const std::string& interface, const traj
         hw_point.positions = point.positions;
         hw_point.velocities = point.velocities;
         hw_point.accelerations = point.accelerations;
+
+        // 预计算重力矩 (如果有 mapping)
+        if (!mapping.empty()) {
+            // 位置是度数，需要转换为弧度
+            std::vector<double> positions_rad;
+            positions_rad.reserve(point.positions.size());
+            for (double pos_deg : point.positions) {
+                positions_rad.push_back(pos_deg * M_PI / 180.0);
+            }
+            hw_point.efforts = compute_gravity_torques(mapping, positions_rad);
+        }
+
         hw_trajectory.points.push_back(hw_point);
     }
 
@@ -415,7 +438,6 @@ void HardwareManager::update_joint_state(const std::string& interface, uint32_t 
     joint_state.position[local_index] = status.position * M_PI / 180.0;
     joint_state.velocity[local_index] = status.velocity * M_PI / 180.0;
 
-    // TODO: 修改为当前状态的重力矩
     joint_state.effort[local_index] = status.effort;
 
     // 记录最新温度用于调试
@@ -573,6 +595,10 @@ void HardwareManager::clear_mappings() {
     start_position_config_.clear();
     joint_limits_config_.clear();
     robot_type_config_.clear();
+    urdf_path_config_.clear();
+
+    // 重置重力补偿计算器
+    gravity_compensator_.reset();
 }
 
 bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML::Node& mapping_node) {
@@ -626,6 +652,35 @@ bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML:
         frame_id_config_[mapping_name].c_str(),
         joint_names_config_[mapping_name].size()
     );
+
+    // ===== URDF路径 (可选配置，默认根据robot_type自动查找) =====
+    std::string urdf_path;
+    if (mapping_node["urdf_path"]) {
+        urdf_path = mapping_node["urdf_path"].as<std::string>();
+    } else {
+        // 根据 robot_type 自动查找 URDF 文件
+        try {
+            std::string robot_desc_path = ament_index_cpp::get_package_share_directory("robot_description");
+            urdf_path = robot_desc_path + "/urdf/" + robot_type_config_[mapping_name] + ".urdf";
+        } catch (const std::exception& e) {
+            RCLCPP_WARN(node_->get_logger(), "[%s] Could not find robot_description package: %s",
+                mapping_name.c_str(), e.what());
+        }
+    }
+    urdf_path_config_[mapping_name] = urdf_path;
+
+    // ===== 加载重力补偿模型 =====
+    if (!urdf_path.empty()) {
+        // 确保 gravity_compensator_ 已初始化
+        if (!gravity_compensator_) {
+            gravity_compensator_ = std::make_shared<arm_controller::dynamics::GravityCompensator>();
+        }
+        if (!gravity_compensator_->loadModel(mapping_name, urdf_path)) {
+            RCLCPP_WARN(node_->get_logger(), "[%s] Failed to load gravity model, gravity compensation disabled",
+                mapping_name.c_str());
+        }
+    }
+
     return true;
 }
 
@@ -894,6 +949,12 @@ std::string HardwareManager::execute_trajectory_async(
     const Trajectory& trajectory,
     bool show_progress) {
     try {
+        // 检查 hardware_driver_ 是否初始化
+        if (!hardware_driver_) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+            return "";
+        }
+
         if (mapping_to_interface_.find(mapping) == mapping_to_interface_.end()) {
             RCLCPP_ERROR(node_->get_logger(), "❎ Mapping '%s' not found", mapping.c_str());
             return "";
@@ -901,8 +962,33 @@ std::string HardwareManager::execute_trajectory_async(
 
         const std::string& interface = mapping_to_interface_.at(mapping);
 
+        // 预计算每个轨迹点的重力矩
+        Trajectory trajectory_with_efforts = trajectory;
+        for (size_t idx = 0; idx < trajectory_with_efforts.points.size(); ++idx) {
+            auto& point = trajectory_with_efforts.points[idx];
+            // 使用轨迹点的位置计算重力矩 (位置是度数，需要转换为弧度)
+            std::vector<double> positions_rad;
+            positions_rad.reserve(point.positions.size());
+            for (double pos_deg : point.positions) {
+                positions_rad.push_back(pos_deg * M_PI / 180.0);
+            }
+            point.efforts = compute_gravity_torques(mapping, positions_rad);
+
+            // 每隔一定点数输出一次重力矩信息（避免日志过多）
+            if (idx == 0 || idx == trajectory_with_efforts.points.size() - 1 || idx % 100 == 0) {
+                std::stringstream ss;
+                ss << "[" << mapping << "] Point " << idx << " gravity torques: [";
+                for (size_t j = 0; j < point.efforts.size(); ++j) {
+                    ss << std::fixed << std::setprecision(3) << point.efforts[j];
+                    if (j < point.efforts.size() - 1) ss << ", ";
+                }
+                ss << "] Nm";
+                RCLCPP_INFO(node_->get_logger(), "%s", ss.str().c_str());
+            }
+        }
+
         // 调用硬件驱动的异步执行方法
-        std::string execution_id = hardware_driver_->execute_trajectory_async(interface, trajectory, show_progress);
+        std::string execution_id = hardware_driver_->execute_trajectory_async(interface, trajectory_with_efforts, show_progress);
 
         if (!execution_id.empty()) {
             // 记录 mapping -> execution_id 的对应关系
@@ -1056,4 +1142,40 @@ bool HardwareManager::wait_for_trajectory_completion(const std::string& mapping,
         RCLCPP_ERROR(node_->get_logger(), "❎ Exception waiting for trajectory completion: %s", e.what());
         return false;
     }
+}
+
+// ============= 重力矩计算实现 =============
+
+std::vector<double> HardwareManager::compute_gravity_torques(const std::string& mapping) {
+    // 获取当前关节位置并计算重力矩
+    std::vector<double> joint_positions = get_current_joint_positions(mapping);
+    return compute_gravity_torques(mapping, joint_positions);
+}
+
+std::vector<double> HardwareManager::compute_gravity_torques(const std::string& mapping, const std::vector<double>& joint_positions) {
+    // 检查重力补偿计算器是否存在
+    if (!gravity_compensator_) {
+        RCLCPP_DEBUG(node_->get_logger(), "[DEBUG] gravity_compensator_ is null, returning zero torques");
+        return std::vector<double>(joint_positions.size(), 0.0);
+    }
+
+    if (!gravity_compensator_->hasModel(mapping)) {
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+            "[%s] Gravity model not loaded, returning zero torques", mapping.c_str());
+        return std::vector<double>(joint_positions.size(), 0.0);
+    }
+
+    // 调用 GravityCompensator 计算重力矩
+    RCLCPP_DEBUG(node_->get_logger(), "[DEBUG] Calling computeGravityTorques for mapping: %s, positions size: %zu",
+                 mapping.c_str(), joint_positions.size());
+    std::vector<double> gravity_torques = gravity_compensator_->computeGravityTorques(mapping, joint_positions);
+    RCLCPP_DEBUG(node_->get_logger(), "[DEBUG] computeGravityTorques returned %zu torques", gravity_torques.size());
+
+    if (gravity_torques.empty()) {
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+            "[%s] Failed to compute gravity torques", mapping.c_str());
+        return std::vector<double>(joint_positions.size(), 0.0);
+    }
+
+    return gravity_torques;
 }

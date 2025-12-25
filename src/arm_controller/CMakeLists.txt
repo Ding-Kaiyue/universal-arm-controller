@@ -60,6 +60,7 @@ find_package(OsqpEigen REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(csaps REQUIRED)
+find_package(pinocchio REQUIRED)
 
 
 include_directories(
@@ -80,6 +81,7 @@ add_library(arm_controller_lib
   src/hardware/hardware_manager.cpp
   src/hardware/motor_data_recorder.cpp
   src/hardware/motor_data_reloader.cpp
+  src/dynamics/gravity_compensator.cpp
   src/controller/controller_registry.cpp
   src/utils/trajectory_converter.cpp
   src/utils/velocity_qp_solver.cpp
@@ -145,11 +147,12 @@ ament_target_dependencies(arm_controller_lib
   csaps
 )
 
-# 链接硬件驱动库、osqp 和 csaps 到库
+# 链接硬件驱动库、osqp、csaps 和 pinocchio 到库
 target_link_libraries(arm_controller_lib
   hardware_driver::hardware_driver_canfd
   OsqpEigen::OsqpEigen
   csaps::csaps
+  pinocchio::pinocchio
 )
 
 # 为库本身添加覆盖率编译选项（在构建测试时）

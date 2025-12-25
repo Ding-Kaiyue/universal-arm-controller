@@ -2,13 +2,21 @@
 
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
+    # 声明参数
+    robot_model_arg = DeclareLaunchArgument(
+        'robot_model_name',
+        default_value='arm620',
+        description='Robot model name (e.g., arm620, arm380, dual_arm620)'
+    )
+
     # Get package directories
     trajectory_planning_bringup_pkg = get_package_share_directory('trajectory_planning_bringup')
 
@@ -30,12 +38,16 @@ def generate_launch_description():
             os.path.join(trajectory_planning_bringup_pkg, 'launch', 'trajectory_planning.launch.py')
         ]),
         launch_arguments={
+            'robot_model_name': LaunchConfiguration('robot_model_name'),
             'planning_node_type': 'none',  # 不启动额外的规划节点
             'use_hardware_controller': 'false'  # 使用我们的arm_controller管理硬件
         }.items()
     )
 
     return LaunchDescription([
+        # 参数声明
+        robot_model_arg,
+
         # 主控制器节点（合并后的controller_manager + trajectory_controller）
         arm_controller_node,
 
