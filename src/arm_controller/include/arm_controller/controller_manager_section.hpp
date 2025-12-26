@@ -44,6 +44,7 @@ private:
 
     // 配置加载
     void load_config();
+    void load_motion_planning_parameters();
     void init_commons();
 
     // 服务回调

@@ -4,6 +4,10 @@
 #include <chrono>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+// ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'TrajectoryRecord', mapping: 'single_arm'}"
+// ros2 topic pub --once /controller_api/trajectory_record_action/single_arm std_msgs/msg/String 'data: "little_nie"'
+// ros2 topic pub --once /controller_api/trajectory_record_control/single_arm std_msgs/msg/String 'data: "complete"'
+
 TrajectoryRecordController::TrajectoryRecordController(const rclcpp::Node::SharedPtr & node)
     : TeachControllerBase("TrajectoryRecord", node)
 {

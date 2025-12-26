@@ -7,18 +7,34 @@
 #include "controller/controller_registry.hpp"
 #include "controller_interface.hpp"
 #include <algorithm>
+#include <rcl_interfaces/msg/parameter_descriptor.hpp>
+#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <yaml-cpp/yaml.h>
 
 // #include "controller/move2start/move2start_controller.hpp"
 // #include "controller/move2initial/move2initial_controller.hpp"
 
 ControllerManagerNode::ControllerManagerNode()
-    : Node("controller_manager")
+    : Node("controller_manager_node")
     , current_mode_("HoldState")
     , in_hook_state_(false)
     , emergency_stop_active_(false)
     , safety_zone_violation_(false)
 {
     RCLCPP_INFO(this->get_logger(), "Initializing Controller Manager Node");
+
+    // 在构造函数中声明参数，确保参数立即可用
+    rcl_interfaces::msg::ParameterDescriptor descriptor;
+    descriptor.read_only = false;
+
+    this->declare_parameter("velocity_scaling_factor", 1.0, descriptor);
+    this->declare_parameter("acceleration_scaling_factor", 1.0, descriptor);
+    this->declare_parameter("movej.velocity_scaling_factor", 0.8, descriptor);
+    this->declare_parameter("movej.acceleration_scaling_factor", 0.8, descriptor);
+    this->declare_parameter("movel.velocity_scaling_factor", 0.5, descriptor);
+    this->declare_parameter("movel.acceleration_scaling_factor", 0.5, descriptor);
+    this->declare_parameter("movec.velocity_scaling_factor", 0.3, descriptor);
+    this->declare_parameter("movec.acceleration_scaling_factor", 0.3, descriptor);
 
     // 只加载配置，其他初始化延迟到post_init
     load_config();
@@ -31,6 +47,7 @@ void ControllerManagerNode::post_init() {
 
     // 现在可以安全使用shared_from_this()
     init_hardware();
+    load_motion_planning_parameters();
     init_commons();
     init_action_event_listener();
     init_controllers();
@@ -39,7 +56,7 @@ void ControllerManagerNode::post_init() {
     auto mappings = hardware_manager_->get_all_mappings();
     for (const auto& mapping : mappings) {
         start_working_controller("SystemStart", mapping);
-        RCLCPP_INFO(this->get_logger(), 
+        RCLCPP_INFO(this->get_logger(),
             "✅ Starting default controller for mapping: %s", mapping.c_str());
 
     }
@@ -609,5 +626,45 @@ void ControllerManagerNode::handle_trajectory_control(const controller_interface
     }
     else {
         RCLCPP_WARN(this->get_logger(), "⚠️  Unknown trajectory control action: %s", action.c_str());
+    }
+}
+
+void ControllerManagerNode::load_motion_planning_parameters() {
+    try {
+        std::string pkg_path = ament_index_cpp::get_package_share_directory("arm_controller");
+        std::string config_path = pkg_path + "/config/config.yaml";
+        YAML::Node config = YAML::LoadFile(config_path);
+
+        // 从配置文件读取并设置参数
+        if (config["velocity_scaling_factor"]) {
+            this->set_parameter(rclcpp::Parameter("velocity_scaling_factor",
+                config["velocity_scaling_factor"].as<double>()));
+        }
+        if (config["acceleration_scaling_factor"]) {
+            this->set_parameter(rclcpp::Parameter("acceleration_scaling_factor",
+                config["acceleration_scaling_factor"].as<double>()));
+        }
+
+        // 加载各控制器专用参数
+        for (const auto& controller : {"movej", "movel", "movec"}) {
+            if (config[controller]) {
+                if (config[controller]["velocity_scaling_factor"]) {
+                    std::string param_name = std::string(controller) + ".velocity_scaling_factor";
+                    this->set_parameter(rclcpp::Parameter(param_name,
+                        config[controller]["velocity_scaling_factor"].as<double>()));
+                }
+                if (config[controller]["acceleration_scaling_factor"]) {
+                    std::string param_name = std::string(controller) + ".acceleration_scaling_factor";
+                    this->set_parameter(rclcpp::Parameter(param_name,
+                        config[controller]["acceleration_scaling_factor"].as<double>()));
+                }
+            }
+        }
+
+        RCLCPP_INFO(this->get_logger(), "✅ Motion planning parameters loaded from config.yaml");
+
+    } catch (const std::exception& e) {
+        RCLCPP_WARN(this->get_logger(),
+                    "Failed to load motion planning parameters: %s", e.what());
     }
 }

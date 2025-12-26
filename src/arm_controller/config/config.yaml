@@ -89,3 +89,21 @@ controllers:
         type: std_msgs/msg/String
       - name: /controller_api/trajectory_replay_control/{mapping}
         type: std_msgs/msg/String
+
+# MoveIt 速度缩放参数
+# 全局默认值（0.0~1.0）
+velocity_scaling_factor: 1.0
+acceleration_scaling_factor: 1.0
+
+# 各控制器专用参数（0.0~1.0）
+movej:
+  velocity_scaling_factor: 0.8
+  acceleration_scaling_factor: 0.8
+
+movel:
+  velocity_scaling_factor: 0.5
+  acceleration_scaling_factor: 0.5
+
+movec:
+  velocity_scaling_factor: 0.3
+  acceleration_scaling_factor: 0.3

@@ -1,44 +1,22 @@
 #include "arm_controller/trajectory_controller_section.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <yaml-cpp/yaml.h>
+#include <rcl_interfaces/msg/parameter_descriptor.hpp>
 
 TrajectoryControllerNode::TrajectoryControllerNode()
-    : Node("trajectory_controller")
+    : Node("trajectory_controller_node")
 {
     RCLCPP_INFO(this->get_logger(), "Initializing Trajectory Controller Node");
-
-    // 只初始化参数，其他初始化延迟到post_init
-    // init_parameters();
-
-    RCLCPP_INFO(this->get_logger(), "Trajectory Controller Node basic initialization complete");
 }
 
 void TrajectoryControllerNode::post_init() {
     RCLCPP_INFO(this->get_logger(), "Starting post-initialization");
 
-    // 现在可以安全使用shared_from_this()
     init_hardware();
     init_trajectory_interpolator();
     init_event_publisher();
-    
     init_action_servers();
 }
-
-// void TrajectoryControllerNode::init_parameters() {
-//     // mapping通过服务调用时传递，不需要参数声明
-    
-//     // 加载配置文件以获取服务名称
-//     try {
-//         std::string pkg_path = ament_index_cpp::get_package_share_directory("arm_controller");
-//         std::string config_path = pkg_path + "/config/config.yaml";
-//         yaml_config_ = YAML::LoadFile(config_path);
-//         RCLCPP_INFO(this->get_logger(), "Configuration loaded from: %s", config_path.c_str());
-//     } catch (const std::exception& e) {
-//         RCLCPP_ERROR(this->get_logger(), "Failed to load configuration: %s", e.what());
-//     }
-
-//     RCLCPP_INFO(this->get_logger(), "TrajectoryControllerNode parameters initialized");
-// }
 
 void TrajectoryControllerNode::init_hardware() {
     // 获取已初始化的硬件管理器实例（由controller_manager负责初始化）
@@ -281,3 +259,4 @@ void TrajectoryControllerNode::execute_trajectory(const std::shared_ptr<GoalHand
 
     current_goal_handle_.reset();
 }
+

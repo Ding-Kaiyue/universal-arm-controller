@@ -22,10 +22,10 @@ def generate_launch_description():
 
     # 合并后的控制器节点 - 包含controller_manager和trajectory_controller
     # 所有配置都从hardware_config.yaml中的mapping配置读取，不再依赖ROS参数
+    # 注意：不指定name，让节点使用内部定义的名称（trajectory_controller_node, controller_manager_node）
     arm_controller_node = Node(
         package='arm_controller',
         executable='universial_arm_controller_node',  # 合并后的main函数
-        name='arm_controller',
         output='screen',
         parameters=[{
             'use_sim_time': False,

@@ -100,7 +100,7 @@ void MoveCController::initialize_planning_services() {
             try {
                 // 创建 MoveItAdapter
                 auto moveit_adapter = std::make_shared<trajectory_planning::infrastructure::integration::MoveItAdapter>(
-                    node_, planning_group);
+                    node_, planning_group, "movec");
 
                 if (!moveit_adapter) {
                     RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveC: Failed to create MoveItAdapter", mapping.c_str());

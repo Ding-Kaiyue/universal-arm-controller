@@ -91,7 +91,7 @@ public:
      */
     static TrajectoryDynamics calculateSafeInterpolationParams(
         const TrajectoryDynamics& dynamics,
-        double safety_margin = 0.8,
+        double safety_margin = 1.0,
         double hardware_velocity_limit = 5.0);
 
 private:

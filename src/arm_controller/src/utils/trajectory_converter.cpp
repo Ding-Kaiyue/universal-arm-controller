@@ -216,9 +216,9 @@ TrajectoryConverter::TrajectoryDynamics TrajectoryConverter::calculateSafeInterp
     TrajectoryDynamics safe_params;
 
     // 如果轨迹动力学参数为0或过小，使用合理的默认值
-    double base_velocity = std::max(dynamics.max_velocity, 1.0);  // 至少1.0 rad/s
-    double base_acceleration = std::max(dynamics.max_acceleration, 2.0);  // 至少2.0 rad/s²
-    double base_jerk = std::max(dynamics.max_jerk, 4.0);  // 至少4.0 rad/s³
+    double base_velocity = std::max(dynamics.max_velocity, 0.1);  // 至少 0.1 rad/s
+    double base_acceleration = std::max(dynamics.max_acceleration, 0.2);  // 至少 0.2 rad/s²
+    double base_jerk = std::max(dynamics.max_jerk, 0.4);  // 至少 0.4 rad/s³
 
     // 应用安全余量（保持原有逻辑，但提高基础值）
     safe_params.max_velocity = base_velocity * safety_margin;
