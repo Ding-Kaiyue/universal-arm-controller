@@ -4,7 +4,6 @@
 #include "arm_controller/utils/trajectory_converter.hpp"
 #include "arm_controller/hardware/motor_data_reloader.hpp"
 #include "trajectory_segmenter.hpp"
-#include "trajectory_smoother.hpp"
 #include <filesystem>
 #include <cmath>
 #include <ament_index_cpp/get_package_share_directory.hpp>
@@ -13,12 +12,11 @@ TrajectoryReplayController::TrajectoryReplayController(const rclcpp::Node::Share
     : TeachControllerBase("TrajectoryReplay", node) {
 
     hardware_manager_ = HardwareManager::getInstance();
-    
+
     motor_data_reloader_ = std::make_unique<MotorDataReloader>(node);
     trajectory_segmenter_ = std::make_unique<TrajectorySegmenter>(100000);  // 100k点每段
-    trajectory_smoother_ = std::make_unique<TrajectorySmoother>(node);
-    
-    // 初始化轨迹插值器
+
+    // 初始化轨迹插值器（仅用于规划到起点）
     trajectory_interpolator_ = std::make_unique<TrajectoryInterpolator>();
 
     // ✅ 加载插值器配置
@@ -48,8 +46,12 @@ void TrajectoryReplayController::start(const std::string& mapping) {
 
     active_mapping_ = mapping.empty() ? "single_arm" : mapping;
     is_active_ = true;
+
     replaying_ = false;
     paused_ = false;
+
+    // 启用示教模式 - 防止安全限位检查触发急停
+    enable_teaching_mode();
 
     if (subscriptions_.find(mapping) == subscriptions_.end()) {
         init_subscriptions(mapping);
@@ -80,6 +82,8 @@ bool TrajectoryReplayController::stop(const std::string& mapping) {
         replay_thread_->join();
     }
 
+    disable_teaching_mode();
+    
     cleanup_subscriptions(mapping);
     active_mapping_.clear();
 
@@ -187,16 +191,14 @@ void TrajectoryReplayController::replay_thread_func(const std::string& file_path
     auto joint_names = hardware_manager_->get_joint_names(active_mapping_);
     size_t total_points = all_positions.size();
 
-    RCLCPP_INFO(node_->get_logger(), "📊 Total trajectory: %zu points", total_points);
-
     // 使用 TrajectorySegmenter 计算分段信息
     auto segments = trajectory_segmenter_->compute_segments(total_points);
-    RCLCPP_INFO(node_->get_logger(), "📊 Will execute in %zu segments", segments.size());
+    RCLCPP_INFO(node_->get_logger(), "Will execute in %zu segments", segments.size());
 
     for (size_t seg = 0; seg < segments.size() && replaying_; ++seg) {
         const auto& segment = segments[seg];
 
-        RCLCPP_INFO(node_->get_logger(), "📊 Processing segment %zu/%zu (%zu-%zu, %zu points)",
+        RCLCPP_INFO(node_->get_logger(), "Processing segment %zu/%zu (%zu-%zu, %zu points)",
                     seg + 1, segments.size(), segment.start_idx, segment.end_idx - 1, segment.point_count);
 
         // 提取当前分段的数据
@@ -243,29 +245,27 @@ void TrajectoryReplayController::replay_thread_func(const std::string& file_path
             continue;
         }
 
-        // 使用 TrajectorySmoother 平滑当前分段
-        // use_csaps=true: 使用CSAPS平滑（提高轨迹质量）
-        // skip_large_datasets=true: 大数据集时自动跳过（优化性能）
-        auto smooth_traj = trajectory_smoother_->smooth(fixed_times, resampled_positions,
-                                                        resampled_velocities, resampled_efforts, joint_names,
-                                                        true, true);
-
-        // 用 TrajectoryInterpolator 进行插值
-        auto ros_traj = arm_controller::utils::TrajectoryConverter::convertInterpolatorToRos(smooth_traj);
-        auto dynamics = arm_controller::utils::TrajectoryConverter::analyzeTrajectoryDynamics(ros_traj);
-        auto safe_params = arm_controller::utils::TrajectoryConverter::calculateSafeInterpolationParams(dynamics);
-
-        trajectory_interpolator::Trajectory interpolated_traj = interpolate_trajectory(
-            smooth_traj,
-            safe_params.max_velocity,
-            safe_params.max_acceleration,
-            safe_params.max_jerk,
-            active_mapping_
-        );
+        // ✅ 直接使用已记录的轨迹数据（在TrajectoryRecord时已通过CSAPS平滑处理）
+        // 不需要额外的平滑和插值，直接转换为轨迹对象执行
 
         // 执行当前分段
         RCLCPP_INFO(node_->get_logger(), "▶️  Executing segment %zu/%zu", seg + 1, segments.size());
-        execute_trajectory(interpolated_traj, active_mapping_);
+
+        // 构建轨迹对象
+        trajectory_interpolator::Trajectory traj;
+        traj.joint_names = joint_names;
+        traj.points.reserve(resampled_positions.size());
+
+        for (size_t i = 0; i < resampled_positions.size(); i++) {
+            trajectory_interpolator::TrajectoryPoint point;
+            point.time_from_start = fixed_times[i];
+            point.positions = resampled_positions[i];
+            point.velocities = resampled_velocities[i];
+            point.accelerations.resize(resampled_positions[i].size(), 0.0);
+            traj.points.push_back(point);
+        }
+
+        execute_trajectory(traj, active_mapping_);
         hardware_manager_->wait_for_trajectory_completion(active_mapping_);
 
         if (!replaying_) {

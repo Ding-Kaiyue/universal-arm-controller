@@ -28,8 +28,8 @@ private:
     // 硬件接口
     std::shared_ptr<HardwareManager> hardware_manager_;
 
-    // 录制输出目录
-    std::string record_output_dir_;
+    // 录制目录
+    std::string record_dir_;
 
     // 当前记录的文件路径（用于 cancel 时删除）
     std::string current_point_file_path_;

@@ -18,16 +18,16 @@ PointRecordController::PointRecordController(const rclcpp::Node::SharedPtr & nod
         std::filesystem::path workspace_root =
             std::filesystem::path(pkg_dir).parent_path().parent_path().parent_path();
 
-        record_output_dir_ = (workspace_root / "points").string();
+        record_dir_ = (workspace_root / "points").string();
 
-        std::filesystem::create_directories(record_output_dir_);
+        std::filesystem::create_directories(record_dir_);
     } catch (const std::exception& e) {
-        record_output_dir_ = "/tmp/arm_recording_points";
-        std::filesystem::create_directories(record_output_dir_);
-        fprintf(stderr, "⚠️  Fallback to: %s\n", record_output_dir_.c_str());
+        record_dir_ = "/tmp/arm_recording_points";
+        std::filesystem::create_directories(record_dir_);
+        fprintf(stderr, "⚠️  Fallback to: %s\n", record_dir_.c_str());
     }
 
-    RCLCPP_INFO(node_->get_logger(), "PointRecordController initialized. Output dir: %s", record_output_dir_.c_str());
+    RCLCPP_INFO(node_->get_logger(), "PointRecordController initialized. Output dir: %s", record_dir_.c_str());
 }
 
 
@@ -83,7 +83,7 @@ void PointRecordController::teach_callback(const std_msgs::msg::String::SharedPt
     if (!is_active_ || msg->data.empty()) return;
 
     /* -------- record current point -------- */
-    current_point_file_path_ = record_output_dir_ + "/" + msg->data + ".csv";
+    current_point_file_path_ = record_dir_ + "/" + msg->data + ".csv";
 
     // 获取该mapping的所有电机ID
     const auto& motor_ids = hardware_manager_->get_motors_id(active_mapping_);

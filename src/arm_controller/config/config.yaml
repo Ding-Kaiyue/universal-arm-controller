@@ -68,11 +68,13 @@ controllers:
         type: std_msgs/msg/String
       - name: /controller_api/point_record_control/{mapping}
         type: std_msgs/msg/String
-  # - key: PointReplay
-  #   class: PointReplayController
-  #   input_topic:
-  #     name: /controller_api/point_replay_action
-  #     type: std_msgs/msg/String
+  - key: PointReplay
+    class: PointReplayController
+    input_topic:
+      - name: /controller_api/point_replay_action
+        type: std_msgs/msg/String
+      - name: /controller_api/point_replay_control/{mapping}
+        type: std_msgs/msg/String
 
   - key: TrajectoryRecord
     class: TrajectoryRecordController

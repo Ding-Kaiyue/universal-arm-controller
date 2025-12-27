@@ -122,9 +122,6 @@ bool MotorDataReloader::parse_csv_line(const std::string& line, int line_count,
 
         return true;
 
-    } catch (const std::invalid_argument& e) {
-        RCLCPP_WARN(node_->get_logger(), "❎ Line %d: Invalid argument: %s", line_count, e.what());
-        return false;
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "❎ Line %d: Exception: %s", line_count, e.what());
         return false;

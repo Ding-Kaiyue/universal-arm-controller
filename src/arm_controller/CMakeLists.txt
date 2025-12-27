@@ -60,6 +60,10 @@ find_package(OsqpEigen REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(csaps REQUIRED)
+
+# ✅ 抑制 Boost.Python 找不到 Python 3.10 的警告（这是一个已知问题，不影响编译）
+set(Boost_NO_WARN_NEW_VERSIONS ON)
+
 find_package(pinocchio REQUIRED)
 
 
@@ -108,19 +112,15 @@ add_library(arm_controller_lib
   src/controller/movel/movel_interface.cpp
   src/controller/point_record/point_record_controller.cpp
   src/controller/point_record/point_record_interface.cpp
-  # src/controller/point_replay/point_replay_controller.cpp
-  # src/controller/point_replay/point_replay_interface.cpp
+  src/controller/point_replay/point_replay_controller.cpp
+  src/controller/point_replay/point_replay_interface.cpp
   src/controller/trajectory_record/trajectory_record_controller.cpp
   src/controller/trajectory_record/trajectory_record_interface.cpp
+  src/controller/trajectory_record/trajectory_smoother.cpp
   src/controller/trajectory_replay/trajectory_replay_controller.cpp
   src/controller/trajectory_replay/trajectory_replay_interface.cpp
   src/controller/trajectory_replay/trajectory_segmenter.cpp
-  src/controller/trajectory_replay/trajectory_smoother.cpp
 )
-
-# target_link_libraries(robot_controller_lib
-#   yaml-cpp
-# )
 
 ament_target_dependencies(arm_controller_lib
   rclcpp
@@ -145,6 +145,7 @@ ament_target_dependencies(arm_controller_lib
   tf2_ros
   tf2_geometry_msgs
   csaps
+  pinocchio
 )
 
 # 链接硬件驱动库、osqp、csaps 和 pinocchio 到库

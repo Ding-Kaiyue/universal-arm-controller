@@ -706,6 +706,11 @@ void HardwareManager::get_joint_limits(const std::string& joint_name, JointLimit
 
 void HardwareManager::check_safety_limits(const std::string& interface, uint32_t motor_id,
                                          const hardware_driver::motor_driver::Motor_Status& status) {
+    // ⚠️ 示教模式下跳过安全限位检查
+    if (teaching_mode_enabled_) {
+        return;
+    }
+
     // 通过interface查找对应的mapping
     auto mapping_it = interface_to_mapping_.find(interface);
     if (mapping_it == interface_to_mapping_.end()) {

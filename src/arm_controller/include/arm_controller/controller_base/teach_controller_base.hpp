@@ -8,6 +8,7 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <any>
+#include "arm_controller/hardware/hardware_manager.hpp"
 
 class TeachControllerBase : public ModeControllerBase {
 public:
@@ -70,10 +71,29 @@ public:
     virtual void resume(const std::string& mapping = "") = 0;
     virtual void cancel(const std::string& mapping = "") = 0;
     virtual void complete(const std::string& mapping = "") = 0;
-    
+
     // 记录复现功能默认需要钩子状态来安全停止
     bool needs_hook_state() const override { return true; }
+
 protected:
+    // 设置示教模式标志 - 防止安全限位检查触发急停
+    void enable_teaching_mode() {
+        auto hw_manager = HardwareManager::getInstance();
+        if (hw_manager) {
+            hw_manager->set_teaching_mode(true);
+            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Teaching mode enabled - safety checks disabled",
+                       get_mode().c_str());
+        }
+    }
+
+    void disable_teaching_mode() {
+        auto hw_manager = HardwareManager::getInstance();
+        if (hw_manager) {
+            hw_manager->set_teaching_mode(false);
+            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Teaching mode disabled - safety checks re-enabled",
+                       get_mode().c_str());
+        }
+    }
     rclcpp::Node::SharedPtr node_;
     std::map<std::string, rclcpp::Subscription<std_msgs::msg::String>::SharedPtr> subscriptions_;
 

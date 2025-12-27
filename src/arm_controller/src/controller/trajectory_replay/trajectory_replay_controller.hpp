@@ -6,7 +6,6 @@
 #include "arm_controller/hardware/hardware_manager.hpp"
 #include "arm_controller/hardware/motor_data_reloader.hpp"
 #include "trajectory_segmenter.hpp"
-#include "trajectory_smoother.hpp"
 #include "trajectory_interpolator/trajectory_interpolator.hpp"
 #include "trajectory_planning_v3/application/services/motion_planning_service.hpp"
 #include "trajectory_planning_v3/infrastructure/integration/moveit_adapter.hpp"
@@ -73,9 +72,8 @@ private:
     // 模块成员变量
     std::unique_ptr<MotorDataReloader> motor_data_reloader_;
     std::unique_ptr<TrajectorySegmenter> trajectory_segmenter_;
-    std::unique_ptr<TrajectorySmoother> trajectory_smoother_;
 
-    const double TIME_STEP = 0.05; // 执行的时间间隔
+    const double TIME_STEP = 0.002; // 执行的时间间隔
 };
 
 #endif

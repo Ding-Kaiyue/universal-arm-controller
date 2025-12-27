@@ -5,6 +5,7 @@
 #include "std_msgs/msg/string.hpp"
 #include "arm_controller/hardware/hardware_manager.hpp"
 #include "arm_controller/hardware/motor_data_recorder.hpp"
+#include "trajectory_smoother.hpp"
 #include <memory>
 
 class TrajectoryRecordController final: public TeachControllerBase {
@@ -25,6 +26,14 @@ private:
     void teach_callback(const std_msgs::msg::String::SharedPtr msg) override;
     void on_teaching_control(const std_msgs::msg::String::SharedPtr msg) override;
 
+    // 持续重力补偿线程
+    void gravity_compensation_thread_func();
+    void start_gravity_compensation_thread();
+    void stop_gravity_compensation_thread();
+
+    // ✅ 轨迹平滑处理（在录制完成后进行）
+    void smooth_recorded_trajectory(const std::string& file_path);
+
     // ✅ 电机数据记录器实例（观察者模式）
     std::shared_ptr<MotorDataRecorder> motor_recorder_;
 
@@ -42,6 +51,14 @@ private:
 
     std::atomic<bool> recording_ = false;   // 是否正在录制
     std::atomic<bool> paused_ = false;      // 录制是否暂停
+
+    // 重力补偿线程相关
+    std::unique_ptr<std::thread> gravity_compensation_thread_;
+    std::atomic<bool> gravity_compensation_running_{false};
+    const double GRAVITY_COMPENSATION_INTERVAL_MS = 10.0;  // 10ms 更新一次
+
+    // ✅ 轨迹平滑处理器
+    std::unique_ptr<TrajectorySmoother> trajectory_smoother_;
 };
 
 #endif      // __TRAJECTORY_RECORD_CONTROLLER_HPP__

@@ -111,6 +111,9 @@ public:
     // ============= 录制观察者接口 =============
     bool register_motor_recorder(std::shared_ptr<hardware_driver::motor_driver::MotorStatusObserver> recorder);
     bool unregister_motor_recorder();
+    
+    // ============= 示教模式安全检查控制 =============
+    void set_teaching_mode(bool enabled) { teaching_mode_enabled_ = enabled; }
 
     // ============= MotorStatusObserver接口实现 =============
     void on_motor_status_update(const std::string& interface,
@@ -191,6 +194,13 @@ private:
     void check_safety_limits(const std::string& interface, uint32_t motor_id,
                            const hardware_driver::motor_driver::Motor_Status& status);
     void emergency_stop_joint(const std::string& interface, uint32_t motor_id);
+
+    // ============= 示教模式安全检查控制 =============
+    bool is_teaching_mode() const { return teaching_mode_enabled_; }
+
+private:
+    // 示教模式标志 - 示教模式下不进行安全限位检查
+    std::atomic<bool> teaching_mode_enabled_{false};
 
 };
 
