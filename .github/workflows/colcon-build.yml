@@ -2,7 +2,7 @@ name: colcon build
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, develop ]
   pull_request:
 
 jobs:
@@ -32,6 +32,28 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-vcstool python3-colcon-common-extensions python3-pip
+
+      - name: Build and install CSAPS
+        run: |
+          mkdir -p /tmp/csaps-build
+          cd /tmp/csaps-build
+          git clone https://github.com/espci-geos/csaps.git
+          cd csaps
+          mkdir build && cd build
+          cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
+          make -j$(nproc)
+          sudo make install
+
+      - name: Build and install Pinocchio
+        run: |
+          mkdir -p /tmp/pinocchio-build
+          cd /tmp/pinocchio-build
+          git clone --recurse-submodules https://github.com/stack-of-tasks/pinocchio.git
+          cd pinocchio
+          mkdir build && cd build
+          cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc)
+          sudo make install
 
       - name: Cache colcon build artifacts
         uses: actions/cache@v4
