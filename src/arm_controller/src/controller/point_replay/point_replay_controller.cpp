@@ -8,6 +8,10 @@
 #include <thread>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+// ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'PointReplay', mapping: 'single_arm'}"
+// ros2 topic pub --once /controller_api/point_replay_action/single_arm std_msgs/msg/String 'data: "point_001"'
+// ros2 topic pub --once /controller_api/point_replay_control/single_arm std_msgs/msg/String 'data: "complete"'
+
 PointReplayController::PointReplayController(const rclcpp::Node::SharedPtr& node)
     : TeachControllerBase("PointReplay", node)
 {
@@ -22,6 +26,9 @@ PointReplayController::PointReplayController(const rclcpp::Node::SharedPtr& node
 
     // 初始化轨迹规划服务
     initialize_planning_services();
+
+    // 初始化电机数据重放加载器
+    motor_data_reloader_ = std::make_unique<MotorDataReloader>(node);
 
     /* ---------- replay directory ---------- */
     try {
@@ -53,14 +60,14 @@ void PointReplayController::start(const std::string& mapping) {
     is_active_ = true;
 
     // 启用示教模式 - 防止安全限位检查触发急停
-    enable_teaching_mode();
+    // enable_teaching_mode();
 
     RCLCPP_INFO(node_->get_logger(), "[%s] PointReplayController activated",
                 active_mapping_.c_str());
 
     // 在激活时创建话题订阅（如果还没创建的话）
-    if (subscriptions_.find(mapping) == subscriptions_.end()) {
-        init_subscriptions(mapping);
+    if (subscriptions_.find(active_mapping_) == subscriptions_.end()) {
+        init_subscriptions(active_mapping_);
     }
 
     auto hardware_driver = hardware_manager_->get_hardware_driver();
@@ -79,7 +86,7 @@ bool PointReplayController::stop(const std::string& mapping) {
         current_execution_id_.clear();
     }
 
-    disable_teaching_mode();
+    // disable_teaching_mode();
 
     cleanup_subscriptions(mapping);
     active_mapping_.clear();
@@ -162,62 +169,24 @@ void PointReplayController::teach_callback(const std_msgs::msg::String::SharedPt
 }
 
 void PointReplayController::replay_point(const std::string& file_path) {
-    // 打开CSV文件并读取第一个数据行（只回放一个点）
-    std::ifstream file(file_path);
-    if (!file.is_open()) {
-        RCLCPP_ERROR(node_->get_logger(), "❎ Failed to open file: %s", file_path.c_str());
+    // 使用 MotorDataReloader 加载 CSV 文件
+    std::vector<double> times;
+    std::vector<std::vector<double>> positions;
+    std::vector<std::vector<double>> velocities;
+    std::vector<std::vector<double>> efforts;
+
+    if (!motor_data_reloader_->load_trajectory_from_csv(file_path, times, positions, velocities, efforts)) {
+        RCLCPP_ERROR(node_->get_logger(), "❎ Failed to load point from file: %s", file_path.c_str());
         return;
     }
 
-    std::string line;
-    std::vector<double> point_position;
-
-    // 跳过CSV头部（如果有）
-    if (std::getline(file, line)) {
-        // 检查第一行是否是头部
-        if (line.find("time") != std::string::npos || line.find("joint") != std::string::npos) {
-            // 这是头部，继续读取数据行
-            if (!std::getline(file, line)) {
-                RCLCPP_ERROR(node_->get_logger(), "❎ No data in file");
-                file.close();
-                return;
-            }
-        }
-        // 否则第一行就是数据
-
-        // 解析CSV行 - 格式: time,joint1,joint2,...,jointN
-        std::istringstream iss(line);
-        std::string value;
-        std::vector<std::string> values;
-
-        while (std::getline(iss, value, ',')) {
-            values.push_back(value);
-        }
-
-        if (values.empty()) {
-            RCLCPP_ERROR(node_->get_logger(), "❎ Invalid CSV format");
-            file.close();
-            return;
-        }
-
-        // 第一列是时间，跳过；后面是关节位置
-        for (size_t i = 1; i < values.size(); ++i) {
-            try {
-                point_position.push_back(std::stod(values[i]));
-            } catch (const std::exception& e) {
-                RCLCPP_ERROR(node_->get_logger(), "❎ Failed to parse joint position: %s", e.what());
-                file.close();
-                return;
-            }
-        }
-    }
-
-    file.close();
-
-    if (point_position.empty()) {
-        RCLCPP_ERROR(node_->get_logger(), "❎ No joint positions found in file");
+    if (positions.empty()) {
+        RCLCPP_ERROR(node_->get_logger(), "❎ No data loaded from file");
         return;
     }
+
+    // 取第一个点
+    const auto& point_position = positions[0];
 
     RCLCPP_INFO(node_->get_logger(), "✅ Loaded point with %zu joints", point_position.size());
 

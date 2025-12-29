@@ -51,7 +51,7 @@ void TrajectoryReplayController::start(const std::string& mapping) {
     paused_ = false;
 
     // 启用示教模式 - 防止安全限位检查触发急停
-    enable_teaching_mode();
+    // enable_teaching_mode();
 
     if (subscriptions_.find(mapping) == subscriptions_.end()) {
         init_subscriptions(mapping);
@@ -82,7 +82,7 @@ bool TrajectoryReplayController::stop(const std::string& mapping) {
         replay_thread_->join();
     }
 
-    disable_teaching_mode();
+    // disable_teaching_mode();
     
     cleanup_subscriptions(mapping);
     active_mapping_.clear();

@@ -6,6 +6,10 @@
 #include <thread>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+// ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'PointRecord', mapping: 'single_arm'}"
+// ros2 topic pub --once /controller_api/point_record_action/single_arm std_msgs/msg/String 'data: "point_001"'
+// ros2 topic pub --once /controller_api/point_record_control/single_arm std_msgs/msg/String 'data: "complete"'
+
 PointRecordController::PointRecordController(const rclcpp::Node::SharedPtr & node)
     : TeachControllerBase("PointRecord", node)
 {
@@ -44,6 +48,8 @@ void PointRecordController::start(const std::string& mapping) {
     active_mapping_ = mapping.empty() ? "single_arm" : mapping;
     is_active_ = true;
 
+    // 启用示教模式 - 防止安全限位检查触发急停
+    enable_teaching_mode();
     RCLCPP_INFO(node_->get_logger(), "[%s] PointRecordController activated",
                 active_mapping_.c_str());
 
@@ -66,6 +72,8 @@ bool PointRecordController::stop(const std::string& mapping) {
         motor_recorder_.reset();
     }
 
+    disable_teaching_mode();
+    
     // 清理该 mapping 的话题订阅
     cleanup_subscriptions(mapping);
 

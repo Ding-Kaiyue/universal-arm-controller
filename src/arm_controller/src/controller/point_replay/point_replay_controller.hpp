@@ -69,6 +69,9 @@ private:
 
     // 轨迹插值器
     std::unique_ptr<TrajectoryInterpolator> trajectory_interpolator_;
+
+    // 电机数据重放加载器
+    std::unique_ptr<MotorDataReloader> motor_data_reloader_;
 };
 
 #endif      // __POINT_REPLAY_CONTROLLER_HPP__
