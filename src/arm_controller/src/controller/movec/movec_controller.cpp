@@ -46,17 +46,6 @@ void MoveCController::start(const std::string& mapping) {
     if (subscriptions_.find(mapping) == subscriptions_.end()) {
         init_subscriptions(mapping);
     }
-
-    // 同步 MoveIt 状态到当前机械臂位置，防止规划从错误的起始位置开始
-    if (moveit_adapters_.find(mapping) != moveit_adapters_.end() && moveit_adapters_[mapping]) {
-        auto current_positions = hardware_manager_->get_current_joint_positions(mapping);
-        if (!current_positions.empty()) {
-            moveit_adapters_[mapping]->setStartState(current_positions);
-            RCLCPP_DEBUG(node_->get_logger(), "[%s] MoveC: Synced MoveIt state to current position", mapping.c_str());
-        } else {
-            RCLCPP_WARN(node_->get_logger(), "[%s] MoveC: Failed to get current positions for state sync", mapping.c_str());
-        }
-    }
 }
 
 bool MoveCController::stop(const std::string& mapping) {
@@ -141,6 +130,17 @@ void MoveCController::plan_and_execute(const std::string& mapping, const geometr
         !motion_planning_services_[mapping]) {
         RCLCPP_INFO(node_->get_logger(), "[%s] ❎ MoveC: Planning service not found. This strategy must be registered first.", mapping.c_str());
         return;
+    }
+
+    // 在规划前同步 MoveIt 状态到当前机械臂位置，确保从正确的起始位置规划
+    if (moveit_adapters_.find(mapping) != moveit_adapters_.end() && moveit_adapters_[mapping]) {
+        auto current_positions = hardware_manager_->get_current_joint_positions(mapping);
+        if (!current_positions.empty()) {
+            moveit_adapters_[mapping]->setStartState(current_positions);
+            RCLCPP_DEBUG(node_->get_logger(), "[%s] MoveC: Synced MoveIt state to current position before planning", mapping.c_str());
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "[%s] MoveC: Failed to get current positions for pre-planning sync", mapping.c_str());
+        }
     }
 
     // 将 PoseArray 转换为 MoveCRequest

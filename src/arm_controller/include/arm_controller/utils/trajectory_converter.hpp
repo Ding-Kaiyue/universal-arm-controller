@@ -92,7 +92,7 @@ public:
     static TrajectoryDynamics calculateSafeInterpolationParams(
         const TrajectoryDynamics& dynamics,
         double safety_margin = 1.0,
-        double hardware_velocity_limit = 5.0);
+        double hardware_velocity_limit = 3.14);
 
 private:
     TrajectoryConverter() = delete; // 静态工具类，禁止实例化

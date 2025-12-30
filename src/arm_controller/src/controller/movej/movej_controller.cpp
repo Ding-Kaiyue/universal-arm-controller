@@ -124,7 +124,7 @@ void MoveJController::initialize_planning_services() {
 
 void MoveJController::plan_and_execute(const std::string& mapping, const sensor_msgs::msg::JointState::SharedPtr msg) {
     // 查找mapping
-    if (motion_planning_services_.find(mapping) == motion_planning_services_.end() || 
+    if (motion_planning_services_.find(mapping) == motion_planning_services_.end() ||
         !motion_planning_services_[mapping]) {
         RCLCPP_INFO(node_->get_logger(), "[%s] ❎ MoveJ: Planning service not found. This strategy must be registered first.", mapping.c_str());
         return;
@@ -134,8 +134,19 @@ void MoveJController::plan_and_execute(const std::string& mapping, const sensor_
     if (msg->position.size() != hardware_manager_->get_joint_count(mapping)) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Invalid joint state size", mapping.c_str());
         return;
-    } 
-    
+    }
+
+    // 在规划前同步 MoveIt 状态到当前机械臂位置，确保从正确的起始位置规划
+    if (moveit_adapters_.find(mapping) != moveit_adapters_.end() && moveit_adapters_[mapping]) {
+        auto current_positions = hardware_manager_->get_current_joint_positions(mapping);
+        if (!current_positions.empty()) {
+            moveit_adapters_[mapping]->setStartState(current_positions);
+            RCLCPP_DEBUG(node_->get_logger(), "[%s] MoveJ: Synced MoveIt state to current position before planning", mapping.c_str());
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "[%s] MoveJ: Failed to get current positions for pre-planning sync", mapping.c_str());
+        }
+    }
+
     // 进行轨迹规划
     auto planning_result = motion_planning_services_[mapping]->planJointMotion(*msg);
     if (!planning_result.success) {
