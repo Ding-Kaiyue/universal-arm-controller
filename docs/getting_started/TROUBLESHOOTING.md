@@ -19,6 +19,7 @@ Universal Arm Controller 常见问题与解决方案。
 **症状**: `CMake Error: Could not find Boost`
 
 **解决方案**:
+
 ```bash
 # 重新运行依赖安装
 cd ~/robotic_arm_ws
@@ -34,6 +35,7 @@ source /opt/ros/humble/setup.bash
 **症状**: `fatal error: arm_controller/...h: No such file or directory`
 
 **解决方案**:
+
 ```bash
 # 清理并重新编译
 cd ~/robotic_arm_ws
@@ -46,6 +48,7 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 **症状**: `vcs import failed` 或 `git clone error`
 
 **解决方案**:
+
 ```bash
 # 检查网络连接
 ping github.com
@@ -71,6 +74,7 @@ git clone https://github.com/Ding-Kaiyue/trajectory-planning.git
 **解决方案**:
 
 首先检查 CAN 硬件：
+
 ```bash
 # 列出所有网络接口
 ifconfig -a
@@ -80,6 +84,7 @@ ip link show
 ```
 
 如果看到 `can0`，尝试配置：
+
 ```bash
 # 配置 CAN 接口（CAN-FD）
 sudo ip link set can0 txqueuelen 1000
@@ -91,6 +96,7 @@ ip link show can0
 ```
 
 如果 CAN 接口不存在，检查驱动程序：
+
 ```bash
 # 加载 CAN 驱动
 sudo modprobe can
@@ -107,11 +113,13 @@ lsmod | grep can
 **解决方案**:
 
 选项 1 - 使用 sudo：
+
 ```bash
 sudo ip link set can0 up type can bitrate 1000000 ...
 ```
 
 选项 2 - 添加到组：
+
 ```bash
 # 将用户添加到 dialout 组
 sudo usermod -a -G dialout $USER
@@ -128,6 +136,7 @@ ip link set can0 up type can bitrate 1000000 ...
 **症状**: CAN 接口启动成功，但数据无法收发
 
 **解决方案**:
+
 ```bash
 # 测试 CAN 通信
 cansend can0 123#0011223344556677
@@ -151,6 +160,7 @@ sudo ip link set can0 promisc on
 **症状**: `Launch file not found: robotic_arm_real.launch.py`
 
 **解决方案**:
+
 ```bash
 # 验证环境
 source ~/robotic_arm_ws/install/setup.bash
@@ -167,6 +177,7 @@ ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 **症状**: 节点启动后立即退出，无错误信息
 
 **解决方案**:
+
 ```bash
 # 启用详细日志
 export ROS_LOG_DIR=~/.ros/log
@@ -185,6 +196,7 @@ cat ~/.ros/log/*/robot_state_publisher*/*.log
 **症状**: 发送控制命令但机械臂无动作
 
 **检查清单**:
+
 ```bash
 # 1. 检查电机是否上电
 # 物理检查：LED 是否亮
@@ -209,6 +221,7 @@ ros2 topic echo /diagnostics
 **症状**: 无法切换到期望的控制模式
 
 **解决方案**:
+
 ```bash
 # 查看当前模式
 ros2 topic echo /controller_api/running_status
@@ -230,6 +243,7 @@ ros2 service call /controller_api/controller_mode \
 **症状**: `Planning failed` 或 `No solution found`
 
 **原因及解决**:
+
 ```bash
 # 1. 检查目标是否在工作空间内
 # 参考 CONFIGURATION.md 了解关节限制
@@ -258,6 +272,7 @@ ros2 param set /move_group planning_time 5.0
 **症状**: 响应不及时，运动不平滑
 
 **优化方案**:
+
 ```bash
 # 1. 检查 CPU 使用率
 top -p $(pgrep -f arm_controller)
@@ -281,6 +296,7 @@ export ROS_LOG_LEVEL=warn
 **症状**: 程序运行一段时间后内存占用增加
 
 **检查方案**:
+
 ```bash
 # 监控内存使用
 watch -n 1 'ps aux | grep arm_controller'
@@ -334,6 +350,7 @@ rqt
 如果问题未在上述列表中解决：
 
 1. **查看日志文件**
+
    ```bash
    cat ~/.ros/log/*/*/stdout_stderr.log
    ```
@@ -344,7 +361,7 @@ rqt
    - 提供复现问题的步骤
 
 3. **联系维护者**
-   - Email: kaiyue.ding@raysense.com
+   - Email: <kaiyue.ding@raysense.com>
    - 提供详细的问题描述和调试日志
 
 ---

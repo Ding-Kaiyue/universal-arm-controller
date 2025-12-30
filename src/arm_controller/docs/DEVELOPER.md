@@ -138,6 +138,7 @@ git checkout -b feature/new-controller
 #### 添加新控制器示例
 
 根据控制器类型,选择合适的基类:
+
 - **轨迹控制器**: 继承 `TrajectoryControllerImpl<MessageType>` (需要钩子状态)
 - **工具控制器**: 继承 `UtilityControllerBase` (不需要钩子状态)
 
@@ -350,7 +351,7 @@ git push origin feature/new-controller
 
 ### 5. CI
 
-提交后稍等 5 分钟，CI 系统会自动运行测试，请保证测试通过。
+提交后稍等 5 分钟，CI 系统会自动运行测试，请保证测试通过
 ---
 
 ## 测试
@@ -362,6 +363,7 @@ git push origin feature/new-controller
 目前项目尚未集成 gtest 单元测试框架。所有功能已通过手动测试验证。
 
 计划添加以下测试用例：
+
 - ControllerManager 的控制器注册和切换
 - 各个控制器的 start/stop 方法
 - HoldState 的状态转移逻辑
@@ -398,6 +400,7 @@ ros2 service call /controller_api/controller_mode \
 ```
 
 **验证项目**:
+
 - ✅ 系统启动成功，两个节点并行运行
 - ✅ 控制器切换通过 ROS2 服务正常工作
 - ✅ 轨迹规划和执行通过话题订阅正常工作
@@ -432,6 +435,7 @@ ament_cppcheck src/
 ### 提交前检查清单
 
 **必须满足的要求** ✅:
+
 - [ ] 代码通过编译，无编译错误和警告
 - [ ] 通过集成测试验证
 - [ ] 代码具有清晰的逻辑和注释
@@ -439,6 +443,7 @@ ament_cppcheck src/
 - [ ] 提交信息清晰描述改动内容
 
 **可选建议** (鼓励，但非强制):
+
 - [ ] 代码通过 ament_cpplint 检查
 - [ ] 代码通过 ament_cppcheck 静态分析
 - [ ] 遵循[代码规范](CODE_STYLE.md)
@@ -476,6 +481,7 @@ watch -n 1 "ps aux | grep controller_manager"
 ### 版本号管理
 
 遵循[语义化版本](https://semver.org/):
+
 - MAJOR.MINOR.PATCH (如 1.2.3)
 - MAJOR: 不兼容的 API 修改
 - MINOR: 向后兼容的功能性新增
@@ -508,4 +514,4 @@ git push origin v1.0.0
 ## 获取帮助
 
 - **Issues**: [GitHub Issues](https://github.com/Ding-Kaiyue/universal-arm-controller/issues)
-- **Email**: kaiyue.ding@raysense.com
+- **Email**: <kaiyue.ding@raysense.com>

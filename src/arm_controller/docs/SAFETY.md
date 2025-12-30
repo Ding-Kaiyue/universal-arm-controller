@@ -61,6 +61,7 @@
 **适用场景**: 从位置控制模式切换时
 
 **工作方式**:
+
 ```cpp
 // 进入 HoldState 时
 void HoldState::onEnter(const std::string& mapping) {
@@ -76,6 +77,7 @@ void HoldState::onEnter(const std::string& mapping) {
 ```
 
 **特点**:
+
 - ✅ 机器人保持当前位置
 - ✅ 防止重力导致下垂
 - ✅ 适用于 MoveJ, MoveL, MoveC 等
@@ -85,6 +87,7 @@ void HoldState::onEnter(const std::string& mapping) {
 **适用场景**: 从速度控制模式切换时
 
 **工作方式**:
+
 ```cpp
 // 进入 HoldState 时
 void HoldState::onEnter(const std::string& mapping) {
@@ -105,6 +108,7 @@ void HoldState::onEnter(const std::string& mapping) {
 ```
 
 **特点**:
+
 - ✅ 平滑减速到停止
 - ✅ 无突变冲击
 - ✅ 适用于 JointVelocity 等
@@ -218,6 +222,7 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
 ```
 
 **关键特点**:
+
 - **无硬性超时**: 不会因为等待时间过长而强制失败
 - **自适应暂停**: 当系统不健康时暂停检查，恢复后自动继续
 - **持续保持**: 不断发送保持命令防止机械臂移动
@@ -230,10 +235,12 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
 ### 限位配置
 
 限位配置分别存储在各机器人型号的 YAML 文件中，见：
+
 - [config/arm620_joint_limits.yaml](../config/arm620_joint_limits.yaml)
 - [config/arm380_joint_limits.yaml](../config/arm380_joint_limits.yaml)
 
 配置格式（YAML）:
+
 ```yaml
 joint_limits:
   joint1:
@@ -249,6 +256,7 @@ joint_limits:
 ```
 
 加载流程：见 [hardware_manager.cpp:load_joint_limits_config()](../src/hardware/hardware_manager.cpp)
+
 1. 根据机械臂类型（robot_type）加载对应的限位配置文件
 2. 解析 YAML 中的 `joint_limits` 节点
 3. 将限位信息存储在 `joint_limits_config_` 映射中
@@ -258,12 +266,14 @@ joint_limits:
 实现：见 [hardware_manager.cpp:are_joints_within_limits()](../src/hardware/hardware_manager.cpp)
 
 检查内容：
+
 - **位置限位**: 检查关节位置是否在 `[min_position, max_position]` 范围内
 - **速度限位**: 检查关节速度是否不超过 `max_velocity` 限制
 
 如果发现违规，记录警告并返回 false，使系统进入安全状态。
 
 **检查集成点**:
+
 - **HoldState**: 在 [can_transition_to_target()](../src/controller/hold_state/hold_state_controller.cpp) 中调用此方法
 - **运动规划**: TrajectoryConverter 在规划阶段分析动力学参数
 - **实时执行**: TrajectoryInterpolator 生成插值轨迹时遵守限位参数
@@ -311,6 +321,7 @@ joint_limits:
 急停状态下允许反向运动以脱离限位区，实现见：[joint_velocity_controller.cpp](../src/controller/joint_velocity/joint_velocity_controller.cpp)
 
 当关节超出限位时：
+
 - 超出下限：只允许正向运动（远离下限）
 - 超出上限：只允许负向运动（远离上限）
 
@@ -319,6 +330,7 @@ joint_limits:
 急停恢复需满足以下条件，实现见：[hardware_manager.cpp](../src/hardware/hardware_manager.cpp)
 
 恢复步骤：
+
 1. 检查所有关节是否回到限位内
 2. 检查系统健康状态
 3. 清除急停标志
@@ -335,6 +347,7 @@ joint_limits:
 ### 规划阶段碰撞检测
 
 见各控制器实现：
+
 - [movej_controller.cpp](../src/controller/movej/movej_controller.cpp)
 - [movel_controller.cpp](../src/controller/movel/movel_controller.cpp)
 - [movec_controller.cpp](../src/controller/movec/movec_controller.cpp)
@@ -344,6 +357,7 @@ MoveIt 在路径规划时会自动进行碰撞检测。规划失败会返回相�
 ### MoveIt 场景配置
 
 碰撞检测依赖 MoveIt 的规划场景配置，包括：
+
 - 机械臂 URDF 模型
 - 自碰撞检测矩阵（SRDF）
 - 环境障碍物定义
@@ -355,11 +369,13 @@ MoveIt 在路径规划时会自动进行碰撞检测。规划失败会返回相�
 ### 配置文件
 
 安全参数通过 YAML 配置文件管理，见：
+
 - [config/arm620_joint_limits.yaml](../config/arm620_joint_limits.yaml) - ARM620 关节限位
 - [config/arm380_joint_limits.yaml](../config/arm380_joint_limits.yaml) - ARM380 关节限位
 - [config/interpolator_config.yaml](../config/interpolator_config.yaml) - 插值器配置
 
 配置包括：
+
 - **位置限位**: min_position 和 max_position
 - **速度限位**: max_velocity
 - **速度停止阈值**: 0.01 rad/s（用于判断机器人是否已停止）
@@ -394,6 +410,7 @@ MoveIt 在路径规划时会自动进行碰撞检测。规划失败会返回相�
 见：[controller_manager_section.cpp](../src/controller_manager_section.cpp)
 
 状态恢复流程：
+
 1. 保存当前控制模式和 mapping
 2. 进入 HoldState 安全状态
 3. 条件满足后恢复到目标模式

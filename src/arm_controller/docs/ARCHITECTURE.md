@@ -74,12 +74,14 @@ Arm Controller 基于以下设计理念:
 #### 1. ControllerManagerNode (控制管理节点)
 
 **主要职责**:
+
 - 创建和管理所有控制模式的控制器实例
 - 工作模式切换和状态管理
 - 处理安全状态转换（钩子状态）
 - 系统状态发布
 
 **关键接口**:
+
 ```cpp
 // 服务
 /controller_api/controller_mode (controller_interfaces/srv/WorkMode) // 工作模式切换
@@ -94,6 +96,7 @@ Arm Controller 基于以下设计理念:
 ```
 
 **核心功能** - 见 [controller_manager_section.hpp](../include/arm_controller/controller_manager_section.hpp):
+
 - 从 YAML 配置加载所有控制器
 - 通过 WorkMode 服务处理模式切换
 - 管理 HoldState 确保安全过渡
@@ -102,11 +105,13 @@ Arm Controller 基于以下设计理念:
 #### 2. TrajectoryControllerNode (轨迹执行节点)
 
 **主要职责**:
+
 - 接收和执行轨迹执行请求
 - 轨迹插值和优化
 - 与硬件管理器交互执行运动
 
 **关键接口**:
+
 ```cpp
 // Action Server (每个映射独立)
 /arm_controller/follow_joint_trajectory (control_msgs/action/FollowJointTrajectory)
@@ -116,6 +121,7 @@ Arm Controller 基于以下设计理念:
 ```
 
 **核心功能** - 见 [trajectory_controller_section.hpp](../include/arm_controller/trajectory_controller_section.hpp):
+
 - 为每个机械臂映射维护独立的 Action Server
 - 使用 TrajectoryInterpolator 进行轨迹光滑化
 - 通过 TrajectoryConverter 进行轨迹格式转换
@@ -155,6 +161,7 @@ Arm Controller 基于以下设计理念:
 ### HardwareManager (单例硬件管理)
 
 **职责**:
+
 - 管理所有电机的 CAN-FD 通信
 - 封装 hardware_driver 库接口
 - 提供线程安全的硬件访问接口
@@ -163,6 +170,7 @@ Arm Controller 基于以下设计理念:
 见 [hardware_manager.hpp](../include/arm_controller/hardware/hardware_manager.hpp)
 
 关键功能：
+
 - 单例实例管理（线程安全）
 - 支持多个机械臂映射 (single_arm/left_arm/right_arm)
 - 电机控制接口：位置控制、速度控制、力矩控制、MIT 模式等
@@ -178,6 +186,7 @@ Arm Controller 基于以下设计理念:
 所有控制器实现统一接口，见 [mode_controller_base.hpp](../include/arm_controller/controller_base/mode_controller_base.hpp)
 
 关键方法：
+
 - `start(mapping)` - 控制器激活时调用
 - `stop(mapping)` - 控制器停用时调用
 - `handle_message(msg)` - 处理接收到的消息
@@ -190,6 +199,7 @@ Arm Controller 基于以下设计理念:
 见 [trajectory_controller_base.hpp](../include/arm_controller/controller_base/trajectory_controller_base.hpp)
 
 职责：
+
 - 规划轨迹（调用 trajectory_planning）
 - 插值轨迹（调用 trajectory_interpolator）
 - 执行轨迹（调用 HardwareManager）
@@ -199,6 +209,7 @@ Arm Controller 基于以下设计理念:
 见 [velocity_controller_base.hpp](../include/arm_controller/controller_base/velocity_controller_base.hpp)
 
 职责：
+
 - 安全检查（关节限位、速度限制）
 - 速度控制执行
 
@@ -233,12 +244,14 @@ Arm Controller 基于以下设计理念:
 见 [movej_controller.cpp](../src/controller/movej/movej_controller.cpp)、[movel_controller.cpp](../src/controller/movel/movel_controller.cpp)、[movec_controller.cpp](../src/controller/movec/movec_controller.cpp)
 
 **集成方式**:
+
 - 各控制器在 `initialize_planning_services()` 中创建 `MoveItAdapter` 和 `MotionPlanningService`
 - 注册对应的规划策略：`registerMoveJStrategy()`、`registerMoveLStrategy()`、`registerMoveCStrategy()`
 - 在 `plan_and_execute()` 方法中调用规划服务：`planJointMotion()`、`planLinearMotion()`、`planArcMotion()`
 - 规划完成后获得轨迹点列表，通过 `TrajectoryConverter` 转换为插值器格式
 
 **集成点**:
+
 - 各控制器初始化时创建规划服务实例（支持多 mapping）
 - 在 `trajectory_callback()` 中接收目标点请求
 - 调用 `plan_and_execute()` 进行规划和执行
@@ -248,12 +261,14 @@ Arm Controller 基于以下设计理念:
 见 [trajectory_converter.hpp](../include/arm_controller/utils/trajectory_converter.hpp)、[movej_controller.cpp](../src/controller/movej/movej_controller.cpp)、[movel_controller.cpp](../src/controller/movel/movel_controller.cpp)、[movec_controller.cpp](../src/controller/movec/movec_controller.cpp)
 
 **集成方式**:
+
 - 各控制器在构造函数中创建 `TrajectoryInterpolator` 实例
 - 规划完成后通过 `TrajectoryConverter::convertPlanningToInterpolator()` 转换轨迹格式
 - 通过 `TrajectoryConverter::analyzeTrajectoryDynamics()` 分析轨迹动力学参数
 - 在 `interpolate_trajectory()` 方法中调用 `loadTrajectoryWithDynamicConfig()` 和 `interpolate()` 进行插值
 
 **集成点**:
+
 - 各轨迹控制器：在 `plan_and_execute()` 中执行插值并生成光滑轨迹
 - 动力学分析：通过规划结果计算安全的插值参数（速度、加速度、加加速度限制）
 
@@ -262,11 +277,13 @@ Arm Controller 基于以下设计理念:
 见 [hardware_manager.hpp](../include/arm_controller/hardware/hardware_manager.hpp)
 
 **集成方式**:
+
 - HardwareManager 单例类封装了所有 hardware_driver 接口
 - 提供统一的硬件控制接口：位置控制、速度控制、力矩控制等
 - 通过 CAN-FD 总线与电机通信
 
 **集成点**:
+
 - ControllerManagerNode 和 TrajectoryControllerNode: 初始化 HardwareManager 实例
 - 所有控制器: 通过 HardwareManager 的公共接口访问和控制硬件
 - 状态反馈: HardwareManager 缓存并提供电机的实时状态信息
@@ -390,12 +407,14 @@ Main Thread
 ```
 
 **执行模型**:
+
 - 使用 `MultiThreadedExecutor` 管理两个节点的 callback 执行
 - ControllerManagerNode 和 TrajectoryControllerNode 共享同一个执行器
 - hardware_driver 的 CanFdBus 维护独立的接收线程池（每个 CAN 接口一个线程）
 - 发送操作在调用线程中同步执行
 
 **线程安全保证**:
+
 - HardwareManager: 单例 + 互斥锁（`instance_mutex_`, `joint_state_mutex_`, `status_mutex_`）确保全局唯一实例和状态访问安全
 - 控制器切换: HoldState 机制和互斥锁保护状态转移
 - 节点间通信: ROS2 话题和服务提供线程安全（QoS reliable）
@@ -416,12 +435,14 @@ config/
 ```
 
 **加载流程**:
+
 - 系统启动时，`ControllerManagerNode::load_config()` 加载 `config.yaml`
 - `HardwareManager::initialize()` 加载 `hardware_config.yaml` 和关节限位配置
 - `ControllerManagerNode::init_controllers()` 根据 `config.yaml` 中的 `controllers` 部分创建并注册所有控制器
 - 各控制器在初始化时读取 `config.yaml` 中的参数（如 `input_topic`）
 
 **config.yaml 结构**:
+
 - `common`: 全局话题和服务定义（服务、发布话题等）
 - `controllers`: 所有控制器的配置，包括类名、输入话题名称和类型等
 
@@ -471,6 +492,63 @@ config/
 1. 在 trajectory_planning 中实现
 2. 在控制器中调用新策略
 3. 添加配置参数
+
+---
+
+## 控制模式总览
+
+### 13+ 实现的控制模式
+
+Arm Controller 支持以下控制模式，可通过 `/controller_api/controller_mode` 服务动态切换：
+
+#### 位置控制（轨迹基础）
+
+- **MoveJ** - 关节空间点到点运动
+  - 基于 MoveIt2 + TracIK 逆运动学规划
+  - 支持动态速度缩放
+
+- **MoveL** - 笛卡尔空间直线运动
+  - 全 6D 方向控制
+  - 支持动态速度缩放
+
+- **MoveC** - 笛卡尔空间圆弧运动
+  - 全 6D 方向控制
+  - 支持动态速度缩放
+
+#### 速度控制（实时响应）
+
+- **JointVelocity** - 关节速度控制
+  - 实时速度指令
+  - 关节限位保护
+
+- **CartesianVelocity** - 笛卡尔速度控制
+  - 全 6D 速度控制
+  - 使用 QP 速度求解器
+
+#### 轨迹录制与回放
+
+- **PointRecord** - 点位录制
+- **PointReplay** - 点位回放
+- **TrajectoryRecord** - 轨迹录制
+- **TrajectoryReplay** - 轨迹回放（支持 CSAPS 平滑）
+
+#### 系统控制
+
+- **HoldState** - 安全保持状态（钩子状态）
+- **SystemStart** - 系统启动
+- **Move2Start** - 移回起始位置
+- **Move2Initial** - 移回初始位置
+- **ROS2ActionControl** - ROS2 Action 服务集成
+
+### 关键特性
+
+| 特性 | 支持模式 | 描述 |
+|------|---------|------|
+| **动态速度缩放** | MoveJ, MoveL, MoveC | 运动过程中无需重新规划即可调整速度 |
+| **全 6D 控制** | MoveL, MoveC, CartesianVelocity | 完整的末端执行器位姿控制 |
+| **重力补偿** | 所有轨迹控制 | 使用 Pinocchio 库进行动力学补偿 |
+| **双臂协同** | 所有模式 | 支持 single_arm, left_arm, right_arm 映射 |
+| **轨迹平滑** | PointReplay, TrajectoryReplay | CSAPS 自适应平滑 |
 
 ---
 

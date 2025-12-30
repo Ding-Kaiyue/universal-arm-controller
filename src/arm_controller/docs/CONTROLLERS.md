@@ -55,6 +55,7 @@ ros2 service call /controller_api/controller_mode controller_interfaces/srv/Work
 ```
 
 **参数说明**:
+
 - `mode`: 目标控制模式名称
 - `mapping`: 机械臂映射名称 (`single_arm`, `left_arm`, `right_arm`)
 

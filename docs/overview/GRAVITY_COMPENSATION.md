@@ -49,13 +49,16 @@
 ## 修改的文件
 
 ### 1. GravityCompensator 类 (新增)
+
 **文件路径**:
+
 - `src/arm_controller/include/arm_controller/dynamics/gravity_compensator.hpp`
 - `src/arm_controller/src/dynamics/gravity_compensator.cpp`
 
 **职责**: 封装 Pinocchio 库，负责重力力矩计算
 
 **接口**:
+
 ```cpp
 class GravityCompensator {
 public:
@@ -75,11 +78,14 @@ public:
 ```
 
 ### 2. CMakeLists.txt
+
 **文件路径**: `src/arm_controller/CMakeLists.txt`
 
 **修改内容**:
+
 - 添加 Pinocchio 依赖
 - 添加 gravity_compensator.cpp 到编译源文件
+
 ```cmake
 find_package(pinocchio REQUIRED)
 
@@ -96,9 +102,11 @@ target_link_libraries(arm_controller_lib
 ```
 
 ### 3. HardwareManager 头文件
+
 **文件路径**: `src/arm_controller/include/arm_controller/hardware/hardware_manager.hpp`
 
 **修改内容**: 使用 GravityCompensator 替代直接使用 Pinocchio
+
 ```cpp
 #include "arm_controller/dynamics/gravity_compensator.hpp"
 
@@ -112,9 +120,11 @@ std::vector<double> compute_gravity_torques(const std::string& mapping,
 ```
 
 ### 4. HardwareManager 实现
+
 **文件路径**: `src/arm_controller/src/hardware/hardware_manager.cpp`
 
 **修改内容**: 通过 GravityCompensator 计算重力矩
+
 ```cpp
 // parse_mapping() 中加载模型
 if (!gravity_compensator_) {
@@ -135,6 +145,7 @@ std::vector<double> HardwareManager::compute_gravity_torques(
 ```
 
 **executeTrajectory() 和 execute_trajectory_async() 中预计算重力力矩**:
+
 ```cpp
 // 预计算每个轨迹点的重力力矩
 Trajectory trajectory_with_efforts = trajectory;
@@ -148,9 +159,11 @@ for (auto& point : trajectory_with_efforts.points) {
 ```
 
 ### 4. JointVelocityController
+
 **文件路径**: `src/arm_controller/src/controller/joint_velocity/joint_velocity_controller.cpp`
 
 **修改内容**: 在发送 MIT 命令前计算重力力矩
+
 ```cpp
 // 获取重力补偿力矩
 std::vector<double> gravity_torques = hardware_manager_->compute_gravity_torques(mapping);
@@ -164,14 +177,17 @@ for (size_t i = 0; i < motor_ids.size(); ++i) {
 ```
 
 ### 5. CartesianVelocityController
+
 **文件路径**: `src/arm_controller/src/controller/cartesian_velocity/cartesian_velocity_controller.cpp`
 
 **修改内容**: 与 JointVelocityController 类似，在发送 MIT 命令前计算重力力矩。
 
 ### 6. TrajectoryRecordController
+
 **文件路径**: `src/arm_controller/src/controller/trajectory_record/trajectory_record_controller.cpp`
 
 **修改内容**: 使用定时器 (100Hz) 定期计算并发送重力补偿力矩
+
 ```cpp
 // 创建重力补偿定时器
 gravity_compensation_timer_ = node_->create_wall_timer(
@@ -188,11 +204,14 @@ void TrajectoryRecordController::gravity_compensation_timer_callback() {
 ```
 
 ### 7. TrajectoryPoint 结构体
+
 **文件路径**:
+
 - `src/trajectory_interpolator/include/trajectory_interpolator/moveit_spline_adapter.hpp`
 - `src/hardware_driver/include/hardware_driver/interface/robot_hardware.hpp`
 
 **修改内容**: 添加 efforts 字段
+
 ```cpp
 struct TrajectoryPoint {
     double time_from_start;
@@ -204,9 +223,11 @@ struct TrajectoryPoint {
 ```
 
 ### 8. RobotHardware 轨迹执行
+
 **文件路径**: `src/hardware_driver/src/interface/robot_hardware.cpp`
 
 **修改内容**: 在轨迹执行时使用预计算的 efforts
+
 ```cpp
 // 使用预计算的重力补偿力矩
 float effort = (i < point.efforts.size()) ? static_cast<float>(point.efforts[i]) : 0.0f;
@@ -222,14 +243,17 @@ URDF 文件路径: `src/trajectory_planning/robot_description/urdf/arm620.urdf`
 ## 使用场景
 
 ### 1. 速度控制模式 (JointVelocity / CartesianVelocity)
+
 - 实时计算当前关节位置的重力力矩
 - 每次发送 MIT 命令时附带重力补偿
 
 ### 2. 示教模式 (TrajectoryRecord)
+
 - 100Hz 定时器持续计算重力力矩
 - 保持机械臂在任意姿态下的稳定
 
 ### 3. 轨迹执行 (TrajectoryExecution)
+
 - 轨迹执行前预计算所有轨迹点的重力力矩
 - 存储在 TrajectoryPoint.efforts 字段中
 - 执行时直接使用预计算值，减少实时计算开销

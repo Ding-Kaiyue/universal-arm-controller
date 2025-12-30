@@ -15,23 +15,7 @@ Universal Arm Controller 的总体架构设计与设计理念。
 
 Universal Arm Controller 采用**三层分层架构** + **模块化组件设计**：
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│         应用层 (ROS2 Nodes / User Applications)              │
-├─────────────────────────────────────────────────────────────┤
-│  ControllerManager         │         TrajectoryController    │
-│  (Mode Control)            │         (Trajectory Execution)  │
-├─────────────────────────────────────────────────────────────┤
-│                 控制层 (Motion Control)                       │
-│  Trajectory Planning  │  Trajectory Interpolator             │
-│  (Path Planning)      │  (Smooth Trajectory)                 │
-├─────────────────────────────────────────────────────────────┤
-│            硬件层 (Hardware Abstraction)                      │
-│         Hardware Driver (CAN-FD Motor Control)               │
-├─────────────────────────────────────────────────────────────┤
-│                  物理硬件 (CAN-FD Bus / Motors)              │
-└─────────────────────────────────────────────────────────────┘
-```
+![Universal Arm Controller Architecture](diagrams/architecture_overview.png)
 
 ---
 
@@ -42,11 +26,13 @@ Universal Arm Controller 采用**三层分层架构** + **模块化组件设计*
 **负责**：用户交互、模式管理、系统状态
 
 **核心组件**：
+
 - **ControllerManager** - 控制器管理和模式切换
 - **TrajectoryController** - 轨迹执行控制
 - **ROS2 Interfaces** - 服务、话题、动作
 
 **特点**：
+
 - 提供统一的 ROS2 接口
 - 隐藏下层复杂性
 - 支持多种控制模式
@@ -58,10 +44,12 @@ Universal Arm Controller 采用**三层分层架构** + **模块化组件设计*
 **负责**：轨迹规划、路径生成、运动学计算
 
 **核心库**：
+
 - **Trajectory Planning** - 基于 MoveIt2 的规划
 - **Trajectory Interpolator** - 实时轨迹插值
 
 **功能**：
+
 - 路径规划与碰撞检测
 - 逆运动学求解
 - 轨迹平滑与动力学约束满足
@@ -73,9 +61,11 @@ Universal Arm Controller 采用**三层分层架构** + **模块化组件设计*
 **负责**：底层硬件通信、电机控制
 
 **核心库**：
+
 - **Hardware Driver** - CAN-FD 通信与电机驱动
 
 **特点**：
+
 - 高性能：微秒级延迟
 - 线程安全：CPU 亲和性绑定
 - 灵活：事件驱动 + 观察者模式
@@ -86,44 +76,11 @@ Universal Arm Controller 采用**三层分层架构** + **模块化组件设计*
 
 ### 交互流程图
 
-```
-用户 Request
-     │
-     ▼
-ControllerManager
-     │ (验证、安全检查)
-     ▼
-选择合适的 Controller
-     │
-     ├─→ MoveJ Controller
-     │        │ (调用 MoveIt2 规划)
-     │        ▼
-     │    Trajectory Planning
-     │        │
-     │        ▼
-     │    Trajectory Interpolator
-     │        │
-     ▼────────┤
-     │
-     ▼
-TrajectoryController
-     │ (执行轨迹)
-     ▼
-Hardware Driver
-     │ (发送 CAN 指令)
-     ▼
-CAN-FD Bus
-     │
-     ▼
-Motors (实际执行)
-     │
-     ▼ (状态反馈)
-Status Feedback
-     │
-     ├─→ ROS2 Topics
-     │
-     └─→ Events/Observers
-```
+<div align="center">
+
+![Data Flow Diagram](diagrams/data_flow.png)
+
+</div>
 
 ### 关键数据结构
 
@@ -172,9 +129,9 @@ Status Feedback
 
 ### MoveJ 控制流程
 
-```
+```text
 1. 用户发送 MoveJ 目标关节角度
-   ros2 topic pub /controller_api/movej_action/single_arm sensor_msgs/msg/JointState
+   ros2 topic pub --once /controller_api/movej_action/single_arm sensor_msgs/msg/JointState "{position: [pos1, pos2, pos3, pos4, pos5, pos6]}"
 
 2. Arm Controller 接收并验证
    - 检查目标是否在关节限制内
@@ -200,21 +157,11 @@ Status Feedback
 
 ### 状态转换流程
 
-```
-                  Move2Start
-                      │
-                      ▼
-HoldState ◄────────────┐
-    │                  │
-    │ 模式切换          │
-    │  (MoveJ等)       │
-    ▼                  │
-执行中 ────选择某模式────┘
-    │
-    ├─ 成功完成 ─→ HoldState
-    │
-    └─ 错误/紧急 ─→ Disable
-```
+<div align="center">
+
+![Controller State Transition](diagrams/controller_state_transition.png)
+
+</div>
 
 ---
 
@@ -245,6 +192,8 @@ HoldState ◄────────────┐
 2. **新规划算法** - 扩展 Trajectory Planning
 3. **新控制模式** - 添加新的 Controller
 4. **新的传感器** - 扩展 Feedback 系统
+5. **新的插值方式** - 扩展 Trajectory Interpolator
+6. **新的轨迹平滑方式** - 替换 csaps
 
 ### 设计原则
 

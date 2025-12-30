@@ -27,9 +27,11 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 ### 本仓库维护的组件
 
 #### 1. Arm Controller（运动控制核心）
+
 **位置**: `src/arm_controller/`
 
 运动控制系统的核心组件，负责：
+
 - ✅ 多模式控制（MoveJ、MoveL、MoveC、JointVelocity）
 - ✅ 状态管理与模式切换
 - ✅ 安全监控与限位保护
@@ -37,6 +39,7 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 - ✅ MoveIt2 集成
 
 **特性**:
+
 - 双节点架构：ControllerManager + TrajectoryController
 - 原生双臂支持
 - 事件驱动的状态监控
@@ -45,18 +48,22 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 **文档**: [Arm Controller 文档中心](../src/arm_controller/docs/README.md)
 
 #### 2. Controller Interfaces（ROS2 消息定义）
+
 **位置**: `src/controller_interfaces/`
 
 定义系统中使用的所有 ROS2 消息和服务：
+
 - 工作模式切换服务
 - 关节状态消息
 - 控制命令消息
 - 系统状态消息
 
 #### 3. Robotic Arm Bringup（系统启动）
+
 **位置**: `src/robotic_arm_bringup/`
 
 系统启动和配置：
+
 - ROS2 启动文件
 - YAML 配置文件
 - 参数管理
@@ -66,9 +73,11 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 ## 依赖库
 
 ### Hardware Driver（CAN-FD 硬件驱动）
+
 **GitHub**: [Ding-Kaiyue/hardware-driver](https://github.com/Ding-Kaiyue/hardware-driver)
 
 提供硬件级别的电机控制能力：
+
 - CAN-FD 高速通信（支持 CAN 2.0 和 CAN-FD）
 - 实时电机控制（位置、速度、力矩、MIT 模式）
 - 事件驱动的状态监控
@@ -77,6 +86,7 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 - 微秒级控制延迟
 
 **关键特性**:
+
 - 支持多个电机并发控制
 - CPU 亲和性绑定
 - 背压控制机制
@@ -84,15 +94,18 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 ---
 
 ### Trajectory Interpolator（轨迹插值库）
+
 **GitHub**: [Ding-Kaiyue/trajectory-interpolator](https://github.com/Ding-Kaiyue/trajectory-interpolator)
 
 提供实时的轨迹插值能力：
+
 - 样条曲线插值（B-spline、Bezier）
 - 动力学约束满足（速度、加速度、加加速度）
 - 实时轨迹生成
 - 运动平滑处理
 
 **应用场景**:
+
 - 从规划的路径生成光滑的执行轨迹
 - 满足机械臂的动力学限制
 - 实时生成控制指令
@@ -100,15 +113,18 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 ---
 
 ### Trajectory Planning（轨迹规划库）
+
 **GitHub**: [Ding-Kaiyue/trajectory-planning](https://github.com/Ding-Kaiyue/trajectory-planning)
 
 基于 MoveIt2 的轨迹规划能力：
+
 - 多种规划算法集成（RRT、RRTConnect 等）
 - 碰撞检测与避障
 - 逆运动学求解（通过 TracIK）
 - 路径优化
 
 **应用场景**:
+
 - MoveJ 和 MoveL 控制的路径规划
 - 碰撞检测和避障
 - IK 求解
@@ -206,10 +222,12 @@ CAN-FD 接收
 ### ROS2 接口
 
 **服务**:
+
 - 模式切换: `/controller_api/controller_mode`
 - 系统状态查询
 
 **话题**:
+
 - 关节状态: `/joint_states`
 - 控制命令: `/controller_api/*_action`
 - 系统状态: `/controller_api/running_status`
@@ -224,15 +242,45 @@ CAN-FD 接收
 
 ## 性能指标
 
-基于 Jetson Orin 平台的典型性能：
+### 实时性能
 
 | 指标 | 数值 |
 |------|------|
 | **控制延迟** | < 200 μs |
-| **状态更新频率** | 2.5 kHz (高频) / 20 Hz (低频) |
-| **CPU 使用率** | < 5% |
+| **更新频率** | 500 Hz |
+| **CAN-FD 波特率** | 5000 kbit/s |
+| **状态反馈延迟** | < 5 ms |
+
+### 硬件支持
+
+| 项目 | 数值 |
+|------|------|
+| **支持电机数** | 数百个 |
+| **关节限位配置** | 动态配置 |
 | **内存占用** | < 50 MB |
-| **电机支持数** | 数百个 |
+| **CPU 使用率** | < 5% (Jetson Orin) |
+
+### 代码规模
+
+| 项目 | 数值 |
+|------|------|
+| **Arm Controller 代码** | 10,798 LOC |
+| **源文件总数** | 462+ 文件 |
+| **控制模式数** | 13+ 种 |
+| **配置文件** | 5+ YAML 文件 |
+| **文档文件** | 15+ Markdown 文件 |
+
+### 关键特性
+
+| 特性 | 描述 |
+|------|------|
+| **13+ 控制模式** | MoveJ、MoveL、MoveC、JointVelocity、CartesianVelocity 等 |
+| **全 6D 方向控制** | 完整的末端执行器位姿控制 |
+| **双臂协同** | 原生支持 single_arm, left_arm, right_arm 映射 |
+| **动态速度缩放** | MoveJ/MoveL/MoveC 运动中无需重规划即可调速 |
+| **重力补偿** | 使用 Pinocchio 库的动力学补偿 |
+| **轨迹平滑** | CSAPS 自适应平滑，特别适合录制轨迹 |
+| **多层安全** | HoldState 钩子、限位保护、硬件监控 |
 
 ---
 

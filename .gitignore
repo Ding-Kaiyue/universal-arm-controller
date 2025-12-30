@@ -114,6 +114,7 @@ gazebo_log/
 .gitignore~
 *.orig
 *.rej
+.markdownlintignore
 
 # === Docs ===
 *.puml

@@ -90,9 +90,11 @@ hardware_interfaces:
     initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     start_position: [0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0]
 ```
-**注意：** 
+
+**注意：**
 
 在需要配置双臂时，除了需要修改对应的 urdf 文件和相应配置文件外，还需要修改 `trajectory_planning`子仓库中的 `trajectory_planning.launch.py`文件，在
+
 ```python
 if robot_model_name == 'arm620':
         config_pkg = 'arm620_config'
@@ -101,11 +103,14 @@ if robot_model_name == 'arm620':
     else:
         raise ValueError(f'Unsupported robot model name: {robot_model_name}')
 ```
+
 中添加双臂的配置包名称，例如：
+
 ```python
 elif robot_model_name == 'arm620_double':
         config_pkg = 'arm620_double_config'
 ```
+
 和你的urdf和配置文件包名一致。
 
 #### 参数说明
@@ -204,14 +209,15 @@ controllers:
       name: /controller_api/movel_action/{mapping}
       type: geometry_msgs/msg/Pose
 ```
-| 参数 | 类型 | 说明 | 示例 | 
+
+| 参数 | 类型 | 说明 | 示例 |
 | --- | --- | --- | --- |
 | key | string | 控制器唯一标识符 | MoveJ |
 | class | string | 控制器类名(需在注册宏中定义) | MoveJController |
 | input_topic.name | string | 控制器订阅的ROS话题名称 | /controller_api/movej_action/{mapping} |
 
-
 #### 已注册的控制器一览
+
 | 控制器Key | 控制器类名 | 输入话题 | 消息类型 | 说明 |
 | --- | --- | --- | --- | --- |
 | SystemStart | SystemStartController | - | - | 系统启动 |
@@ -235,12 +241,14 @@ controllers:
 | /trajectory_control | controller_interfaces/msg/TrajectoryControl | 实时轨迹控制命令 |
 
 **TrajectoryControl 消息格式：**
+
 ```
 string mapping     # 机械臂映射标识（single_arm/left_arm/right_arm）
 string action      # 控制指令（Pause/Resume/Cancel）
 ```
 
 **使用示例：**
+
 ```bash
 # 暂停轨迹
 ros2 topic pub /trajectory_control controller_interfaces/msg/TrajectoryControl "{mapping: 'single_arm', action: 'Pause'}"
@@ -251,9 +259,11 @@ ros2 topic pub /trajectory_control controller_interfaces/msg/TrajectoryControl "
 # 取消轨迹
 ros2 topic pub /trajectory_control controller_interfaces/msg/TrajectoryControl "{mapping: 'single_arm', action: 'Cancel'}"
 ```
+
 ---
 
 #### 扩展控制器配置示例
+
 ```yaml
 - key: TrajectoryReplay
   class: TrajectoryReplayController

@@ -19,6 +19,7 @@
 **症状**: 启动时报错,节点无法运行
 
 **可能原因**:
+
 1. 工作空间未 source
 2. 依赖包未安装
 3. 配置文件错误
@@ -87,6 +88,7 @@ sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000
 **症状**: 命令发送后电机不动
 
 **可能原因**:
+
 1. CAN 接口未正确配置
 2. 电机 ID 配置错误
 3. 电机未上电或未使能
@@ -167,6 +169,7 @@ ros2 service call /controller_api/controller_mode controller_interfaces/srv/Work
 **症状**: 模式切换服务调用失败或超时
 
 **可能原因**:
+
 1. 系统未满足安全条件
 2. 目标控制器未注册
 3. 机器人运动中
@@ -192,6 +195,7 @@ ros2 topic echo /rosout | grep "Safety condition"
 **症状**: 机械臂运动时出现明显抖动
 
 **可能原因**:
+
 1. 轨迹插值参数不当
 2. 控制频率过低
 3. 硬件通信延迟
@@ -223,6 +227,7 @@ sudo tc qdisc show dev can0
 **症状**: 规划总是失败,无法生成轨迹
 
 **可能原因**:
+
 1. 目标位置超出工作空间
 2. 目标导致碰撞
 3. IK 求解失败
@@ -255,7 +260,6 @@ ros2 param set /move_group planner_id "RRTConnectkConfigDefault"
 
 **解决方法**: 调整起始位姿,避开奇点
 
-
 ### 接近奇点时规划慢
 
 **症状**: 机械臂接近奇点区域时规划很慢或失败
@@ -265,6 +269,7 @@ ros2 param set /move_group planner_id "RRTConnectkConfigDefault"
 **解决方法**:
 
 1. **使用关节约束规划**(如果有):
+
 ```bash
 # 限制特定关节,避开奇点
 ros2 topic pub --once /joint_constrained_goals \
@@ -272,14 +277,15 @@ ros2 topic pub --once /joint_constrained_goals \
   "{...joint_constraints...}"
 ```
 
-2. **调整起始位置**:
+1. **调整起始位置**:
+
 ```bash
 # 先移动到远离奇点的位置
 ros2 service call /controller_api/controller_mode \
   "{mode: 'MoveJ', mapping: 'single_arm'}"
 ```
 
-3. **使用 TracIK**:
+1. **使用 TracIK**:
 TracIK 在奇点附近性能更好,确保已安装 TracIK 插件。本工程已经使用了TracIK,无需额外配置。
 
 ---
@@ -376,7 +382,7 @@ ros2 topic echo /rosout > rosout.log
 
 1. 搜索 [GitHub Issues](https://github.com/Ding-Kaiyue/universal-arm-controller/issues)
 2. 创建新的 Issue,附带上述日志信息
-3. 发送邮件至 kaiyue.ding@raysense.com
+3. 发送邮件至 <kaiyue.ding@raysense.com>
 
 ---
 

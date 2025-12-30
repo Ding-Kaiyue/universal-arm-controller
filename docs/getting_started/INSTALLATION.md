@@ -15,16 +15,19 @@
 ## 系统要求
 
 ### 操作系统
+
 - **Ubuntu 22.04 LTS** 或更高版本（推荐 Ubuntu 22.04）
 - 需要 Linux 内核 4.4+ 以支持 CAN
 
 ### 软件依赖
+
 - **ROS2 Humble** 或更高版本
 - **GCC 10+** 或 **Clang 12+**（支持 C++17）
 - **CMake 3.10+**
 - **Python 3.10+**
 
 ### 工具软件
+
 ```bash
 # 必需工具
 sudo apt install python3-vcstool python3-colcon-common-extensions
@@ -35,6 +38,7 @@ sudo apt install libyaml-cpp-dev libeigen3-dev libfmt-dev
 ```
 
 ### 硬件要求
+
 - **CAN 接口**: 兼容 SocketCAN 的 CAN-FD 接口
 - **内存**: 最少 4GB RAM（推荐 8GB）
 - **CPU**: 四核或以上

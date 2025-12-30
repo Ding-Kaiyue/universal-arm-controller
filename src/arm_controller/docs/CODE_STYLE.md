@@ -562,6 +562,7 @@ assert(goal.positions.size() == 6);  // 应该用if检查
 ### clang-format
 
 `.clang-format`:
+
 ```yaml
 BasedOnStyle: Google
 IndentWidth: 2
@@ -571,6 +572,7 @@ AllowShortIfStatementsOnASingleLine: Never
 ```
 
 使用:
+
 ```bash
 clang-format -i src/**/*.cpp src/**/*.hpp
 ```
