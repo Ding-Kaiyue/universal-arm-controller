@@ -5,6 +5,7 @@
 #include <geometry_msgs/msg/pose.hpp>
 #include "trajectory_planning_v3/application/services/motion_planning_service.hpp"
 #include "trajectory_planning_v3/infrastructure/integration/moveit_adapter.hpp"
+#include "trajectory_planning_v3/infrastructure/integration/tracik_adapter.hpp"
 #include "trajectory_interpolator/trajectory_interpolator.hpp"
 #include "arm_controller/utils/trajectory_converter.hpp"
 
@@ -42,6 +43,7 @@ private:
     // 轨迹规划相关 - 支持多臂mapping
     std::map<std::string, std::shared_ptr<trajectory_planning::application::services::MotionPlanningService>> motion_planning_services_;
     std::map<std::string, std::shared_ptr<trajectory_planning::infrastructure::integration::MoveItAdapter>> moveit_adapters_;
+    std::map<std::string, std::shared_ptr<trajectory_planning::infrastructure::integration::TracIKAdapter>> tracik_adapters_;
     std::map<std::string, std::string> mapping_to_planning_group_;
 
     // 轨迹插值器

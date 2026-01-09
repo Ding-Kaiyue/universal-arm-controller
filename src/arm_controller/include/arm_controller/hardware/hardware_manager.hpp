@@ -101,6 +101,10 @@ public:
     // 取消指定mapping的轨迹执行
     bool cancel_trajectory(const std::string& mapping);
 
+    // 获取指定execution_id的轨迹执行进度 [0, 1]
+    // 返回进度百分比（轨迹点索引进度），-1 表示查询失败或执行不存在
+    double get_execution_progress(const std::string& execution_id);
+
     // 等待指定mapping的轨迹执行完成（阻塞）
     bool wait_for_trajectory_completion(const std::string& mapping, int timeout_ms = 0);
 

@@ -1114,6 +1114,33 @@ bool HardwareManager::cancel_trajectory(const std::string& mapping) {
     }
 }
 
+double HardwareManager::get_execution_progress(const std::string& execution_id) {
+    try {
+        if (!hardware_driver_) {
+            RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
+            return -1.0;
+        }
+
+        // 从硬件驱动查询执行进度
+        TrajectoryExecutionProgress progress;
+        if (hardware_driver_->get_execution_progress(execution_id, progress)) {
+            // 计算进度百分比 [0, 1]
+            if (progress.total_points > 0) {
+                double progress_ratio = static_cast<double>(progress.current_point_index) / progress.total_points;
+                return std::clamp(progress_ratio, 0.0, 1.0);
+            }
+            return 0.0;
+        } else {
+            // 查询失败（执行可能已完成或出错）
+            return -1.0;
+        }
+    } catch (const std::exception& e) {
+        RCLCPP_WARN(node_->get_logger(), "⚠️  Failed to get execution progress for execution_id %s: %s",
+                   execution_id.c_str(), e.what());
+        return -1.0;
+    }
+}
+
 bool HardwareManager::wait_for_trajectory_completion(const std::string& mapping, int timeout_ms) {
     try {
         if (!hardware_driver_) {

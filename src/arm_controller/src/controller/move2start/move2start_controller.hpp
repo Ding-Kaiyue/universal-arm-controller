@@ -6,6 +6,7 @@
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "trajectory_planning_v3/application/services/motion_planning_service.hpp"
 #include "trajectory_planning_v3/infrastructure/integration/moveit_adapter.hpp"
+#include "trajectory_planning_v3/infrastructure/integration/tracik_adapter.hpp"
 #include "trajectory_interpolator/trajectory_interpolator.hpp"
 #include "arm_controller/utils/trajectory_converter.hpp"
 #include <unordered_map>

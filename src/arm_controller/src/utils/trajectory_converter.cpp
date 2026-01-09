@@ -18,21 +18,21 @@ trajectory_interpolator::Trajectory TrajectoryConverter::convertPlanningToInterp
         interpolator_point.time_from_start = planning_point.time_from_start.seconds();
 
         // 转换位置：弧度 → 度数 (轨迹插值器期望度数)
-        auto positions_rad = planning_point.position.values();
+        const auto& positions_rad = planning_point.position.values();
         interpolator_point.positions.reserve(positions_rad.size());
         for (double pos_rad : positions_rad) {
             interpolator_point.positions.push_back(pos_rad * 180.0 / M_PI);
         }
 
         // 转换速度：弧度/秒 → 度/秒
-        auto velocities_rad = planning_point.velocity.values();
+        const auto& velocities_rad = planning_point.velocity.values();
         interpolator_point.velocities.reserve(velocities_rad.size());
         for (double vel_rad : velocities_rad) {
             interpolator_point.velocities.push_back(vel_rad * 180.0 / M_PI);
         }
 
         // 转换加速度：弧度/秒² → 度/秒²
-        auto accelerations_rad = planning_point.acceleration.values();
+        const auto& accelerations_rad = planning_point.acceleration.values();
         interpolator_point.accelerations.reserve(accelerations_rad.size());
         for (double acc_rad : accelerations_rad) {
             interpolator_point.accelerations.push_back(acc_rad * 180.0 / M_PI);
@@ -131,15 +131,15 @@ TrajectoryConverter::TrajectoryDynamics TrajectoryConverter::analyzeTrajectoryDy
 
     for (const auto& point : trajectory.points()) {
         // 分析速度
-        const auto& velocities = point.velocity.values();
-        for (double vel : velocities) {
-            dynamics.max_velocity = std::max(dynamics.max_velocity, std::abs(vel));
+        const auto& vel_values = point.velocity.values();
+        for (size_t i = 0; i < vel_values.size(); ++i) {
+            dynamics.max_velocity = std::max(dynamics.max_velocity, std::abs(vel_values[i]));
         }
 
         // 分析加速度
-        const auto& accelerations = point.acceleration.values();
-        for (double acc : accelerations) {
-            dynamics.max_acceleration = std::max(dynamics.max_acceleration, std::abs(acc));
+        const auto& acc_values = point.acceleration.values();
+        for (size_t i = 0; i < acc_values.size(); ++i) {
+            dynamics.max_acceleration = std::max(dynamics.max_acceleration, std::abs(acc_values[i]));
         }
     }
 
@@ -215,23 +215,22 @@ TrajectoryConverter::TrajectoryDynamics TrajectoryConverter::calculateSafeInterp
 
     TrajectoryDynamics safe_params;
 
-    // 如果轨迹动力学参数为0或过小，使用合理的默认值
-    double base_velocity = std::max(dynamics.max_velocity, 0.1);  // 至少 0.1 rad/s
-    double base_acceleration = std::max(dynamics.max_acceleration, 0.2);  // 至少 0.2 rad/s²
-    double base_jerk = std::max(dynamics.max_jerk, 0.4);  // 至少 0.4 rad/s³
+    // 如果轨迹已经有速度/加速度信息，直接使用该信息
+    if (dynamics.max_velocity > 0.001) {
+        // 轨迹有动力学信息，直接使用
+        safe_params.max_velocity = dynamics.max_velocity * safety_margin;
+        safe_params.max_acceleration = dynamics.max_acceleration * safety_margin;
+        safe_params.max_jerk = dynamics.max_jerk * safety_margin;
 
-    // 应用安全余量（保持原有逻辑，但提高基础值）
-    safe_params.max_velocity = base_velocity * safety_margin;
-    safe_params.max_acceleration = base_acceleration * safety_margin;
-    safe_params.max_jerk = base_jerk * safety_margin;
-
-    // 应用硬件限制
-    safe_params.max_velocity = std::min(safe_params.max_velocity, hardware_velocity_limit);
-
-    // 确保最小值合理（不要过慢）
-    safe_params.max_velocity = std::max(safe_params.max_velocity, 0.8);  // 最低0.8 rad/s
-    safe_params.max_acceleration = std::max(safe_params.max_acceleration, 1.5);  // 最低1.5 rad/s²
-    safe_params.max_jerk = std::max(safe_params.max_jerk, 3.0);  // 最低3.0 rad/s³
+        // 应用硬件限制
+        safe_params.max_velocity = std::min(safe_params.max_velocity, hardware_velocity_limit);
+    } else {
+        // 轨迹没有动力学信息（如 MoveIt Cartesian 规划），使用最小的温和参数
+        // 这样插值器会生成合理数量的点，避免过度插值
+        safe_params.max_velocity = 0.2;       // 非常温和的速度
+        safe_params.max_acceleration = 0.3;   // 非常温和的加速度
+        safe_params.max_jerk = 0.5;           // 非常温和的加加速度
+    }
 
     return safe_params;
 }

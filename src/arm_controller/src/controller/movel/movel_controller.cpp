@@ -49,7 +49,7 @@ bool MoveLController::stop(const std::string& mapping) {
     // 清理该 mapping 的话题订阅
     cleanup_subscriptions(mapping);
 
-    RCLCPP_INFO(node_->get_logger(), "[%s] MoveLController deactivated", mapping.c_str());
+    RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveLController deactivated", mapping.c_str());
     return true;
 }
 
@@ -90,9 +90,20 @@ void MoveLController::initialize_planning_services() {
 
                 moveit_adapters_[mapping] = moveit_adapter;
 
+                // 创建 TracIKAdapter
+                auto tracik_adapter = std::make_shared<trajectory_planning::infrastructure::integration::TracIKAdapter>(
+                    node_, planning_group);
+
+                if (!tracik_adapter) {
+                    RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Failed to create TracIKAdapter", mapping.c_str());
+                    continue;
+                }
+
+                tracik_adapters_[mapping] = tracik_adapter;
+
                 // 创建轨迹规划服务
                 auto motion_planning_service = std::make_shared<trajectory_planning::application::services::MotionPlanningService>(
-                    moveit_adapter, node_);
+                    moveit_adapter, tracik_adapter, node_);
 
                 if (!motion_planning_service) {
                     RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Failed to create MotionPlanningService", mapping.c_str());
@@ -135,11 +146,8 @@ void MoveLController::plan_and_execute(const std::string& mapping, const geometr
         }
     }
 
-    // 进行轨迹规划（可选JOINT/CARTESIAN/INTELLIGENT）
-    auto planning_result = motion_planning_services_[mapping]->planLinearMotion(
-        *msg,
-        trajectory_planning::infrastructure::planning::MoveLPlanningStrategy::PlanningType::INTELLIGENT
-    );
+    // 进行轨迹规划
+    auto planning_result = motion_planning_services_[mapping]->planLinearMotion(*msg);
     if (!planning_result.success) {
         return;
     }

@@ -95,9 +95,19 @@ void MoveJController::initialize_planning_services() {
 
                 moveit_adapters_[mapping] = moveit_adapter;
 
+                // 创建 TracIKAdapter（MoveJ 不使用，但需要为 MotionPlanningService 创建）
+                auto tracik_adapter = std::make_shared<trajectory_planning::infrastructure::integration::TracIKAdapter>(
+                    node_, planning_group);
+
+                if (!tracik_adapter) {
+                    RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Failed to create TracIKAdapter", mapping.c_str());
+                    continue;
+                }
+
                 // 创建轨迹规划服务
                 auto motion_planning_service = std::make_shared<trajectory_planning::application::services::MotionPlanningService>(
                     moveit_adapter,
+                    tracik_adapter,
                     node_);
 
                 if (!motion_planning_service) {
