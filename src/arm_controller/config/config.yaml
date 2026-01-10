@@ -103,8 +103,8 @@ movej:
   acceleration_scaling_factor: 0.8
 
 movel:
-  velocity_scaling_factor: 0.5
-  acceleration_scaling_factor: 0.5
+  velocity_scaling_factor: 0.8
+  acceleration_scaling_factor: 0.8
 
 movec:
   velocity_scaling_factor: 0.3
