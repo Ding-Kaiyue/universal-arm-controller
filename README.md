@@ -59,6 +59,82 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 ```
 
+## 🔨 构建指南
+
+### 系统要求与性能
+
+| 场景 | 最低配置 | 推荐配置 | 编译时间 |
+|------|---------|---------|---------|
+| 标准开发 | 4核 CPU, 16GB RAM | 8核+, 32GB RAM | 5-10 分钟 |
+| 低配机器 | 2核 CPU, 8GB RAM | - | 20-30 分钟 |
+
+**注意**: 编译过程中，MoveIt2、Pinocchio 等重型库会导致高内存占用。如果机器配置低，请使用单线程构建模式。
+
+### 标准构建（推荐）
+
+适合 16GB+ 内存的机器：
+
+```bash
+cd ~/robotic_arm_ws
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+```
+
+### 低配机器构建（≤16GB RAM）
+
+如果编译过程中系统卡死，请使用以下命令：
+
+```bash
+# 方法 1: 单线程构建（最稳定）
+colcon build \
+  --executor sequential \
+  --parallel-workers 1 \
+  --cmake-args -DCMAKE_BUILD_PARALLEL_LEVEL=1 -DCMAKE_BUILD_TYPE=Release
+
+# 方法 2: 限制并行度
+export MAKEFLAGS="-j2"
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+```
+
+### ⚠️ 常见问题与解决方案
+
+#### 编译时系统卡死
+
+**原因**: 并行编译线程过多，导致 CPU/内存耗尽和 swap 风暴。
+
+**诊断步骤**:
+```bash
+# 在编译时打开另一个终端，实时监控资源
+watch -n 1 'free -h && echo "---" && top -b -n 1 | head -15'
+```
+
+**解决方案**:
+```bash
+# 使用单线程构建（完全解决卡死问题，但编译时间较长）
+colcon build \
+  --executor sequential \
+  --parallel-workers 1 \
+  --cmake-args -DCMAKE_BUILD_PARALLEL_LEVEL=1 -DCMAKE_BUILD_TYPE=Release
+```
+
+#### Debug 模式编译导致内存爆炸
+
+**问题**: 不要使用 Debug 模式，否则内存占用会增加 10 倍以上。
+
+```bash
+# ❌ 禁止使用 Debug 模式
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=Debug
+
+# ✅ 使用 RelWithDebInfo（保留符号信息，内存占用更低）
+colcon build --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+```
+
+#### 编译特定包以加快开发循环
+
+```bash
+# 只编译 arm_controller，速度快 10 倍
+colcon build --packages-select arm_controller
+```
+
 ### 前置说明
 
 详见 [文档中心](docs/README.md) 中的配置与故障排除部分。
