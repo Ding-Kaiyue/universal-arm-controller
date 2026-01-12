@@ -34,35 +34,96 @@ void JointVelocityController::start(const std::string& mapping) {
         init_subscriptions(mapping);
     }
 
-    RCLCPP_INFO(node_->get_logger(), "[%s] JointVelocityController activated", mapping.c_str());
+    // ✅ 创建 10ms 控制定时器（实时循环）
+    control_timer_ = node_->create_wall_timer(
+        std::chrono::milliseconds(10),
+        std::bind(&JointVelocityController::control_loop, this));
+
+    RCLCPP_INFO(node_->get_logger(), "[%s] ✓ JointVelocityController activated with 10ms control loop", mapping.c_str());
 }
 
 bool JointVelocityController::stop(const std::string& mapping) {
     is_active_ = false;
 
+    // ✅ 销毁 10ms 控制定时器
+    if (control_timer_) {
+        control_timer_.reset();
+        RCLCPP_INFO(node_->get_logger(), "[%s] Control loop stopped", mapping.c_str());
+    }
+
+    // 发送零速度命令停止机械臂
+    auto joint_names = hardware_manager_->get_joint_names(mapping);
+    if (!joint_names.empty()) {
+        std::vector<double> zero_velocities(joint_names.size(), 0.0);
+        send_joint_velocities(mapping, zero_velocities);
+    }
+
     // 清理该 mapping 的话题订阅
     cleanup_subscriptions(mapping);
 
     RCLCPP_INFO(node_->get_logger(), "[%s] JointVelocityController deactivated", mapping.c_str());
-    return true;  // 需要钩子状态来安全停止
+    return true;
 }
 
 void JointVelocityController::velocity_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
     if (!is_active_) return;
 
+    // ✅ Velocity latch 模式：仅缓存最新命令
+    // 实际的速度控制在 control_loop 中以 10ms 频率进行
+
+    {
+        std::lock_guard<std::mutex> lock(cmd_mutex_);
+        last_cmd_ = *msg;
+        // ✅ 使用 steady_clock（单调时间）确保工业级时间源一致
+        last_cmd_time_ = steady_clock_.now();
+    }
+
+    RCLCPP_INFO(node_->get_logger(),
+        "[%s] ✓ Joint velocity command received: %zu joints",
+        active_mapping_.c_str(), msg->velocity.size());
+}
+
+void JointVelocityController::control_loop() {
+    /* ========================================
+     * 10ms 实时控制循环
+     * 关键特性：
+     * - 每 10ms 执行一次速度命令
+     * - 命令 latch（缓存最新速度）
+     * - 100ms 超时保护
+     * ======================================== */
+
+    if (!is_active_ || active_mapping_.empty()) {
+        return;
+    }
+
+    // 获取最新的速度命令（带超时检查）
+    sensor_msgs::msg::JointState cmd;
+    {
+        std::lock_guard<std::mutex> lock(cmd_mutex_);
+
+        // ✅ 使用 steady_clock 进行超时检查（单调时间，不受 use_sim_time 影响）
+        if ((steady_clock_.now() - last_cmd_time_).count() > 100000000) {  // 100ms in nanoseconds
+            // 命令超时 → 紧急停止
+            auto joint_names = hardware_manager_->get_joint_names(active_mapping_);
+            std::vector<double> zero(joint_names.size(), 0.0);
+            send_joint_velocities(active_mapping_, zero);
+            return;
+        }
+        cmd = last_cmd_;
+    }
+
     // 检查长度匹配
     const auto& joint_names = hardware_manager_->get_joint_names(active_mapping_);
-    if (msg->velocity.size() != joint_names.size()) {
+    if (cmd.velocity.size() != joint_names.size()) {
         RCLCPP_WARN(node_->get_logger(),
             "[%s] Velocity vector size mismatch: expected %zu, got %zu",
-            active_mapping_.c_str(), joint_names.size(), msg->velocity.size());
+            active_mapping_.c_str(), joint_names.size(), cmd.velocity.size());
         return;
     }
 
     // 发送关节速度命令 (实时安全检查已在HardwareManager中实现)
-    send_joint_velocities(active_mapping_, msg->velocity);
+    send_joint_velocities(active_mapping_, cmd.velocity);
 }
-    
 
 bool JointVelocityController::send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities) {
     if (!hardware_manager_) {
