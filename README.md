@@ -41,6 +41,30 @@
 
 ### 快速安装
 
+#### 方式 A: Docker（推荐，无需编译）
+
+适合无编译环境或编译困难的用户：
+
+```bash
+# 克隆仓库
+git clone https://github.com/Ding-Kaiyue/universal-arm-controller.git
+cd universal-arm-controller
+
+# 使用 Docker Compose 启动
+docker-compose build
+docker-compose up -d
+docker-compose exec robotic-arm bash
+
+# 在容器内启动系统
+ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
+```
+
+详见 [Docker 快速开始](docs/DOCKER.md)
+
+#### 方式 B: 本地编译
+
+适合需要修改代码的开发者：
+
 ```bash
 # 1. 创建工作空间
 mkdir -p ~/robotic_arm_ws/src
