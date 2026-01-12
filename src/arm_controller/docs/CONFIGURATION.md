@@ -280,7 +280,7 @@ interpolation:
     # 时间步长
     target_dt: 0.01           # 插值时间步长 (秒)
     max_velocity: 180.0       # 最大速度 (度/秒)
-    max_acceleration: 360.0   # 最大加速度 (度/秒^2)
+    max_acceleration: 150.0   # 最大加速度 (度/秒^2)
     max_jerk: 720.0           # 最大加加速度 (度/秒^3)
 ```
 
