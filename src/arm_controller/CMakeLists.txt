@@ -6,6 +6,9 @@ if(POLICY CMP0077)
   cmake_policy(SET CMP0077 NEW)
 endif()
 
+# Build options
+option(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable LTO for optimization" OFF)
+
 # 默认禁用测试
 if(NOT DEFINED BUILD_TESTING)
   set(BUILD_TESTING OFF)

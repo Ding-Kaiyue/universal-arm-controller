@@ -76,12 +76,14 @@ cd universal-arm-controller/src
 sudo apt install python3-vcstool
 vcs import < ../deps.repos --recursive
 
-# 3. 编译
+# 3. 编译（使用官方构建脚本）
 cd ~/robotic_arm_ws
 rosdep install --from-paths src --ignore-src -r -y
-colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+./src/universal-arm-controller/build.sh
 source install/setup.bash
 ```
+
+**重要**: 请使用 `build.sh` 而不是直接运行 `colcon build`。构建脚本会检查系统资源并应用安全的构建配置。
 
 ## 🔨 构建指南
 
@@ -158,6 +160,43 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
 # 只编译 arm_controller，速度快 10 倍
 colcon build --packages-select arm_controller
 ```
+
+#### 为什么有些用户会遇到卡死问题？
+
+这个工程为了性能和可移植性，使用了密集的 C++ 模板、多层抽象和复杂的链接依赖。这导致：
+
+- 编译期符号解析复杂度高
+- 最终链接阶段瞬时内存峰值可达 10GB+
+- 低配机器（≤8GB RAM，无 swap）无法安全完成
+
+**这不是代码问题**，而是工程规模问题。大型项目如 MoveIt、LLVM 等也有同样的约束。
+
+**解决方案**（优先级顺序）：
+
+1. **使用官方构建脚本**（推荐）
+   ```bash
+   ./build.sh    # 自动检查资源并应用安全配置
+   ```
+
+2. **确保足够的内存**
+   - 最小需求：12GB 总可用内存（RAM + swap）
+   - 推荐配置：16GB RAM + 8GB swap
+
+   启用 swap：
+   ```bash
+   sudo fallocate -l 16G /swapfile
+   sudo chmod 600 /swapfile
+   sudo mkswap /swapfile
+   sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   ```
+
+3. **使用 Docker**（最简单，无需本地编译）
+   ```bash
+   docker-compose build
+   docker-compose up -d
+   ```
+   详见 [Docker 快速开始](docs/DOCKER.md)
 
 ### 前置说明
 

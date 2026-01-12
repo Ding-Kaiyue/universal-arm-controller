@@ -1,0 +1,26 @@
+# 排除构建产物和缓存
+build/
+log/
+install_backup/
+.colcon/
+
+# 排除 git 和开发文件
+.git/
+.gitignore
+.github/
+.gitmodules
+
+# 排除文档和测试
+docs/
+*.md
+test_*.sh
+run_tests.sh
+coverage_report/
+coverage_report.sh
+
+# 排除其他无关文件
+*.png
+*.puml
+*.py
+.vscode/
+.clangd/

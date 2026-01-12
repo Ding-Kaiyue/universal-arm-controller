@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  robotic-arm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dyk/robotic-arm-controller:latest
+    container_name: robotic_arm_controller
+
+    # 重要：允许 GPU 访问（如果需要）
+    # runtime: nvidia
+
+    # 允许 Docker 容器访问主机网络（ROS 通信）
+    network_mode: host
+
+    # 允许容器访问 USB 设备（CAN 接口）
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+      - /dev/ttyUSB1:/dev/ttyUSB1
+      - /dev/can0:/dev/can0
+      - /dev/can1:/dev/can1
+
+    # 共享主机的 IPC（ROS 通信需要）
+    ipc: host
+
+    # 挂载卷
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw  # X11 显示（如果需要 GUI）
+      - ./data:/root/data                   # 数据目录
+
+    # 环境变量
+    environment:
+      - DISPLAY=${DISPLAY}
+      - ROS_DOMAIN_ID=0
+
+    # 保持容器运行
+    stdin_open: true
+    tty: true
+
+    # 自动重启
+    restart: unless-stopped
