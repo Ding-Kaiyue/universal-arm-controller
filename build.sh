@@ -138,6 +138,14 @@ fi
 # ===============================
 # Build arguments
 # ===============================
+# Preserve CMAKE_PREFIX_PATH from environment and ensure system paths are included
+CMAKE_PREFIX_PATH_ARG="${CMAKE_PREFIX_PATH:-}"
+if [[ -n "$CMAKE_PREFIX_PATH_ARG" ]]; then
+  # Append system default paths to ensure system packages (like NLopt) are found
+  CMAKE_PREFIX_PATH_ARG="/usr/local;/usr;${CMAKE_PREFIX_PATH_ARG}"
+  CMAKE_PREFIX_PATH_ARG="-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH_ARG}"
+fi
+
 BUILD_ARGS=(
   "--executor" "sequential"
   "--parallel-workers" "1"
@@ -148,6 +156,10 @@ BUILD_ARGS=(
   "-DCMAKE_EXE_LINKER_FLAGS=${LINKER_FLAGS}"
   "-DCMAKE_SHARED_LINKER_FLAGS=${LINKER_FLAGS}"
 )
+
+if [[ -n "$CMAKE_PREFIX_PATH_ARG" ]]; then
+  BUILD_ARGS+=("$CMAKE_PREFIX_PATH_ARG")
+fi
 
 if [[ ${#COLCON_ARGS[@]} -gt 0 ]]; then
   BUILD_ARGS+=("${COLCON_ARGS[@]}")
