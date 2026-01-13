@@ -9,6 +9,22 @@ endif()
 # Build options
 option(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable LTO for optimization" OFF)
 
+# Memory-efficient linker settings for low-memory systems
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-keep-memory")
+set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS} -Wl,--no-keep-memory")
+
+# Use lld linker if available (reduces link-time memory by 30-50%)
+find_program(LLD_LINKER ld.lld)
+if(LLD_LINKER)
+  message(STATUS "Found lld linker: ${LLD_LINKER}")
+  set(CMAKE_LINKER ${LLD_LINKER})
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
+else()
+  message(STATUS "lld linker not found, using system default")
+  message(STATUS "To install lld: sudo apt install lld")
+endif()
+
 # 默认禁用测试
 if(NOT DEFINED BUILD_TESTING)
   set(BUILD_TESTING OFF)
