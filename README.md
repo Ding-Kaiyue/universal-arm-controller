@@ -41,25 +41,38 @@
 
 ### 快速安装
 
-#### 方式 A: Docker（推荐，无需编译）
+#### 方式 A: Docker（推荐，特别适合内存受限系统）
 
-适合无编译环境或编译困难的用户：
+**最简单的方式，一条命令完成所有工作。特别推荐给：**
+- ✅ 内存不足 16GB 的系统（避免本地编译卡死）
+- ✅ 无编译环境的用户
+- ✅ 希望快速部署的用户
 
 ```bash
 # 克隆仓库
 git clone https://github.com/Ding-Kaiyue/universal-arm-controller.git
 cd universal-arm-controller
 
-# 使用 Docker Compose 启动
-docker-compose build
+# 一键启动（首次会自动构建，耗时 30-60 分钟）
 docker-compose up -d
+
+# 进入容器
 docker-compose exec robotic-arm bash
 
-# 在容器内启动系统
+# 在容器内启动系统（源代码已编译完成）
 ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 ```
 
-详见 [Docker 快速开始](docs/DOCKER.md)
+**为什么选择 Docker？**
+| 对比项 | 本地编译 | Docker 构建 |
+|--------|---------|------------|
+| 构建时间 | 10-30 分钟 | 30-60 分钟（仅首次）|
+| 内存需求 | **≥16GB RAM + swap** | 4-8GB（Docker 容器可限制）|
+| 系统卡死风险 | ⚠️ 高（低内存系统） | ✅ 低 |
+| 环境依赖冲突 | 可能 | 完全隔离 |
+| 后续编译 | 快（10+ 分钟） | 快（在容器内） |
+
+详见 [Docker 完整指南](docs/DOCKER.md)
 
 #### 方式 B: 本地编译
 
@@ -92,7 +105,7 @@ source install/setup.bash
 | 场景 | 最低配置 | 推荐配置 | 编译时间 |
 |------|---------|---------|---------|
 | 标准开发 | 4核 CPU, 16GB RAM | 8核+, 32GB RAM | 5-10 分钟 |
-| 低配机器 | 2核 CPU, 8GB RAM | - | 20-30 分钟 |
+| 低配机器 | 4核 CPU, 8GB RAM + 8GB swap | 8GB RAM + 16GB swap | 20-30 分钟 |
 
 **注意**: 编译过程中，MoveIt2、Pinocchio 等重型库会导致高内存占用。如果机器配置低，请使用单线程构建模式。
 
@@ -179,8 +192,8 @@ colcon build --packages-select arm_controller
    ```
 
 2. **确保足够的内存**
-   - 最小需求：12GB 总可用内存（RAM + swap）
-   - 推荐配置：16GB RAM + 8GB swap
+   - 最小需求：16GB 总可用内存（RAM + swap）
+   - 推荐配置：16GB RAM + 8GB swap 或更多
 
    启用 swap：
    ```bash
@@ -189,6 +202,9 @@ colcon build --packages-select arm_controller
    sudo mkswap /swapfile
    sudo swapon /swapfile
    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+   # 验证
+   free -h
    ```
 
 3. **使用 Docker**（最简单，无需本地编译）

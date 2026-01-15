@@ -131,3 +131,12 @@ code_review.md
 笛卡尔控制的安全设计（下篇）：四大检验机制 + 容错机制的工程实现.md
 shared_memory_ipc_design*.md
 改动及建议/
+
+# === Docker ===
+CONTAINER_USAGE.md
+Dockerfile
+DOCKER*.md
+docker*
+QUICK_REFERENCE.md
+verify_installation.sh
+deps/

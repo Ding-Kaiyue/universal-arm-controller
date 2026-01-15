@@ -19,7 +19,10 @@ cd "$ROOT_DIR"
 # ===============================
 # Configuration
 # ===============================
-MIN_TOTAL_MEMORY_GB=12
+# Memory requirements - empirically measured from actual builds
+# Peak linker memory for this project: ~10-12GB
+# Safe margin needed: +30% buffer for system overhead
+MIN_TOTAL_MEMORY_GB=16
 DEV_MEMORY_HINT_GB=32
 
 ENABLE_LTO_DEFAULT=OFF
@@ -52,9 +55,25 @@ DEFAULT BEHAVIOR:
 
 ENVIRONMENT REQUIREMENTS:
   Safe build:
-    - >= 12GB total memory (RAM + swap)
+    - >= 16GB total memory (RAM + swap)
+    - 10GB+ free disk space
   Developer build (--dev):
     - Recommended >= 32GB total memory
+
+MEMORY SETUP (if insufficient):
+  1. Check current memory:
+     free -h
+
+  2. Add swap (example: 16GB swap):
+     sudo fallocate -l 16G /swapfile
+     sudo chmod 600 /swapfile
+     sudo mkswap /swapfile
+     sudo swapon /swapfile
+     echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+  3. Verify:
+     free -h
+     swapon --show
 
 EOF
 }
@@ -102,15 +121,24 @@ info "System memory: RAM=${RAM_GB}GB, SWAP=${SWAP_GB}GB, Total=${TOTAL_GB}GB"
 if [[ "$TOTAL_GB" -lt "$MIN_TOTAL_MEMORY_GB" ]]; then
   error "Insufficient memory for build.
 
+CRITICAL: This project requires significant peak linker memory (~10-12GB).
+
 Required: >= ${MIN_TOTAL_MEMORY_GB}GB total (RAM + swap)
 Current : ${TOTAL_GB}GB
+Deficit : $((MIN_TOTAL_MEMORY_GB - TOTAL_GB))GB needed
 
-Suggested solution (example 16GB swap):
+SOLUTION:
+Add swap space to reach ${MIN_TOTAL_MEMORY_GB}GB total. Example (add 16GB swap):
 
   sudo fallocate -l 16G /swapfile
   sudo chmod 600 /swapfile
   sudo mkswap /swapfile
   sudo swapon /swapfile
+  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+Then verify with: free -h
+
+After adding swap, rerun this script.
 "
 fi
 
