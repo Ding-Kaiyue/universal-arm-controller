@@ -16,9 +16,7 @@
 
 ### 贡献流程
 
-<<<<<<< HEAD
 1. **Fork 项目**
-=======
 ## 🌳 分支策略
 
 ### 主要分支
@@ -142,7 +140,6 @@ cppcheck src/
 ### 第6步：提交 Pull Request
 
 1. **Push 到你的 fork**
->>>>>>> develop
    ```bash
    git clone https://github.com/Ding-Kaiyue/universal-arm-controller.git
    cd universal-arm-controller
