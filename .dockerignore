@@ -29,12 +29,6 @@ README.md
 LICENSE
 *.md
 
-# Docker 相关
-Dockerfile
-docker-compose.yml
-.dockerignore
-*.tar.gz
-
 # 数据
 data
 *.bag
