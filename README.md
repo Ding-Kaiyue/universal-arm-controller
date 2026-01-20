@@ -22,6 +22,10 @@
 **方式 1：从 Docker Hub 拉取**
 
 ```bash
+# 配置 CAN 接口
+sudo ip link set can0 txqueuelen 1000
+sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off restart-ms 100
+
 xhost +local:docker
 docker pull dingkaiyue/robotic-arm-controller:latest
 docker run -dit --name robotic_arm \
@@ -34,18 +38,21 @@ docker run -dit --name robotic_arm \
 docker exec -it robotic_arm bash
 source /opt/robotic_arm_ws/install/setup.bash
 
-# 配置 CAN 接口
-sudo ip link set can0 txqueuelen 1000
-sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off restart-ms 100
-
 # 启动系统
 ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 ```
+注意：国内用户使用此方式请提前配置代理
 
 **方式 2：从百度网盘下载**
 
 1. 下载镜像文件：[robotic-arm-controller-latest.tar.gz](https://pan.baidu.com/s/19Tc-so0SimXrALYAQxx3pQ?pwd=j5v9)（644MB，提取码：j5v9）
-2. 加载镜像：
+2. 配置 CAN 接口
+```bash
+# 配置 CAN 接口
+sudo ip link set can0 txqueuelen 1000
+sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off restart-ms 100
+```
+3. 加载镜像：
 ```bash
 docker load < robotic-arm-controller-latest.tar.gz
 
@@ -59,10 +66,6 @@ docker run -dit --name robotic_arm \
 docker exec -it robotic_arm bash
 source /opt/robotic_arm_ws/install/setup.bash
 
-# 配置 CAN 接口
-sudo ip link set can0 txqueuelen 1000
-sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off restart-ms 100
-
 # 启动系统
 ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 ```
@@ -70,6 +73,10 @@ ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 ### 本地编译
 
 ```bash
+# 配置 CAN 接口
+sudo ip link set can0 txqueuelen 1000
+sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off restart-ms 100
+
 mkdir -p ~/robotic_arm_ws/src && cd ~/robotic_arm_ws/src
 git clone https://github.com/Ding-Kaiyue/universal-arm-controller.git
 cd universal-arm-controller/src
@@ -82,15 +89,11 @@ rosdep install --from-paths src --ignore-src -r -y
 (或者colcon build)
 source install/setup.bash
 
-# 配置 CAN 接口
-sudo ip link set can0 txqueuelen 1000
-sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off restart-ms 100
-
 # 启动系统
 ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 ```
 
-**具体实现细节详见 [文档中心](docs/README.md)**
+**具体使用及实现细节详见 [文档中心](docs/README.md)**
 
 ## 许可证
 

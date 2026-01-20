@@ -2,7 +2,7 @@
 
 欢迎来到 Universal Arm Controller 的文档中心！这里包含了项目的所有技术文档、快速开始指南、架构设计和故障排除信息。
 
-## 文档目录
+## 完整文档列表
 
 ### 快速上手
 
@@ -45,33 +45,6 @@
 - **[CSAPS 库](https://github.com/Ding-Kaiyue/csaps)** - C++ 样条曲线库
   - 功能: 用于轨迹平滑、录制轨迹后处理
   - 特性: 高效曲线拟合、光滑输出
-
----
-
-## 🎯 快速导航
-
-### 我是新用户，想快速开始
-
-1. 阅读 [README](../README.md) 了解项目
-2. 跟随 [安装指南](getting_started/INSTALLATION.md) 完成环境配置
-3. 了解 [系统架构与组件](overview/ARCHITECTURE.md)
-
-### 我需要安装和配置
-
-1. 查看 [安装指南](getting_started/INSTALLATION.md) 完整的安装步骤
-2. 参考 [Arm Controller 配置指南](../src/arm_controller/docs/CONFIGURATION.md) 配置硬件绑定关系
-
-### 我是开发者
-
-1. 阅读 [系统架构与组件](overview/ARCHITECTURE.md) 了解设计
-2. 查看 [Arm Controller 文档中心](../src/arm_controller/docs/README.md) 了解控制模块
-3. 参考 [开发指南](../.github/CONTRIBUTING.md) 了解贡献流程
-
-### 我遇到了问题
-
-1. 查看 [故障排除](getting_started/TROUBLESHOOTING.md) 寻找解决方案
-2. 在 GitHub Issues 中搜索类似问题
-3. 联系维护者: <kaiyue.ding@raysense.com>
 
 ---
 
