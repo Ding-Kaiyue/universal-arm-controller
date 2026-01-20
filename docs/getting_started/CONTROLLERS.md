@@ -2,7 +2,7 @@
 
 本文档详细介绍 Arm Controller 支持的所有控制器及其使用方法。
 
-## 📋 目录
+## 目录
 
 - [控制器总览](#控制器总览)
   - [控制器分类](#控制器分类)
@@ -33,31 +33,58 @@
 系统支持三类控制器:
 
 | 类别 | 控制器 | 状态 | 说明 |
-|------|--------|------|------|
+|:------:|:--------:|:------:|:------:|
 | **轨迹控制器** | MoveJ | ✅ 稳定 | 关节空间点对点运动 |
 | | MoveL | ✅ 稳定 | 笛卡尔空间直线运动 |
 | | MoveC | ✅ 稳定 | 圆弧/圆周轨迹运动 |
 | **速度控制器** | JointVelocity | ✅ 稳定 | 关节空间速度控制 |
-| | CartesianVelocity | 🚧 开发中 | 笛卡尔速度控制 |
+| | CartesianVelocity | ✅ 稳定 | 笛卡尔速度控制 |
 | **实用控制器** | HoldState | ✅ 稳定 | 安全保持状态 |
 | | Move2Start | ✅ 稳定 | 移动到启动位置 |
 | | Move2Initial | ✅ 稳定 | 移动到初始位置 |
 | | ROS2ActionControl | ✅ 稳定 | MoveIt 轨迹执行 |
-| | Disable | ✅ 稳定 | 机械臂失能 |
 
 ### 模式切换
 
-所有控制器通过统一的服务接口切换:
+所有控制器通过统一的服务接口切换，使用以下命令格式。
 
 ```bash
 ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode \
-  "{mode: '<MODE_NAME>', mapping: '<MAPPING_NAME>'}"
+  "{mode: '<MODE>', mapping: '<MAPPING>'}"
 ```
 
 **参数说明**:
+- `<MODE>`: 目标控制模式（详见表 2-1）
+- `<MAPPING>`: 机械臂映射名称（详见表 2-2）
 
-- `mode`: 目标控制模式名称
-- `mapping`: 机械臂映射名称 (`single_arm`, `left_arm`, `right_arm`)
+**表 2-1：控制模式对照表**
+
+| `<MODE>` | 类别 | 说明 |
+|:---:|:---:|:---:|
+| **MoveJ** | 轨迹控制 | 关节空间点对点运动 |
+| **MoveL** | 轨迹控制 | 末端执行器在笛卡尔空间沿直线运动 |
+| **MoveC** | 轨迹控制 | 末端执行器沿圆弧或圆周路径运动 |
+| **JointVelocity** | 速度控制 | 实时控制各关节的速度 |
+| **CartesianVelocity** | 速度控制 | 末端执行器笛卡尔空间速度控制 |
+| **Move2Start** | 实用控制 | 一键移动到启动位置（机械臂运动的起始位姿，非奇异位姿） |
+| **Move2Initial** | 实用控制 | 一键移动到初始位置（机械臂的折叠位姿，可能奇异） |
+| **HoldState** | 实用控制 | 安全保持状态，用于模式切换时的安全过渡|
+| **ROS2ActionControl** | 实用控制 | 通过 ROS2 Action 接收 MoveIt 的轨迹执行请求 |
+| **PointRecord** | 示教 | 记录当前机械臂的关节位置到文件中 |
+| **PointReplay** | 示教 | 移动到之前用 PointRecord 记录的位置 |
+| **TrajectoryRecord** | 示教 | 持续记录机械臂的运动轨迹到文件中 |
+| **TrajectoryReplay** | 示教 | 重现之前用 TrajectoryRecord 记录的机械臂运动轨迹 |
+
+> [!CAUTION]
+> HoldState 模式由系统自动管理，用于模式切换时的安全过渡。用户不应主动切换。
+
+**表 2-2：机械臂映射对照表**
+
+| `<MAPPING>` | 说明 |
+|:---:|:---:|
+| **single_arm** | 单臂控制（适用于单臂系统） |
+| **left_arm** | 左臂控制（适用于双臂系统） |
+| **right_arm** | 右臂控制（适用于双臂系统） |
 
 ---
 
@@ -521,7 +548,7 @@ ros2 topic pub --once /controller_api/movel_action/right_arm geometry_msgs/msg/P
 
 ### 协同控制
 
-> 🚧 **规划中** - 双臂协同控制功能正在规划中。
+> ✅ **已完成** - 双臂协同控制功能正在规划中。
 
 ---
 

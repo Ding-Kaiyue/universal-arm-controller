@@ -8,8 +8,6 @@
 - [前置准备](#前置准备)
 - [标准安装流程](#标准安装流程)
 - [安装验证](#安装验证)
-- [故障排除](#故障排除)
-
 ---
 
 ## 系统要求
@@ -296,4 +294,4 @@ ls ~/robotic_arm_ws/install/robotic_arm_bringup/share/robotic_arm_bringup/
 
 ---
 
-**遇到问题？** 查看 [故障排除指南](TROUBLESHOOTING.md) 或提交 [GitHub Issue](https://github.com/Ding-Kaiyue/universal-arm-controller/issues)。
+**遇到问题？** 查看 **[故障排除](TROUBLESHOOTING.md)** 或提交 **[Issue](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=installation_issue.md)**

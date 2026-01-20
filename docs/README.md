@@ -48,28 +48,37 @@
 
 ---
 
-## 🔗 外部资源
+## 外部资源
 
-### 技术参考
+### 官方文档与参考
 
 - **[ROS2 Humble](https://docs.ros.org/en/humble/)** - ROS2 官方文档
 - **[MoveIt 2](https://moveit.picknik.ai/humble/)** - MoveIt 官方教程
-- **[Eigen](https://eigen.tuxfamily.org/)** - 线性代数库文档
+
+### 数学与优化
+
+- **[eigenpy](https://github.com/stack-of-tasks/eigenpy)** - Eigen 的 Python 绑定
+- **[OSQP](https://github.com/osqp/osqp)** - 二次规划求解器
+- **[OsqpEigen](https://github.com/gbionics/osqp-eigen.git)** - OSQP 的 C++ 包装
+- **[NLopt](https://github.com/stevengj/nlopt)** - 非线性优化库
+
+### 机器人学
+
+- **[Pinocchio](https://github.com/stack-of-tasks/pinocchio)** - 刚体动力学库
+- **[TracIK](https://github.com/aprotyas/trac_ik)** - 逆运动学求解器
+
+### Python 包
+
+- **[qdldl](https://pypi.org/project/qdldl/)** - 二次规划求解器的 Python 包，为 **[Pinocchio](https://github.com/stack-of-tasks/pinocchio)** 的依赖库
 
 ### 社区
 
-- **[GitHub Issues](https://github.com/Ding-Kaiyue/universal-arm-controller/issues)** - 问题跟踪与讨论
-- **[GitHub Discussions](https://github.com/Ding-Kaiyue/universal-arm-controller/discussions)** - 社区讨论
+- **[Bug 报告](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=bug_report.md)** - 报告使用中的 Bug
+- **[安装问题](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=installation_issue.md)** - 报告安装过程中的问题
+- **[功能请求](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=feature_request.md)** - 请求新功能或改进
+- **[使用问题](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=usage_question.md)** - 询问库的使用方法
+- **[安全漏洞报告](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=security_report.md)** - 报告安全漏洞
 
 ---
 
-## 💡 使用提示
-
-- 📌 **使用目录**: 每个文档开头都有目录，便于快速导航
-- 🔗 **交叉链接**: 点击文档中的链接快速跳转到相关内容
-- 🔍 **搜索功能**: 使用浏览器的查找功能（Ctrl+F）在文档中搜索关键词
-- 📱 **移动友好**: 所有文档都支持在手机/平板上查看
-
----
-
-**最后更新**: 2025年12月29日 | **维护者**: [Ding-Kaiyue](https://github.com/Ding-Kaiyue)
+**最后更新**: 2026年1月20日 | **维护者**: [Ding-Kaiyue](https://github.com/Ding-Kaiyue)
