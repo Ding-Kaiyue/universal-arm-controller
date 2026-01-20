@@ -2,25 +2,24 @@
 
 欢迎来到 Universal Arm Controller 的文档中心！这里包含了项目的所有技术文档、快速开始指南、架构设计和故障排除信息。
 
-## 📚 文档目录
+## 文档目录
 
-### 🚀 快速上手
+### 快速上手
 
 - **[README](../README.md)** - 项目简介与快速安装
-- **[快速开始](QUICKSTART.md)** - 5分钟快速上手教程
-- **[安装指南](INSTALLATION.md)** - 详细安装步骤与前置准备
+- **[本地安装指南](getting_started/INSTALLATION.md)** - 详细安装步骤与前置准备
 
-### 📖 用户文档
+### 用户文档
 
-- **[系统概览](COMPONENTS.md)** - 系统组件与架构说明
+- **[控制命令使用指南](getting_started/CONTROLLERS.md)** - 所有控制模式与使用方法
 - **[故障排除](TROUBLESHOOTING.md)** - 常见问题与解决方案
 
-### 👨‍💻 开发者文档
-
+### 开发者文档
+- **[系统概览](COMPONENTS.md)** - 系统组件与架构说明
 - **[系统架构](ARCHITECTURE.md)** - 总体架构设计与设计理念
 - **[开发指南](../.github/CONTRIBUTING.md)** - 贡献指南与开发流程
 
-### 🔗 组件文档
+### 组件文档
 
 #### 本仓库维护的组件
 
