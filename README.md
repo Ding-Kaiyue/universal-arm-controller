@@ -17,7 +17,9 @@
 
 ## 快速开始
 
-**Docker（低性能主控推荐）**
+### Docker（低性能主控推荐）
+
+**方式 1：从 Docker Hub 拉取**
 
 ```bash
 xhost +local:docker
@@ -40,7 +42,32 @@ sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000
 ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 ```
 
-**本地编译**
+**方式 2：从百度网盘下载**
+
+1. 下载镜像文件：[robotic-arm-controller-latest.tar.gz](https://pan.baidu.com/s/19Tc-so0SimXrALYAQxx3pQ?pwd=j5v9)（644MB，提取码：j5v9）
+2. 加载镜像：
+```bash
+docker load < robotic-arm-controller-latest.tar.gz
+
+docker run -dit --name robotic_arm \
+  --network=host \
+  -e DISPLAY=$DISPLAY \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  -v $HOME/.Xauthority:/root/.Xauthority:rw \
+  dingkaiyue/robotic-arm-controller:latest
+
+docker exec -it robotic_arm bash
+source /opt/robotic_arm_ws/install/setup.bash
+
+# 配置 CAN 接口
+sudo ip link set can0 txqueuelen 1000
+sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off restart-ms 100
+
+# 启动系统
+ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
+```
+
+### 本地编译
 
 ```bash
 mkdir -p ~/robotic_arm_ws/src && cd ~/robotic_arm_ws/src
@@ -75,7 +102,7 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
   - 使用预定义的 Issue 模板报告 Bug、功能请求或安全问题
 - **Email**: <kaiyue.ding@raysense.com>
 
-## 🤝 贡献
+## 贡献
 
 欢迎贡献！详见 [CONTRIBUTING.md](.github/CONTRIBUTING.md)
 
