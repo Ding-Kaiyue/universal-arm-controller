@@ -12,11 +12,10 @@
 ### 用户文档
 
 - **[控制命令使用指南](getting_started/CONTROLLERS.md)** - 所有控制模式与使用方法
-- **[故障排除](TROUBLESHOOTING.md)** - 常见问题与解决方案
+- **[故障排除](getting_started/TROUBLESHOOTING.md)** - 常见问题与解决方案
 
 ### 开发者文档
-- **[系统概览](COMPONENTS.md)** - 系统组件与架构说明
-- **[系统架构](ARCHITECTURE.md)** - 总体架构设计与设计理念
+- **[系统架构与组件](overview/ARCHITECTURE.md)** - 系统组件、架构设计与设计理念
 - **[开发指南](../.github/CONTRIBUTING.md)** - 贡献指南与开发流程
 
 ### 组件文档
@@ -54,23 +53,23 @@
 ### 我是新用户，想快速开始
 
 1. 阅读 [README](../README.md) 了解项目
-2. 跟随 [快速开始](QUICKSTART.md) 5分钟上手
-3. 了解 [系统概览](COMPONENTS.md)
+2. 跟随 [安装指南](getting_started/INSTALLATION.md) 完成环境配置
+3. 了解 [系统架构与组件](overview/ARCHITECTURE.md)
 
 ### 我需要安装和配置
 
-1. 查看 [安装指南](INSTALLATION.md) 完整的安装步骤
+1. 查看 [安装指南](getting_started/INSTALLATION.md) 完整的安装步骤
 2. 参考 [Arm Controller 配置指南](../src/arm_controller/docs/CONFIGURATION.md) 配置硬件绑定关系
 
 ### 我是开发者
 
-1. 阅读 [系统架构](ARCHITECTURE.md) 了解设计
+1. 阅读 [系统架构与组件](overview/ARCHITECTURE.md) 了解设计
 2. 查看 [Arm Controller 文档中心](../src/arm_controller/docs/README.md) 了解控制模块
-3. 参考 [开发指南](./.github/CONTRIBUTING.md) 了解贡献流程
+3. 参考 [开发指南](../.github/CONTRIBUTING.md) 了解贡献流程
 
 ### 我遇到了问题
 
-1. 查看 [故障排除](TROUBLESHOOTING.md) 寻找解决方案
+1. 查看 [故障排除](getting_started/TROUBLESHOOTING.md) 寻找解决方案
 2. 在 GitHub Issues 中搜索类似问题
 3. 联系维护者: <kaiyue.ding@raysense.com>
 
