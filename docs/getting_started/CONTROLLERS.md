@@ -300,3 +300,25 @@ ros2 topic echo /joint_states
 ros2 run tf2_tools tf2_echo base_link Link6
 ```
 
+---
+
+## 下一步
+
+至此，你已经掌握了 Universal Arm Controller 中所有主要控制模式的使用方法，包括：
+
+- 轨迹控制（MoveJ / MoveL / MoveC）
+- 速度控制（JointVelocity / CartesianVelocity）
+- 实用控制（Move2Start / Move2Initial / HoldState）
+- 示教模式（PointRecord / TrajectoryRecord 及回放）
+
+接下来你可以：
+
+- 👉 参考 **[系统启动指南](INSTALLATION.md)** 重新启动系统并进行完整测试  
+- 👉 在复杂任务中结合 **示教模式 + 轨迹回放** 进行离线编程  
+- 👉 如果在使用过程中遇到任何异常，请优先查阅 **[故障排除](TROUBLESHOOTING.md)**  
+
+---
+
+> [!NOTE]
+> 本文档侧重于“如何使用控制接口”。  
+> 如果你是开发者，想深入理解控制器实现、插件机制或架构设计，请参阅 **[系统架构与组件说明](overview/ARCHITECTURE.md)** 。

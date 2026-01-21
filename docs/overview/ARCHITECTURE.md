@@ -134,6 +134,12 @@ Universal Arm Controller 是一个完整的机械臂控制系统解决方案，�
 
 ---
 
+### CSAPS (轨迹平滑库)
+
+**GitHub**: [Ding-Kaiyue/csaps-cpp-redo](https://github.com/Ding-Kaiyue/csaps-cpp-redo)
+
+---
+
 ## 分层架构
 
 ### 整体架构图

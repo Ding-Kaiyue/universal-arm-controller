@@ -4,10 +4,8 @@
 
 ## 目录
 
-- [系统要求](#系统要求)
-- [前置准备](#前置准备)
-- [标准安装流程](#标准安装流程)
-- [安装验证](#安装验证)
+[TOC]
+
 ---
 
 ## 系统要求
@@ -292,6 +290,10 @@ ls ~/robotic_arm_ws/install/robotic_arm_bringup/share/robotic_arm_bringup/
 # 应该看到 robotic_arm_real.launch.py
 ```
 
----
+如果上述文件存在，说明安装与编译阶段已经完成，可以进入下一步的系统启动与控制命令使用。
 
-**遇到问题？** 查看 **[故障排除](TROUBLESHOOTING.md)** 或提交 **[Issue](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=installation_issue.md)**
+## 下一步
+
+- 按照 **[控制命令使用指南](CONTROLLERS.md)** 启动系统并尝试发送第一条控制命令
+- 如果在启动过程中遇到问题，请优先参考 **[故障排除](TROUBLESHOOTING.md)**
+
