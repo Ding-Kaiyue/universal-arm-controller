@@ -10,10 +10,13 @@
 
 **1. [README](../README.md)**
    项目概览、支持能力与快速开始。
+
 **2. [安装指南](getting_started/INSTALLATION.md)**
    环境准备、依赖安装、源码构建。
+
 **3. [控制命令使用指南](getting_started/CONTROLLERS.md)**
    所有控制模式的使用方法与示例命令。
+
 **4. [故障排除](getting_started/TROUBLESHOOTING.md)**
    编译失败、启动异常、机械臂不动等高频问题。
 
@@ -101,7 +104,9 @@
 - **[OSQP](https://github.com/osqp/osqp)**
 - **[NLopt](https://github.com/stevengj/nlopt)**
 
-### 问题反馈与社区
+---
+
+## 问题反馈与社区
 
 - **[Bug 报告](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=bug_report.md)**
 - **[安装问题](https://github.com/Ding-Kaiyue/universal-arm-controller/issues/new?template=installation_issue.md)**
