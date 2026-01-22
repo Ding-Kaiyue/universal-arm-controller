@@ -1,9 +1,5 @@
 # Universal Arm Controller - 系统集成指南
 
-[TOC]
-
----
-
 本指南面向**系统集成者（System Integrator）**，即负责将机械臂控制系统集成到完整机器人产品或产线系统中的工程人员。如果你只是使用本系统控制机械臂，请优先阅读 [Getting Started](../getting_started/README.md) 部分。
 
 ---

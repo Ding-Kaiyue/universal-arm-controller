@@ -2,10 +2,6 @@
 
 详细的 Universal Arm Controller 环境配置步骤。
 
-## 目录
-
-[TOC]
-
 ---
 
 ## 系统要求
