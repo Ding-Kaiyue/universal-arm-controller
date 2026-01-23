@@ -1,455 +1,677 @@
-# 系统架构与组件
+# Universal Arm Controller - Architecture Design
 
-Universal Arm Controller 系统组件、架构设计与设计理念。
+## 1. 设计目标与架构原则
 
-## 📋 目录
+### 设计目标
 
-- [系统概览](#系统概览)
-- [核心组件](#核心组件)
-- [依赖库](#依赖库)
-- [分层架构](#分层架构)
-- [组件交互](#组件交互)
-- [设计理念](#设计理念)
-- [数据流](#数据流)
-- [性能指标](#性能指标)
+Universal Arm Controller 的架构设计目标是：
 
----
+- **屏蔽硬件差异**：通过统一的硬件抽象接口，支持不同总线（CAN-FD / EtherCAT）和电机驱动
+- **控制模式可插拔**：支持多种控制模式（轨迹、速度、示教等），新模式可独立开发和注册
+- **ROS 2 原生集成**：基于 ROS 2 Action/Topic/Service，与 ROS 生态无缝集成
+- **实时性与可维护性平衡**：在 100 Hz 控制频率下保证稳定性，同时保持代码清晰
 
-## 系统概览
+### 架构约束
 
-Universal Arm Controller 是一个完整的机械臂控制系统解决方案，采用模块化架构，由多个独立组件组成。整个系统分为三层：
+- **不提供硬实时保证**：系统运行在标准 Linux + ROS 2，无法保证 < 1 μs 抖动
+- **轨迹规划职责分工**：MoveJ 依赖 MoveIt2 规划，MoveL/MoveC 使用自有轨迹生成算法
+- **不包含硬件安全回路**：提供软件级急停逻辑，但不包含硬件抱闸或功能安全（SIL 2/3）认证
+- **支持多臂控制**：主分支支持单臂，`feature/ipc-dual-arm` 分支支持双臂协同控制
 
-1. **应用层** - ROS2 节点和控制器
-2. **控制层** - 轨迹规划和插值
-3. **硬件层** - CAN-FD 通信和电机驱动
+### 关键设计原则
 
----
-
-## 核心组件
-
-### 本仓库维护的组件
-
-#### 1. Arm Controller（运动控制核心）
-
-**位置**: `src/arm_controller/`
-
-运动控制系统的核心组件，负责：
-
-- ✅ 多模式控制（MoveJ、MoveL、MoveC、JointVelocity）
-- ✅ 状态管理与模式切换
-- ✅ 安全监控与限位保护
-- ✅ ROS2 接口与服务
-- ✅ MoveIt2 集成
-
-**特性**:
-
-- 双节点架构：ControllerManager + TrajectoryController
-- 原生双臂支持
-- 事件驱动的状态监控
-- 微秒级控制延迟
-
-**文档**: [Arm Controller 文档中心](../../src/arm_controller/docs/README.md)
-
-#### 2. Controller Interfaces（ROS2 消息定义）
-
-**位置**: `src/controller_interfaces/`
-
-定义系统中使用的所有 ROS2 消息和服务：
-
-- 工作模式切换服务
-- 关节状态消息
-- 控制命令消息
-- 系统状态消息
-
-#### 3. Robotic Arm Bringup（系统启动）
-
-**位置**: `src/robotic_arm_bringup/`
-
-系统启动和配置：
-
-- ROS2 启动文件
-- YAML 配置文件
-- 参数管理
+1. **分层解耦**：应用层、控制层、硬件层职责清晰分离
+2. **观察者模式**：硬件状态变化通过事件回调通知上层，而非轮询
+3. **模式切换安全**：同一时刻只有一个控制器活跃，切换时进行状态验证
+4. **自定义注册机制**：不依赖 pluginlib，通过 YAML 配置驱动控制器注册
+5. **接口稳定性**：ROS 2 接口（`/controller_api/*`）向后兼容，硬件接口仅供内部使用
 
 ---
 
-## 依赖库
+## 2. 系统整体分层架构
 
-### Hardware Driver（CAN-FD 硬件驱动）
+### 分层结构
 
-**GitHub**: [Ding-Kaiyue/hardware-driver](https://github.com/Ding-Kaiyue/hardware-driver)
+分为 7 层，从上到下的数据流向：
 
-提供硬件级别的电机控制能力：
+![系统架构图](../diagrams/architecture_7layers.png)
 
-- CAN-FD 高速通信（支持 CAN 2.0 和 CAN-FD）
-- 实时电机控制（位置、速度、力矩、MIT 模式）
-- 事件驱动的状态监控
-- 观察者模式与事件总线
-- 线程安全设计
-- 微秒级控制延迟
+### 各层职责概览
 
-**关键特性**:
+| 层级 | 职责 | 可替换性 |
+|------|------|--------|
+| Layer 1: Application Layer | 发送控制命令，接收状态反馈 | 用户代码，不属于本系统 |
+| Layer 2: ROS 2 Node Layer | 管理控制器生命周期、模式切换、轨迹动作处理 | 核心稳定，不建议替换 |
+| Layer 3: Controller Layer | 实现具体控制模式（MoveJ/MoveL/速度/示教等） | 强烈推荐扩展新模式 |
+| Layer 3.5: Trajectory Interpolation | 轨迹插值、平滑处理 | 可替换，需谨慎 |
+| Layer 4: Hardware Abstraction Layer | 统一硬件接口、异步执行、观察者模式 | 稳定接口，不建议修改 |
+| Layer 5: Hardware Driver Layer | RobotHardware 驱动（CAN-FD/EtherCAT/USB2CAN） | 推荐扩展新总线 |
+| Layer 6: Motor Driver Layer | 具体电机协议实现 | 推荐扩展新电机 |
+| Layer 7: Physical Hardware | 电机、编码器、传感器 | 不可修改（物理硬件） |
 
-- 支持多个电机并发控制
-- CPU 亲和性绑定
-- 背压控制机制
+### 数据流与控制流方向
 
----
+**命令流向（从上到下）**：
+![控制命令数据流](../diagrams/command_flow.png)
 
-### Trajectory Interpolator（轨迹插值库）
+**状态反馈路径（从下到上）**：
+![状态反馈数据流](../diagrams/feedback_path.png)
 
-**GitHub**: [Ding-Kaiyue/trajectory-interpolator](https://github.com/Ding-Kaiyue/trajectory-interpolator)
-
-提供实时的轨迹插值能力：
-
-- 样条曲线插值（B-spline、Bezier）
-- 动力学约束满足（速度、加速度、加加速度）
-- 实时轨迹生成
-- 运动平滑处理
-
-**应用场景**:
-
-- 从规划的路径生成光滑的执行轨迹
-- 满足机械臂的动力学限制
-- 实时生成控制指令
+> [!IMPORTANT]
+> 系统采用**开环轨迹执行**模式：执行前读取一次当前位置用于规划，规划完成后按轨迹逐步执行，不进行反馈控制。状态反馈（500Hz/20Hz）用于应用层监测和显示，不参与轨迹跟踪。
 
 ---
 
-### Trajectory Planning（轨迹规划库）
+## 3. 核心运行时组件
 
-**GitHub**: [Ding-Kaiyue/trajectory-planning](https://github.com/Ding-Kaiyue/trajectory-planning)
+> [!TIP]
+> 本节从系统级视角描述 Universal Arm Controller 的核心结构单元及其依赖关系，用于支持架构评审与系统级理解。
+> 后续 3.1–3.4 小节将分别对上述四个结构单元中的关键实现组件进行展开说明，面向具体扩展开发者。
 
-基于 MoveIt2 的轨迹规划能力：
+### 3.0 系统级架构视角（Architecture View）
 
-- 多种规划算法集成（RRT、RRTConnect 等）
-- 碰撞检测与避障
-- 逆运动学求解（通过 TracIK）
-- 路径优化
+本系统采用**四层结构单元**设计，通过明确的职责边界和单向依赖实现模块独立演进。
 
-**应用场景**:
+#### 结构单元划分
 
-- MoveJ 和 MoveL 控制的路径规划
-- 碰撞检测和避障
-- IK 求解
+**1. 控制编排单元（Control Orchestration）**
+- 核心组件：ControllerManager
+- 职责：管理控制器生命周期、模式切换、状态机维护
+- 特点：单一活跃原则、原子性切换、决策中心
 
----
+**2. 控制策略单元（Control Strategy）**
+- 核心组件：5 个基类 + 多个具体控制器实现  
+- 职责：实现多种控制模式（轨迹、速度、示教等）  
+- 特点：工厂注册、热插拔、独立演进能力强 
 
-### CSAPS (轨迹平滑库)
+**3. 算法单元（Algorithm Layer）**
+- 核心组件：轨迹生成、插值器、平滑器  
+- 职责：提供纯数学计算能力（无业务逻辑）  
+- 特点：无 ROS 依赖、可完全替换  
 
-**GitHub**: [Ding-Kaiyue/csaps-cpp-redo](https://github.com/Ding-Kaiyue/csaps-cpp-redo)
+**4. 硬件抽象单元（Hardware Abstraction）**
+- 核心组件：HardwareManager + RobotHardware 接口  
+- 职责：统一硬件接口、屏蔽总线差异、执行命令、采集反馈  
+- 特点：观察者模式、异步执行、稳定接口 
 
----
+#### 系统级约束与依赖方向
 
-## 分层架构
-
-### 整体架构图
-
+系统采用严格的**单向依赖结构**：
 ```
-┌─────────────────────────── Universal Arm Controller ──────────────────────┐
-│                                                                           │
-│  ┌──────────────────────────┐         ┌──────────────────────────┐        │
-│  │  Arm Controller Nodes    │         │  User Applications       │        │
-│  │ (ControllerManager +     │◄────────│  - ROS2 Nodes           │         │
-│  │  TrajectoryController)   │         │  - Python Scripts       │         │
-│  └──────────────┬───────────┘         └──────────────────────────┘        │
-│                 │                                                         │
-│                 │ (Motion Commands & Feedback)                            │
-│                 ▼                                                         │
-│  ┌──────────────────────────┐         ┌──────────────────────────┐        │
-│  │ Trajectory Planning      │         │ Trajectory Interpolator  │        │
-│  │ (MoveIt2 + TracIK)       │         │ (Spline + Dynamics)      │        │
-│  └──────────────┬───────────┘         └──────────────┬───────────┘        │
-│                 │                                    │                    │
-│                 └────────────┬───────────────────────┘                    │
-│                              │                                            │
-│                    ┌─────────▼────────┐                                   │
-│                    │ Hardware Manager │                                   │
-│                    │ (Unified Driver) │                                   │
-│                    └─────────┬────────┘                                   │
-│                              │                                            │
-│                    ┌─────────▼────────┐                                   │
-│                    │  CAN-FD Bus      │                                   │
-│                    │  (Communication) │                                   │
-│                    └─────────┬────────┘                                   │
-└────────────────────────────────┼──────────────────────────────────────────┘
-                                 │
-                        ┌────────▼────────┐
-                        │    Hardware     │
-                        │  (Motors/Arm)   │
-                        └─────────────────┘
+Control Orchestration
+    ↓
+Control Strategy (调用 Algorithm + Hardware)
+    ↓
+Algorithm Layer + Hardware Abstraction
 ```
 
-### 分层设计详解
+**明确禁止**：
+- 硬件层反向调用控制器
+- 算法层包含业务逻辑
+- 控制器绕过 HardwareManager 直接访问底层硬件
 
-#### 第一层：应用层
+通过上述四个结构单元的划分，本系统的宏观运行结构可以被理解为：
 
-**负责**：用户交互、模式管理、系统状态
+- 由 **Control Orchestration** 负责全局调度与状态机控制；
+- 由 **Control Strategy** 承载具体的控制模式与业务逻辑；
+- 由 **Algorithm Layer** 提供可替换的纯算法能力；
+- 由 **Hardware Abstraction** 屏蔽具体硬件差异并执行底层命令。
 
-**核心组件**：
+这一视角用于回答“系统由哪些结构单元组成，以及它们之间如何协作”的问题，  
+它刻画的是**架构级依赖关系**，而非具体类或文件结构。
 
-- **ControllerManager** - 控制器管理和模式切换
-- **TrajectoryController** - 轨迹执行控制
-- **ROS2 Interfaces** - 服务、话题、动作
+在接下来的章节中，文档将从这一系统级视角下沉到**具体运行时组件层面**，  
+逐一说明这些结构单元在代码中的实际承载者及其职责边界。
 
-**特点**：
+### 3.0.1 ControllerManager（控制编排器）
 
-- 提供统一的 ROS2 接口
-- 隐藏下层复杂性
-- 支持多种控制模式
+在系统级结构单元划分中，**Control Orchestration** 结构单元的核心实现载体即为 ControllerManager。
+
+从本节开始，文档将从“结构单元”层面切换到“具体运行时组件”层面，  
+对每一个关键组件说明：
+
+- 其在整体架构中的位置  
+- 承担的核心职责  
+- 与上下层的依赖关系  
+- 以及在代码中的实现位置  
+
+ControllerManager 是系统的**全局调度中心**，负责控制器生命周期管理、模式切换和系统状态机维护。
+
+**位置**：`src/arm_controller/src/controller_manager_section.hpp/cpp`
+
+**职责**：
+- 管理所有控制器的生命周期（创建、初始化、激活、停用、销毁）
+- 处理模式切换请求，确保同一时刻只有一个控制器活跃
+- 维护模式切换状态机（normal → hook_state → normal）
+- 管理多臂配置（支持 single_arm/left_arm/right_arm）
+- 初始化和管理 HardwareManager 单例
+
+### 3.1 各类 Controller（具体控制器）
+
+在系统级结构单元划分中，所有具体控制模式均属于 **Control Strategy** 结构单元的实现部分。
+
+本节所描述的各类 Controller：
+
+- 是系统中**业务逻辑的主要承载者**  
+- 直接实现不同控制模式（轨迹、速度、示教、工具模式等）  
+- 通过统一基类体系与 ControllerManager 受控调度  
+- 并通过 Algorithm Layer 与 Hardware Abstraction 间接访问算法与硬件  
+
+理解这一层的设计，对于：
+
+- 扩展新控制模式  
+- 评估系统可演化性  
+- 判断架构稳定边界  
+
+具有关键意义。
+
+**实现位置**：`src/arm_controller/src/controller/`
+
+系统提供 5 个基类和 14 个具体控制器实现。新的控制模式可通过继承相应基类并在 `controller_registry.cpp` 中注册来添加。
+
+**5 个基类**：
+1. **ModeControllerBase** - 所有控制器的基类
+2. **VelocityControllerBase** - 速度控制基类
+3. **TrajectoryControllerBase** - 轨迹控制基类
+4. **UtilityControllerBase** - 工具类控制器基类
+5. **TeachControllerBase** - 示教模式基类
+
+**当前控制器实现**：
+
+| 控制模式 | 控制器类 | 基类 | 职责 |
+|---------|---------|------|------|
+| MoveJ | MoveJController | TrajectoryControllerBase | 关节空间点到点运动 |
+| MoveL | MoveLController | TrajectoryControllerBase | 直线运动 |
+| MoveC | MoveCController | TrajectoryControllerBase | 圆弧插补运动 |
+| JointVelocity | JointVelocityController | VelocityControllerBase | 手动控制 |
+| CartesianVelocity | CartesianVelocityController | VelocityControllerBase | 遥操作 |
+| PointRecord | PointRecordController | TeachControllerBase | 示教（点位记录） |
+| PointReplay | PointReplayController | TeachControllerBase | 点位回放 |
+| TrajectoryRecord | TrajectoryRecordController | TeachControllerBase | 轨迹示教（轨迹记录） |
+| TrajectoryReplay | TrajectoryReplayController | TeachControllerBase | 轨迹回放 |
+| Move2Start | Move2StartController | UtilityControllerBase | 系统启动（移至启动位置） |
+| Move2Initial | Move2InitialController | UtilityControllerBase | 初始化（移至初始位置） |
+| HoldState | HoldStateController | UtilityControllerBase | 安全切换模式（保持当前状态） |
+| SystemStart | SystemStartController | UtilityControllerBase | 系统启动 |
+| ROS2ActionControl | ROS2ActionControlController | UtilityControllerBase | ROS2 动作控制 |
+
+**控制器注册机制**：
+- 使用工厂模式（Factory Pattern）
+- 注册文件：`controller_registry.cpp`
+- 在 ControllerManager 初始化时从工厂加载
+
+### 3.2 Hardware Manager（硬件管理器）
+
+**位置**：`src/arm_controller/src/hardware/hardware_manager.cpp`
+
+**职责**：
+- 提供统一的硬件抽象接口（屏蔽 CAN-FD / EtherCAT 差异）
+- 采用单例模式管理硬件驱动实例
+- 异步轨迹执行（支持整条轨迹的暂停、恢复、取消）
+- 关节限位检查和安全保护
+- 电机使能/失能、模式切换
+- 计算重力补偿力矩
+- 实现观察者模式，将硬件状态变化通知给活跃控制器（高频回调 500Hz）
+
+### 3.3 Trajectory Interpolator（轨迹插值器）
+
+**位置**：`src/trajectory_interpolator/`
+
+**职责**：
+- 将规划器生成的轨迹点插值为实时指令（100 Hz）
+- 使用插值算法保证平滑性
+- 处理时间同步和边界条件
+- 支持轨迹约束检查（速度、加速度、加加速度）
+
+### 3.4 Trajectory Smoother（轨迹平滑器）
+
+**位置**：`src/arm_controller/src/controller/trajectory_record/`
+
+**职责**：
+- 对示教录制的轨迹进行平滑处理（当前实现包括 CSAPS 平滑和原始数据两种策略）
+- 仅在示教类控制器中使用
+- 不参与实时控制路径
+
+**设计说明**：
+- 当前系统基于 **TOTG（Time-Optimal Trajectory Generation）** 算法进行轨迹生成
+- 通过策略模式支持多种平滑算法实现的灵活切换
 
 ---
 
-#### 第二层：控制层
+## 4. 控制器生命周期与调度模型
 
-**负责**：轨迹规划、路径生成、运动学计算
+### 控制器生命周期
 
-**核心库**：
+**生命周期状态**：
 
-- **Trajectory Planning** - 基于 MoveIt2 的规划
-- **Trajectory Interpolator** - 实时轨迹插值
+> [!IMPORTANT]
+> 控制器遵循完整的生命周期循环：
+> **创建 → 初始化 → 激活 → 执行 → 停用 → (循环)**
+> 
+> 这个循环确保在模式切换时能够正确清理资源。
 
-**功能**：
 
-- 路径规划与碰撞检测
-- 逆运动学求解
-- 轨迹平滑与动力学约束满足
+**关键状态转换**：
+- **创建**：通过工厂在 ControllerManager 中创建
+- **初始化**：ControllerManager 初始化时调用
+- **激活**：模式切换时启动，初始化订阅
+- **执行**：处理订阅的命令/轨迹
+- **停用**：模式切换到其他模式时停止
 
----
+### 模式切换机制
 
-#### 第三层：硬件层
+**ROS 2 服务接口**：
+- 服务：`/controller_api/controller_mode`
+- 参数：mapping（机器人映射）、mode（目标模式）
 
-**负责**：底层硬件通信、电机控制
+**模式切换的安全保证**：
 
-**核心库**：
+1. **验证阶段**：检查目标控制器是否存在且已初始化
+2. **停用阶段**：调用当前活跃控制器的停止方法，等待其完成清理
+3. **钩子状态处理**：如果当前控制器的停止需要钩子状态，则切换到HoldState
+4. **激活阶段**：调用目标控制器的启动方法，初始化新模式的订阅
+5. **原子性**：模式切换过程中，不允许新的命令进入
 
-- **Hardware Driver** - CAN-FD 通信与电机驱动
+### 实时调度路径
 
-**特点**：
-
-- 高性能：微秒级延迟
-- 线程安全：CPU 亲和性绑定
-- 灵活：事件驱动 + 观察者模式
-
----
-
-## 组件交互
-
-### 关键数据结构
-
-1. **关节状态** - sensor_msgs/JointState
-2. **任务指令** - geometry_msgs/Pose 或 sensor_msgs/JointState
-3. **轨迹** - trajectory_msgs/JointTrajectory
-4. **电机指令** - CAN-FD 格式的控制字
-
----
-
-## 设计理念
-
-### 1. 分离关注点
-
-- **应用层**与**硬件层**隔离
-- 便于独立测试和维护
-- 支持多种硬件替换
-
-### 2. 模块化
-
-- 各组件可独立使用
-- 清晰的接口定义
-- 最小化依赖耦合
-
-### 3. 实时性
-
-- 低延迟设计
-- 事件驱动架构
-- 精确的时序控制
-
-### 4. 可靠性
-
-- 多层安全检查
-- 限位保护机制
-- 异常处理
-
-### 5. 易用性
-
-- 统一的 ROS2 接口
-- 完整的文档
-- 丰富的示例
-
----
-
-## 数据流
-
-### 1. MoveJ 命令流
+**ROS 2 节点架构**：
 
 ```
-用户输入
-  ↓
-MoveJ 控制器
-  ↓
-轨迹规划 (MoveIt2)  ← 碰撞检测
-  ↓
-轨迹插值生成
-  ↓
-硬件驱动
-  ↓
-电机执行
-  ↓
-状态反馈
-  ↓
-用户反馈
+main()
+  ├── ControllerManagerNode 创建（硬件初始化）
+  ├── 100ms 延迟（确保硬件完全初始化）
+  ├── TrajectoryControllerNode 创建（订阅轨迹）
+  └── executor.spin()
 ```
 
-### 2. 状态反馈流
+**轨迹执行路径**：
+![轨迹执行路径](../diagrams/trajectory_execution_flow.png)
 
-```
-电机状态
-  ↓
-CAN-FD 接收
-  ↓
-硬件驱动处理
-  ↓
-事件总线/观察者
-  ↓
-用户应用
-```
-
-### 3. MoveJ 控制流程详解
-
-```
-1. 用户发送 MoveJ 目标关节角度
-   ros2 topic pub --once /controller_api/movej_action/single_arm sensor_msgs/msg/JointState "{position: [pos1, pos2, pos3, pos4, pos5, pos6]}"
-
-2. Arm Controller 接收并验证
-   - 检查目标是否在关节限制内
-   - 检查碰撞风险
-
-3. 调用轨迹规划
-   - MoveIt2 进行路径规划
-   - 生成中间路径点
-
-4. 轨迹插值
-   - 在路径点间生成光滑轨迹
-   - 满足速度/加速度约束
-
-5. 硬件执行
-   - 从轨迹中提取控制指令
-   - 通过 CAN-FD 发送到电机
-
-6. 状态反馈
-   - 电机返回当前位置/速度
-   - 发布 ROS2 Topics
-   - 可选的事件触发
-```
+**关键约束**：
+- 异步执行不阻塞 ROS 2 事件循环
+- 每个硬件命令调用必须在 10ms 内完成（100Hz 控制周期）
+- 状态反馈通过观察者回调异步处理
+- 同一时刻最多只有一个轨迹在执行
 
 ---
 
-## 通信方式
+## 5. 插件化与扩展机制
 
-### ROS2 接口
+### 自定义注册机制
 
-**服务**:
+**实现位置**：`src/arm_controller/src/controller/controller_registry.cpp`
 
-- 模式切换: `/controller_api/controller_mode`
-- 系统状态查询
+本系统采用工厂模式（Factory Pattern）的自定义注册机制，不依赖 pluginlib。
 
-**话题**:
+**注册流程**：
+1. 编译时，注册函数将控制器创建器存储在全局工厂中
+2. 运行时，ControllerManager 通过工厂创建对应的控制器实例
+3. 配置文件（YAML）中指定要启用哪些控制器
 
-- 关节状态: `/joint_states`
-- 控制命令: `/controller_api/*_action`
-- 系统状态: `/controller_api/running_status`
+**优势**：
+- 不依赖动态加载（更安全、更高效）
+- 编译时检查类型安全
+- 易于调试和控制版本
 
-### CAN-FD 协议
+### 多臂配置与映射
 
-- 波特率: 5000 kbit/s (CAN-FD)
-- 帧格式: 扩展 CAN 帧
-- 实时性: 微秒级延迟
+**映射概念**：
+- `single_arm` - 单臂配置
+- `left_arm` - 双臂左臂
+- `right_arm` - 双臂右臂
 
----
+**配置文件位置**：`config/hardware_config.yaml`
 
-## 性能指标
+**加载流程**：
+![加载流程](../diagrams/controller_loading_flow.png)
 
-### 实时性能
+### 新控制模式的扩展步骤
 
-| 指标 | 数值 |
-|------|------|
-| **控制延迟** | < 200 μs |
-| **更新频率** | 500 Hz |
-| **CAN-FD 波特率** | 5000 kbit/s |
-| **状态反馈延迟** | < 5 ms |
+**第 1 步**：继承合适的基类
+- 位置：`src/arm_controller/src/controller/your_mode/`
+- 继承 TrajectoryControllerBase、VelocityControllerBase 或 UtilityControllerBase
 
-### 硬件支持
+**第 2 步**：实现核心方法
+- 实现生命周期方法（start、stop、init_subscriptions）
+- 实现控制逻辑
 
-| 项目 | 数值 |
-|------|------|
-| **支持电机数** | 数百个 |
-| **关节限位配置** | 动态配置 |
-| **内存占用** | < 50 MB |
-| **CPU 使用率** | < 5% (Jetson Orin) |
+**第 3 步**：注册控制器
+- 在实现文件中添加注册代码
+- 使用工厂的 registerController 方法
 
-### 代码规模
+**第 4 步**：编译和测试
+- 编译：`colcon build --packages-select arm_controller`
+- 启动系统：`ros2 launch arm_controller bringup.launch.py`
+- 切换模式：`ros2 service call /controller_api/controller_mode ...`
 
-| 项目 | 数值 |
-|------|------|
-| **Arm Controller 代码** | 10,798 LOC |
-| **源文件总数** | 462+ 文件 |
-| **控制模式数** | 13+ 种 |
-| **配置文件** | 5+ YAML 文件 |
-| **文档文件** | 15+ Markdown 文件 |
+### 新硬件驱动的扩展步骤
 
-### 关键特性
+**第 1 步**：实现硬件驱动接口
+- 位置：`src/hardware_driver/src/driver/`
+- 继承 RobotHardware 接口
 
-| 特性 | 描述 |
-|------|------|
-| **13+ 控制模式** | MoveJ、MoveL、MoveC、JointVelocity、CartesianVelocity 等 |
-| **全 6D 方向控制** | 完整的末端执行器位姿控制 |
-| **双臂协同** | 原生支持 single_arm, left_arm, right_arm 映射 |
-| **动态速度缩放** | MoveJ/MoveL/MoveC 运动中无需重规划即可调速 |
-| **重力补偿** | 使用 Pinocchio 库的动力学补偿 |
-| **轨迹平滑** | CSAPS 自适应平滑，特别适合录制轨迹 |
-| **多层安全** | HoldState 钩子、限位保护、硬件监控 |
+**第 2 步**：实现总线通信
+- 实现底层总线协议
+- 实现状态反馈读取
 
-### 延迟路径分析
-
-1. **应用层延迟** - ROS2 通信（1-2 ms）
-2. **规划延迟** - 轨迹规划（50-500 ms）
-3. **插值延迟** - 轨迹生成（< 1 ms）
-4. **硬件延迟** - CAN 通信 + 电机响应（200 μs）
-
-**总延迟** - 规划主导（通常 < 1 s）
-
-### 优化策略
-
-- 规划的结果缓存
-- 异步规划执行
-- 优先级队列管理
+**第 3 步**：在 HardwareManager 中注册驱动
+- 位置：`src/arm_controller/src/hardware/hardware_manager.cpp`
+- 在 `initialize()` 方法中：
+  - 调用工厂函数创建驱动实例（如 `createCanFdMotorDriver()`）
+  - 传入硬件配置（从 `hardware_config.yaml` 加载的 interface 列表）
+  - 创建 RobotHardware 实例并关联驱动
+  > [!WARNING]
+  > 当前实现硬编码使用 CAN-FD，如需支持其他总线需替换
 
 ---
 
-## 可扩展性
+## 6. 关键接口与抽象边界（Architectural Boundaries）
 
-### 支持的扩展
+本章定义的是本系统中**最重要的一组架构边界**。
 
-1. **新硬件** - 替换 Hardware Driver
-2. **新规划算法** - 扩展 Trajectory Planning
-3. **新控制模式** - 添加新的 Controller
-4. **新的传感器** - 扩展 Feedback 系统
-5. **新的插值方式** - 扩展 Trajectory Interpolator
-6. **新的轨迹平滑方式** - 替换 csaps
+这些边界并非仅用于模块解耦，而是明确规定：
 
-### 设计原则
+- 哪些职责必须由哪一层承担  
+- 哪些方向的依赖是被允许的  
+- 哪些调用关系在架构层面是**被禁止的**  
 
-- 接口驱动设计
-- 插件式架构
-- 配置驱动行为
+对于系统演化而言，本章所定义的边界构成了：
 
----
+- 系统的**稳定内核（Stable Core）**  
+- 以及未来扩展时**最不应该被破坏的部分**  
 
-## 下一步
+从架构视角看，本系统存在三条最关键的控制边界：
 
-- 📖 查看 [Arm Controller 架构](../../src/arm_controller/docs/ARCHITECTURE.md) 了解详细设计
-- ⚙️ 参考 [配置指南](../../src/arm_controller/docs/CONFIGURATION.md)
-- 👨‍💻 查看 [开发指南](../../src/arm_controller/docs/DEVELOPER.md)
+1. **ROS 2 节点 ↔ 控制器（编排边界）**  
+2. **控制器 ↔ 硬件抽象层（执行边界）**  
+3. **控制器 ↔ 算法层（计算边界）**  
+
+下面分别对这三条边界进行正式定义。
 
 ---
 
-**更多信息请访问 [文档中心](../README.md)。**
+### 6.1 ROS 2 节点 ↔ 控制器 的边界（编排边界）
+
+该边界定义了：
+
+> **系统调度职责** 与 **具体控制逻辑职责** 的分离。
+
+在该边界之上的是 **ControllerManager（编排者）**，  
+在该边界之下的是 **各类具体 Controller（执行者）**。
+
+#### ControllerManager 的职责（调度侧）
+
+ControllerManager 作为系统的**唯一编排中心**，其职责限定为：
+
+- 管理所有控制器的生命周期  
+  - 创建 / 初始化 / 激活 / 停用 / 销毁  
+- 处理 ROS 2 服务请求（模式切换）  
+- 维护全局状态机（normal ↔ hook_state ↔ normal）  
+- 保证**同一时刻仅有一个控制器处于活跃状态**  
+- 决定“何时切换”“切换到哪个控制器”  
+
+ControllerManager **不承担**：
+
+- 任何具体控制算法  
+- 任何轨迹生成或插值逻辑  
+- 任何硬件通信细节  
+
+它是一个**纯调度与编排组件**。
+
+#### Controller 的职责（执行侧）
+
+Controller 作为系统的**业务逻辑承载者**，其职责限定为：
+
+- 实现具体的控制模式逻辑（轨迹、速度、示教等）  
+- 被动订阅 ROS 2 Topic / Action 接收命令  
+- 在激活期间独占系统执行权  
+- 通过 HardwareManager 间接访问硬件  
+
+Controller **明确不允许**：
+
+- 直接调用 ROS 2 Service 进行模式切换  
+- 直接创建或销毁其他控制器  
+- 直接操作底层硬件驱动  
+
+该边界保证了：
+
+- **调度权集中于 ControllerManager**  
+- **控制权集中于当前活跃 Controller**  
+- 系统状态机具有**唯一决策源**  
+
+---
+
+### 6.2 控制器 ↔ 硬件抽象层 的边界（执行边界）
+
+该边界定义了：
+
+> **控制算法** 与 **硬件实现细节** 的彻底隔离。
+
+在该边界之上的是 **Controller（控制决策）**，  
+在该边界之下的是 **HardwareManager + RobotHardware（执行实现）**。
+
+#### Controller 的职责（控制侧）
+
+Controller 在该边界上的职责限定为：
+
+- 生成控制命令（位置 / 速度 / 力矩）  
+- 决定控制时序与控制策略  
+- 不关心底层通信方式（CAN-FD / EtherCAT / 其他）  
+- 不关心具体电机协议与帧格式  
+
+Controller 只与：
+
+- HardwareManager 提供的**抽象接口**交互  
+
+#### HardwareManager 的职责（执行侧）
+
+HardwareManager 在该边界上的职责限定为：
+
+- 提供统一的硬件抽象接口（屏蔽总线与驱动差异）  
+- 管理 RobotHardware 驱动实例  
+- 执行轨迹：开始 / 暂停 / 恢复 / 取消  
+- 进行关节限位检查与基础安全保护  
+- 计算并注入重力补偿力矩  
+- 通过观察者模式，将硬件状态变化回调给控制器  
+
+HardwareManager **明确不允许**：
+
+- 反向调用 Controller 的业务逻辑  
+- 参与任何控制策略决策  
+- 解析 ROS 2 消息或处理模式切换  
+
+> [!NOTE]
+> 具体的硬件协议实现（如 CAN-FD 帧格式、电机通信协议）  
+> 位于 `hardware_driver/src/driver/` 中的 MotorDriver  
+> 以及 `hardware_driver/src/protocol/` 中的 motor_protocol。  
+>  
+> 这些实现细节被**严格限制在硬件驱动层内部**，  
+> 不允许向控制层或编排层泄漏。
+
+该边界保证了：
+
+- 控制器可以在**不修改任何控制逻辑**的情况下替换硬件总线  
+- 新硬件驱动的引入不会影响上层控制模式  
+- 硬件相关复杂性被**完全封装在系统底部**  
+
+---
+
+### 6.3 控制器 ↔ 算法层 的边界（计算边界）
+
+该边界定义了：
+
+> **业务控制逻辑** 与 **纯算法计算逻辑** 的分离。
+
+在该边界之上的是 **Controller（业务决策）**，  
+在该边界之下的是 **Algorithm Layer（数学计算）**。
+
+#### Controller 的职责（业务侧）
+
+Controller 在该边界上的职责限定为：
+
+- 决定何时调用算法  
+- 组织算法的输入参数  
+- 解释算法的输出结果  
+- 将算法结果转化为控制命令  
+
+Controller 对算法的依赖是：
+
+- 面向接口的  
+- 与具体实现解耦的  
+
+#### Algorithm 的职责（计算侧）
+
+Algorithm Layer 在该边界上的职责限定为：
+
+- 执行纯数学运算（轨迹生成、插值、平滑等）  
+- 不包含任何业务状态机  
+- 不依赖 ROS 2  
+- 不访问硬件  
+- 不感知控制模式语义  
+
+Algorithm 层提供的是：
+
+> **可替换的“计算策略”集合**，  
+> 而非系统行为的决策者。
+
+该边界保证了：
+
+- 新算法可以在**不修改控制器结构**的情况下引入  
+- 控制模式的演化不依赖具体算法实现  
+- 系统具备**长期算法可演进能力**  
+
+---
+
+### 6.4 架构边界的系统级意义
+
+上述三条边界共同构成了本系统的**核心架构防线**：
+
+| 边界 | 保护的核心能力 |
+|------|---------------|
+| 节点 ↔ 控制器 | 保护调度权的集中性与状态机一致性 |
+| 控制器 ↔ 硬件 | 保护硬件可替换性与驱动层隔离 |
+| 控制器 ↔ 算法 | 保护算法可演进性与控制逻辑稳定性 |
+
+这些边界一旦被破坏，将直接导致：
+
+- 架构退化为强耦合系统  
+- 扩展成本指数级上升  
+- 系统演化路径被锁死  
+
+因此，本章所定义的接口与抽象边界应被视为：
+
+> **架构层面的“不可随意修改约束”**，是系统可长期演进的根基。
+
+后续所有扩展工作，都应以**不破坏这些边界**为前提。
+
+---
+
+## 7. 典型扩展场景
+
+### 场景 1：新增一种控制模式
+
+**目标**：添加一个新的控制模式
+
+**步骤**：
+
+1. 在 `src/arm_controller/src/controller/` 中创建新的控制器类
+2. 继承合适的基类（TrajectoryControllerBase、VelocityControllerBase 或 UtilityControllerBase）
+3. 实现核心方法
+4. 在`config.yaml`中定义索引和类名以及输入话题，在 `controller_registry.cpp` 中注册控制器，修改`CMakeList`文件
+5. 编译并测试
+
+**需要修改的层**：Controller 层
+**不应该修改的层**：ControllerManager、Hardware Manager、硬件驱动
+
+### 场景 2：替换硬件驱动
+
+**目标**：从 CAN-FD 切换到 EtherCAT
+
+**步骤**：
+
+1. 在 `src/hardware_driver/src/driver/` 中实现新的硬件驱动
+2. 继承 RobotHardware 接口
+3. 实现底层总线协议
+4. 在 `src/arm_controller/src/hardware/hardware_manager.cpp` 中注册驱动
+5. 修改配置文件指定驱动类型
+
+**需要修改的层**：硬件驱动层（motor_driver_impl、bus protocol）
+**不应该修改的层**：RobotHardware 接口、HardwareManager 的调用逻辑
+
+### 场景 3：引入新的轨迹平滑算法
+
+**目标**：为轨迹平滑策略添加自定义实现
+
+**步骤**：
+
+1. 在 `src/arm_controller/src/controller/trajectory_record/trajectory_smoother.hpp` 中实现新的平滑器类
+2. 继承 `TrajectorySmootherStrategy` 接口
+3. 在 `TrajectorySmoother` 中添加新的策略实例
+4. 在 `TrajectoryRecordController` 中修改调用参数以选择使用新的平滑策略
+5. 编译并测试
+
+**需要修改的层**：轨迹平滑器实现、TrajectoryRecordController（策略选择）
+**不应该修改的层**：ControllerManager、其他 Controller 基类、硬件层、轨迹生成算法
+
+---
+
+## 8. 架构约束与非目标
+
+### 明确的架构约束
+
+1. **不提供硬实时保证**
+   - 系统运行在标准 Linux + ROS 2，无法保证 < 1 μs 抖动
+   - 典型状态反馈延迟为 2-5 ms
+
+2. **轨迹规划职责分工**
+   - **MoveJ**：依赖 MoveIt2 进行路径规划
+   - **MoveL/MoveC**：使用自有轨迹生成算法（基于 TOTG - Time-Optimal Trajectory Generation）
+   - 本系统负责规划结果的执行、插值和平滑
+
+3. **软件级急停，无硬件安全回路**
+   - 提供软件级急停逻辑（可在控制循环中立即停止）
+   - 不提供硬件抱闸或功能安全（SIL 2/3）认证
+   - 集成者需自行实现硬件级安全机制（如安全 PLC、硬件急停）
+
+4. **支持单臂和双臂控制**
+   - **主分支**：单臂控制（`single_arm`）
+   - **feature/ipc-dual-arm 分支**：双臂协同控制（`left_arm` / `right_arm`）
+   - 多于两臂的协调需在应用层实现
+
+5. **不处理电机零位标定**
+   - 假设各电机已完成零位设置（通过 `example_motor_zero_position.cpp` 等工具）
+   - 集成者需自行完成电机零位校准和保存
+
+### 明确的非目标
+
+- **不是通用的机器人控制框架**：针对机械臂控制优化
+- **不是实时操作系统**：依赖 Linux + ROS 2 的调度
+- **不是视觉系统**：不包含视觉处理或感知
+- **不是任务规划系统**：不处理高层任务逻辑
+- **不是工业级产品**：适合研究和原型开发，生产环境需额外验证
+
+### 架构的可演化性
+
+**可以扩展的方向**：
+- ✅ 新增控制模式（通过继承 ModeControllerBase）
+- ✅ 新增硬件驱动（通过实现 RobotHardware 接口）
+- ✅ 新增总线类型（通过实现总线协议）
+
+**不建议修改的方向**：
+- ❌ ControllerManager 的核心调度逻辑
+- ❌ 模式切换的安全机制
+- ❌ 观察者模式的事件分发
+- ❌ ROS 2 接口的签名
+
+---
+
+## 总结
+
+Universal Arm Controller 的架构通过**分层解耦**、**观察者模式**、**自定义注册机制**实现了：
+
+- **灵活性**：支持多种控制模式和硬件平台
+- **可维护性**：清晰的职责边界和接口定义
+- **可扩展性**：新模式、新硬件、新算法可独立开发
+- **稳定性**：模式切换的安全保证和实时调度的确定性
+
+开发者应该在理解这些设计原则的基础上进行扩展，而不是绕过或修改核心架构。
