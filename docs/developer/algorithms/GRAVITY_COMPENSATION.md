@@ -1,340 +1,241 @@
-# 重力补偿功能实现文档
-
-## 概述
-
-本文档描述了使用 C++ Pinocchio 库实现的重力力矩补偿功能。该功能用于在 MIT 模式控制下补偿机械臂各关节的重力力矩，使机械臂能够在任意姿态下保持稳定。
-
-## 依赖
-
-- **Pinocchio**: 机器人动力学计算库
-- **URDF**: 机械臂模型文件
-
-## 实现架构
+# 重力补偿算法设计说明
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      HardwareManager                             │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  GravityCompensator (独立类)                             │    │
-│  │  - loadModel(): 加载 URDF 到 Pinocchio                   │    │
-│  │  - computeGravityTorques(): 计算重力力矩                 │    │
-│  │  - 支持多个 mapping 的模型管理                           │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-        ▼                     ▼                     ▼
-┌───────────────┐   ┌───────────────┐   ┌───────────────────┐
-│JointVelocity  │   │CartesianVel   │   │TrajectoryRecord   │
-│Controller     │   │Controller     │   │Controller         │
-│               │   │               │   │                   │
-│实时计算重力矩 │   │实时计算重力矩 │   │定时器计算重力矩   │
-│发送MIT命令    │   │发送MIT命令    │   │(100Hz)            │
-└───────────────┘   └───────────────┘   └───────────────────┘
-                              │
-                              ▼
-                    ┌───────────────────┐
-                    │  TrajectoryExec   │
-                    │  (轨迹执行)        │
-                    │                   │
-                    │  预计算每个点的   │
-                    │  重力力矩存入     │
-                    │  TrajectoryPoint  │
-                    │  .efforts 字段    │
-                    └───────────────────┘
-```
-
-## 修改的文件
-
-### 1. GravityCompensator 类 (新增)
-
-**文件路径**:
-
-- `src/arm_controller/include/arm_controller/dynamics/gravity_compensator.hpp`
-- `src/arm_controller/src/dynamics/gravity_compensator.cpp`
-
-**职责**: 封装 Pinocchio 库，负责重力力矩计算
-
-**接口**:
-
-```cpp
-class GravityCompensator {
-public:
-    // 加载 URDF 模型
-    bool loadModel(const std::string& mapping, const std::string& urdf_path);
-
-    // 检查模型是否已加载
-    bool hasModel(const std::string& mapping) const;
-
-    // 计算重力力矩
-    std::vector<double> computeGravityTorques(const std::string& mapping,
-                                              const std::vector<double>& joint_positions);
-
-    // 获取关节数量
-    size_t getNumJoints(const std::string& mapping) const;
-};
-```
-
-### 2. CMakeLists.txt
-
-**文件路径**: `src/arm_controller/CMakeLists.txt`
-
-**修改内容**:
+> 本文档描述 Universal Arm Controller 系统中，算法层子模块“重力补偿模块”的架构设计、系统集成方式与责任边界。
 
-- 添加 Pinocchio 依赖
-- 添加 gravity_compensator.cpp 到编译源文件
+## 1. 功能定位与系统层角色
 
-```cmake
-find_package(pinocchio REQUIRED)
+重力补偿解决的核心问题是：**在 MIT 模式控制下，机械臂各关节需要实时补偿由重力产生的力矩，使得机械臂能够在任意姿态下保持稳定**，而不需要持续的关节驱动指令。
 
-add_library(arm_controller_lib
-  ...
-  src/dynamics/gravity_compensator.cpp
-  ...
-)
+在系统架构中，重力补偿属于 **算法层（Algorithm Layer）** 的一个子模块。根据 [架构设计](../ARCHITECTURE.md#3-核心运行时组件) 第 3 章的描述，算法层的职责是：
 
-target_link_libraries(arm_controller_lib
-  ...
-  pinocchio::pinocchio
-)
-```
+> 提供纯数学计算能力（无业务逻辑）
 
-### 3. HardwareManager 头文件
+因此，重力补偿在系统内的角色是：
 
-**文件路径**: `src/arm_controller/include/arm_controller/hardware/hardware_manager.hpp`
+- **为控制策略层（Control Strategy）服务**：提供关节重力力矩的计算接口
+- **独立于控制模式**：不感知具体是轨迹执行、速度控制还是示教模式
+- **独立于硬件实现**：不关心电机驱动协议或总线类型，仅提供纯数学结果
+- **可完全替换**：若需要使用其他动力学引擎或简化模型，可以直接替换该模块而不影响控制器逻辑
 
-**修改内容**: 使用 GravityCompensator 替代直接使用 Pinocchio
+---
 
-```cpp
-#include "arm_controller/dynamics/gravity_compensator.hpp"
+## 2. 算法模型与关键设计选择
 
-// 成员变量
-std::shared_ptr<arm_controller::dynamics::GravityCompensator> gravity_compensator_;
+> 本模块的设计目标是在保证 100Hz 实时性的前提下，为多控制模式提供可复用、可替换的重力补偿能力。
 
-// 接口保持不变
-std::vector<double> compute_gravity_torques(const std::string& mapping);
-std::vector<double> compute_gravity_torques(const std::string& mapping,
-                                            const std::vector<double>& joint_positions);
-```
+### 2.1 动力学模型范围
 
-### 4. HardwareManager 实现
+重力补偿计算的是**仅包含重力项的力矩补偿**：
 
-**文件路径**: `src/arm_controller/src/hardware/hardware_manager.cpp`
+$$\tau_g(q) = g(q)$$
 
-**修改内容**: 通过 GravityCompensator 计算重力矩
+其中：
+- $q$ 为关节位置向量（弧度）
+- $\tau_g$ 为各关节的重力力矩向量
 
-```cpp
-// parse_mapping() 中加载模型
-if (!gravity_compensator_) {
-    gravity_compensator_ = std::make_shared<arm_controller::dynamics::GravityCompensator>();
-}
-gravity_compensator_->loadModel(mapping_name, urdf_path);
+这意味着系统**不计算科氏力、离心力等动态项**，仅补偿静态重力效应。这个选择使得：
 
-// compute_gravity_torques() 调用 GravityCompensator
-std::vector<double> HardwareManager::compute_gravity_torques(
-    const std::string& mapping,
-    const std::vector<double>& joint_positions) {
+- 计算复杂度低（O(n)），适合 100Hz 实时控制
+- 对模型参数变化（如负载）的鲁棒性相对较好（只需关心质量分布）
+- 高速运动时存在科氏力和离心力误差
 
-    if (!gravity_compensator_ || !gravity_compensator_->hasModel(mapping)) {
-        return std::vector<double>(joint_positions.size(), 0.0);
-    }
-    return gravity_compensator_->computeGravityTorques(mapping, joint_positions);
-}
-```
+### 2.2 设计选择：采用 Pinocchio 库而非自实现
 
-**executeTrajectory() 和 execute_trajectory_async() 中预计算重力力矩**:
+**核心决策**：使用 Pinocchio（开源机器人动力学库）作为底层计算引擎，而不是自实现动力学算法。
 
-```cpp
-// 预计算每个轨迹点的重力力矩
-Trajectory trajectory_with_efforts = trajectory;
-for (auto& point : trajectory_with_efforts.points) {
-    std::vector<double> positions_rad;
-    for (double pos_deg : point.positions) {
-        positions_rad.push_back(pos_deg * M_PI / 180.0);
-    }
-    point.efforts = compute_gravity_torques(mapping, positions_rad);
-}
-```
+**为什么选择 Pinocchio**：
 
-### 4. JointVelocityController
+1. **成熟与可靠性**：Pinocchio 是业界标准库，被广泛应用于学术和工业机器人领域
+2. **算法高效**：使用经过优化的递推牛顿-欧拉（RNEA）算法，复杂度为 O(n)
+3. **模型灵活性**：直接支持 URDF 格式的机械臂模型，适配不同的硬件配置
+4. **维护与扩展**：无需维护自定义的动力学引擎，长期可维护性更强
 
-**文件路径**: `src/arm_controller/src/controller/joint_velocity/joint_velocity_controller.cpp`
+**代价与权衡**：
 
-**修改内容**: 在发送 MIT 命令前计算重力力矩
+- 增加了外部依赖（需要编译和安装 Pinocchio）
+- 模型加载需要正确的 URDF 文件和配置路径
+- 初始化时需要一次性的模型解析（后续调用速度快）
 
-```cpp
-// 获取重力补偿力矩
-std::vector<double> gravity_torques = hardware_manager_->compute_gravity_torques(mapping);
+---
 
-// 发送带重力补偿的 MIT 命令
-for (size_t i = 0; i < motor_ids.size(); ++i) {
-    double effort = (i < gravity_torques.size()) ? gravity_torques[i] : 0.0;
-    robot_hardware->control_motor_in_mit_mode(interface, motor_ids[i],
-                                               position, velocity, effort, kp, kd);
-}
-```
+## 3. 算法接口与对外契约
 
-### 5. CartesianVelocityController
+重力补偿向控制策略层提供的接口定义如下：
 
-**文件路径**: `src/arm_controller/src/controller/cartesian_velocity/cartesian_velocity_controller.cpp`
+> [!NOTE]
+> **输入参数**：
+> - `q`: 关节位置向量（单位：弧度）
+> - `mapping`: 映射标识符（用于多臂系统中区分不同的臂）
+>
+> **输出结果**：
+> - `τ_g`: 重力补偿力矩向量（单位：Nm，与关节配置对应）
+>
+> **不承诺的职责**：
+> - 不关心是哪个控制模式在调用（轨迹、速度、示教等都可用）
+> - 不感知 ROS 2 的存在
+> - 不访问硬件驱动或执行层
+> - 不包含任何状态机或业务决策逻辑
 
-**修改内容**: 与 JointVelocityController 类似，在发送 MIT 命令前计算重力力矩。
+这种设计保证了**算法层的纯粹性**：它就是一个数学计算模块，接收输入，返回计算结果。
 
-### 6. TrajectoryRecordController
+---
 
-**文件路径**: `src/arm_controller/src/controller/trajectory_record/trajectory_record_controller.cpp`
+## 4. 系统内的集成位置与调用关系
 
-**修改内容**: 使用定时器 (100Hz) 定期计算并发送重力补偿力矩
+### 架构分层关系
 
-```cpp
-// 创建重力补偿定时器
-gravity_compensation_timer_ = node_->create_wall_timer(
-    std::chrono::milliseconds(10),
-    std::bind(&TrajectoryRecordController::gravity_compensation_timer_callback, this)
-);
+根据 [架构设计](../ARCHITECTURE.md#63-控制器--算法层-的边界计算边界) 第 6.3 章关于"控制器 ↔ 算法层边界"的定义，重力补偿在系统中的分层位置如下：
+![Gravity Compensation Layering](../../diagrams/gravity_compensation_layering.png)
 
-void TrajectoryRecordController::gravity_compensation_timer_callback() {
-    if (!is_recording_) return;
+**控制器的职责**：
+- 决定何时触发重力补偿计算（轨迹执行时预计算，速度控制和轨迹记录时实时计算）
+- 组织算法的输入参数（当前关节位置）
+- 解释算法的输出（力矩向量）
+- 将力矩结果转化为 MIT 模式的控制命令发送给硬件
 
-    std::vector<double> gravity_torques = hardware_manager_->compute_gravity_torques(mapping);
-    // 发送重力补偿力矩...
-}
-```
+**算法的职责**：
+- 执行纯数学运算，基于 URDF 模型和关节位置计算重力力矩
+- 不做任何关于控制策略的决策
 
-### 7. TrajectoryPoint 结构体
+---
 
-**文件路径**:
+## 5. 双层集成策略
 
-- `src/trajectory_interpolator/include/trajectory_interpolator/moveit_spline_adapter.hpp`
-- `src/hardware_driver/include/hardware_driver/interface/robot_hardware.hpp`
+重力补偿在系统中有**两种不同的集成模式**，分别对应不同的性能权衡：
 
-**修改内容**: 添加 efforts 字段
+### 5.1 轨迹执行：离线预计算策略
 
-```cpp
-struct TrajectoryPoint {
-    double time_from_start;
-    std::vector<double> positions;
-    std::vector<double> velocities;
-    std::vector<double> accelerations;
-    std::vector<double> efforts;  // 重力补偿力矩 (可选，用于MIT模式控制)
-};
-```
+**触发时机**：轨迹执行命令被调用时（HardwareManager::execute_trajectory_async()）
 
-### 8. RobotHardware 轨迹执行
+**执行方式**：
+- 当轨迹执行命令到达时，遍历整条轨迹的所有路径点
+- 对每个路径点的关节位置计算一次重力力矩（使用 Pinocchio RNEA 算法）
+- 将计算结果存储在硬件驱动层 TrajectoryPoint 的 `efforts` 字段中
+- 随后在轨迹执行 worker 线程中，每个控制周期直接使用预计算的力矩值
 
-**文件路径**: `src/hardware_driver/src/interface/robot_hardware.cpp`
+**优点**：
+- 执行期间零计算开销（直接使用预存的力矩值）
+- 可以在轨迹规划完成后离线计算，不占用实时控制周期
+- 轨迹执行速度恒定（100Hz），力矩值直接映射
 
-**修改内容**: 在轨迹执行时使用预计算的 efforts
+**代价**：
+- 需要额外内存存储轨迹中每个点的力矩数据
+- 如果轨迹很长，预计算时间可能较长（但仅在启动时发生）
 
-```cpp
-// 使用预计算的重力补偿力矩
-float effort = (i < point.efforts.size()) ? static_cast<float>(point.efforts[i]) : 0.0f;
-efforts[i] = effort;
-```
+### 5.2 速度/示教：实时计算策略
 
-## URDF 配置
+**触发时机**：每个控制周期（100Hz 定时器，即每 10ms）
 
-URDF 文件路径: `src/trajectory_planning/robot_description/urdf/arm620.urdf`
+**执行方式**：
+- 在速度控制器或示教控制器的主控制循环中，每个周期都调用重力补偿计算
+- 使用当前的关节位置（从硬件反馈获得）进行计算
+- 将结果直接用作该周期的 MIT 命令的力矩分量
 
-在 mapping 配置中指定 URDF 路径，HardwareManager 会自动加载 Pinocchio 模型。
+**优点**：
+- ✅ 无需预存数据，内存占用少
+- ✅ 跟踪实时的关节位置变化，适应外部干扰或位置偏差
 
-## 使用场景
+**代价**：
+- 每个控制周期需要执行一次 O(n) 的计算
+- 在 100Hz 下仍在可接受范围（典型硬件上 < 1ms）
 
-### 1. 速度控制模式 (JointVelocity / CartesianVelocity)
+### 权衡总结
 
-- 实时计算当前关节位置的重力力矩
-- 每次发送 MIT 命令时附带重力补偿
+| 指标 | 轨迹执行（预计算） | 速度/示教（实时） |
+|------|------------------|-----------------|
+| 实时计算开销 | 零 | 每周期 O(n) |
+| 内存占用 | 高（按轨迹长度） | 低 |
+| 自适应性 | 固定预存值 | 跟踪实时位置 |
+| 适用场景 | 精准轨迹执行 | 交互式控制 |
 
-### 2. 示教模式 (TrajectoryRecord)
+---
 
-- 100Hz 定时器持续计算重力力矩
-- 保持机械臂在任意姿态下的稳定
+## 6. 实时性能与调度约束
 
-### 3. 轨迹执行 (TrajectoryExecution)
+### 计算复杂度
 
-- 轨迹执行前预计算所有轨迹点的重力力矩
-- 存储在 TrajectoryPoint.efforts 字段中
-- 执行时直接使用预计算值，减少实时计算开销
+- **时间复杂度**：O(n)，其中 n 为关节数（通常为 6）
+- **空间复杂度**：O(n)，主要用于存储中间计算结果
 
-## 测试方法
+### 性能预期
 
-### 第一步：启动系统
+基于目标硬件（标准 x86 或 ARM 多核处理器）：
 
-```bash
-# 启动完整的机械臂控制系统
-ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
-```
+- 单次计算耗时：**< 1ms**
+- 在 100Hz 控制周期（10ms）内的占比：**< 10%**
+- 不会成为控制循环的瓶颈
 
-### 第二步：测试 JointVelocity 模式的重力补偿
+### 非硬实时保证
 
-在另一个终端中：
+系统运行在标准 Linux + ROS 2 环境，**不提供硬实时保证**：
 
-```bash
-# 切换到 JointVelocity 模式
-ros2 service call /controller_api/controller_mode \
-  controller_interfaces/srv/WorkMode "{mode: 'JointVelocity', mapping: 'single_arm'}"
+- 无法保证计算延迟 < 1μs 级别
+- 无法保证任意时刻的计算时间确定性
+- 在 100Hz 控制周期下保证统计上的确定性调度
 
-# 发送零速度命令（仅靠重力补偿维持位置）
-ros2 topic pub /controller_api/joint_velocity_action/single_arm sensor_msgs/msg/JointState \
-  "{velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
-```
+**集成者责任**：如果应用需要硬实时保证（如重型工业臂焊接），需在系统外层添加 RTOS 或边界硬实时层。
 
-**验证方法**: 发送零速度后，观察二轴是否能在当前位置保持住而不下坠。如果重力补偿生效，手臂应该能"悬停"。
+---
 
-**动态测试（二轴起升测试）**: 先将手臂移动到二轴接近最低点的位置，然后：
+## 7. 集成边界与责任划分
 
-```bash
-# 给二轴一个小的正速度让它起来
-ros2 topic pub --once /controller_api/joint_velocity_action/single_arm sensor_msgs/msg/JointState \
-  "{velocity: [0.0, 0.1, 0.0, 0.0, 0.0, 0.0]}"
+### 算法模块不负责的事项
 
-# 然后发送零速度，观察是否能停住
-ros2 topic pub /controller_api/joint_velocity_action/single_arm sensor_msgs/msg/JointState \
-  "{velocity: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
-```
+- 不处理 URDF 模型的加载失败恢复（由 HardwareManager 负责）
+- 不验证输入关节位置的合法性（由控制器负责边界检查）
+- 不处理并发访问的同步（由 HardwareManager 的 mutex 保护）
+- 不知道计算结果如何被使用
 
-### 第三步：测试 CartesianVelocity 模式的重力补偿
+### 控制策略层必须负责的事项
 
-```bash
-# 切换到 CartesianVelocity 模式
-ros2 service call /controller_api/controller_mode \
-  controller_interfaces/srv/WorkMode "{mode: 'CartesianVelocity', mapping: 'single_arm'}"
+- 在调用前确保关节位置在有效范围内
+- 处理算法返回的异常值（如模型未加载时的零向量）
+- 决定何时进行计算（轨迹启动 vs 每周期实时）
+- 在数据不一致时（如切换控制模式）的逻辑处理
 
-# 发送零笛卡尔速度命令
-ros2 topic pub /controller_api/cartesian_velocity_action/single_arm geometry_msgs/msg/TwistStamped \
-  "{header: {frame_id: 'base_link'}, twist: {linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}}"
-```
+### 硬件抽象层的职责
 
-**验证方法**: 同样观察手臂是否能在零速度命令下保持当前位置不下坠。
+- 负责 Pinocchio 模型的加载和初始化
+- 负责 URDF 文件路径的管理
+- 提供线程安全的计算接口（mutex 保护）
+- 缓存已加载的模型，避免重复初始化
 
-### 第四步：测试 MoveIt 轨迹执行的重力补偿
+---
 
-```bash
-# 切换到 MoveJ 模式
-ros2 service call /controller_api/controller_mode \
-  controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
+## 8. 典型使用语义与验证期望
 
-# 将二轴移动到最低点位置（根据实际关节限位调整）
-ros2 topic pub /controller_api/movej_action/single_arm sensor_msgs/msg/JointState \
-  "{position: [0.0, -1.57, 0.0, 0.0, 0.0, 0.0]}"
-```
+重力补偿的实现应满足以下典型场景的行为预期：
 
-**验证方法**: 当轨迹执行完成后，观察二轴在最低点位置是否会往下掉。如果重力补偿生效，手臂应该能稳定保持在目标位置。
+### 场景 1：零速度悬停
 
-### 预期结果
+**期望行为**：当用户在速度控制模式下发送零速度命令时，机械臂应该在当前位置保持静止，不会缓慢下坠。
 
-| 测试项 | 有重力补偿 | 无重力补偿 |
-|--------|-----------|-----------|
-| 零速度悬停 | 手臂稳定保持位置 | 手臂缓慢下坠 |
-| 二轴起升 | 平稳起升，能用较小速度克服重力 | 需要更大速度才能起升 |
-| 停止命令 | 立即停止并保持位置 | 因惯性和重力继续下坠 |
-| MoveIt 到位 | 稳定保持目标位置 | 到位后下坠 |
+**工作机制**：
+- 速度控制器每个周期计算当前位置的重力力矩
+- 将重力力矩作为 MIT 命令的 effort 分量发送
+- 由于无外部扰动，关节能够平衡重力
 
-## 注意事项
+### 场景 2：平衡的起升
 
-1. **单位转换**: URDF 使用弧度，部分接口使用角度，需注意转换
-2. **线程安全**: pinocchio_mutex_ 保护模型和数据的并发访问
-3. **模型加载**: 确保 URDF 路径正确，模型加载失败会返回空力矩向量
-4. **性能**: RNEA 算法计算复杂度为 O(n)，适合实时控制
+**期望行为**：机械臂关节即使在重力作用下仍能以相对较小的速度命令实现上升运动。
+
+**工作机制**：
+- 重力补偿抵消了关节的重力力矩
+- 用户的速度命令可以直接驱动关节运动（不需要额外的速度开销来克服重力）
+
+### 场景 3：轨迹到位保持
+
+**期望行为**：轨迹执行完成后，机械臂到达目标位置，并在没有额外驱动的情况下保持该位置。
+
+**工作机制**：
+- 轨迹执行时预计算了目标位置的重力力矩
+- 轨迹结束时，硬件执行最后一个点的力矩命令，关节稳定在目标位置
+
+---
+
+## 参考资源
+
+- **Pinocchio 官方文档**：https://github.com/stack-of-tasks/pinocchio
+- **RNEA 算法原理**：Featherstone, R. "Rigid Body Dynamics Algorithms"
+- **系统架构参考**：[ARCHITECTURE.md](../ARCHITECTURE.md#63-控制器--算法层-的边界计算边界) 第 6.3 章 - 控制器 ↔ 算法层边界
+

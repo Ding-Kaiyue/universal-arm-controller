@@ -1,61 +1,62 @@
 # Developer Guide
 
-本目录面向开发者和系统扩展者，帮助你理解系统架构、扩展控制模式或硬件支持。
+本目录为系统开发者和扩展者提供完整的架构文档和技术参考。
 
-## 推荐阅读顺序
+## 快速导航
 
-请**按照以下顺序**阅读，这是从"理解架构"到"成功扩展"的完整路径：
+### 我想...
 
-### [ARCHITECTURE.md](ARCHITECTURE.md)
-**系统架构完整说明**
+| 需求 | 推荐阅读 |
+|------|--------|
+| **快速了解系统** | [ARCHITECTURE.md](ARCHITECTURE.md) - 简介和架构约束部分 |
+| **全面理解架构** | [ARCHITECTURE.md](ARCHITECTURE.md) - 完整阅读 |
+| **开发新控制模式** | [ARCHITECTURE.md#场景-1新增一种控制模式](ARCHITECTURE.md#场景-1新增一种控制模式) |
+| **接入新硬件/总线** | [ARCHITECTURE.md#场景-2替换硬件驱动](ARCHITECTURE.md#场景-2替换硬件驱动) |
+| **添加轨迹平滑算法** | [ARCHITECTURE.md#场景-3引入新的轨迹平滑算法](ARCHITECTURE.md#场景-3引入新的轨迹平滑算法) |
+| **了解笛卡尔末端速度计算原理** | [algorithms/CARTESIAN_VELOCITY.md](algorithms/CARTESIAN_VELOCITY.md) |
+| **了解重力补偿算法设计** | [algorithms/GRAVITY_COMPENSATION.md](algorithms/GRAVITY_COMPENSATION.md) |
+| **了解系统中逆运动学实现** | [algorithms/INVERSE_KINEMATICS](algorithms/INVERSE_KINEMATICS.md) |
+| **了解轨迹插值组件的原理** | [algorithms/TRAJECTORY_INTERPOLATION.md](algorithms/TRAJECTORY_INTERPOLATION.md) |
 
-- 组件职责边界与分层设计
-- 数据流与控制流
-- 插件扩展点与模块交互
-- 关键设计决策
-
-**预计耗时**：1-2 小时
-**完成标志**：理解系统整体架构与各组件职责
-
-### [DEVELOPER.md](DEVELOPER.md)
-**二次开发与扩展指南**
-
-- 新控制模式开发
-- 新硬件驱动扩展
-- 贡献流程与代码规范
-
-**预计耗时**：2-4 小时（取决于扩展复杂度）
-**完成标志**：能够开发新的控制模式或硬件驱动
-
-### [GRAVITY_COMPENSATION.md](algorithms/GRAVITY_COMPENSATION.md)
-**附加技术参考**
-
-- 动力学补偿方案
-- 重力补偿算法
-
-**使用场景**：需要实现高精度控制或动力学补偿时
 
 ---
 
-## 核心文档速查
+## 文档清单
 
-| 文档 | 用途 | 何时阅读 |
-|------|------|--------|
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | 系统架构说明 | 开始开发前 |
-| **[DEVELOPER.md](DEVELOPER.md)** | 二次开发指南 | 准备扩展系统时 |
-| **[GRAVITY_COMPENSATION.md](GRAVITY_COMPENSATION.md)** | 动力学补偿 | 需要高精度控制时 |
+### 核心架构
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** (711 行)
+  - 系统整体设计理念与核心原则
+  - 4 个结构单元与核心运行时组件
+  - 3 条关键架构边界定义
+  - 3 个典型扩展场景示例
+  - 系统设计约束与集成责任
+
+### 算法与技术参考
+
+- **[算法模块架构说明：重力补偿子模块](algorithms/GRAVITY_COMPENSATION.md)**
+  - 重力补偿算法原理
+  - 动力学补偿方案
+
+- **[algorithms/CARTESIAN_VELOCITY.md](algorithms/CARTESIAN_VELOCITY.md)**
+  - 笛卡尔空间末端执行器速度控制
+
+- **[algorithms/INVERSE_KINEMATICS.md](algorithms/INVERSE_KINEMATICS.md)**
+  - 逆运动学算法实现
+
+- **[algorithms/TRAJECTORY_INTERPOLATION.md](algorithms/TRAJECTORY_INTERPOLATION.md)**
+  - 轨迹插值算法
 
 ---
 
 ## 完成标志
 
-当你能够：
-- ✅ 理解系统的分层架构与各组件职责
-- ✅ 理解数据流与控制流
-- ✅ 开发新的控制模式或硬件驱动
-- ✅ 按照代码规范提交贡献
+当你能够做到以下事项时，说明你已掌握本系统的核心：
 
-说明你已具备**成功扩展本系统的全部能力**。
+- ✅ 解释系统的 3 条架构边界及其保护的目标
+- ✅ 描述 4 个结构单元各自的职责与依赖关系
+- ✅ 开发新的控制模式或硬件驱动
+- ✅ 理解系统的设计约束与集成责任
 
 ---
 
