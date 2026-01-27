@@ -118,6 +118,7 @@ gazebo_log/
 
 # === Docs ===
 *.puml
+site/
 
 # === Blog Posts (个人博客) ===
 blog_series_plan.md
