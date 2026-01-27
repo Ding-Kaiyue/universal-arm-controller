@@ -17,6 +17,7 @@
 
 - **[System Integrator](system_integrator/README.md)**
   系统集成者阅读入口，了解系统分层、接口、可替换组件与性能边界。
+
 ### 开发者
 
 - **[Developer](developer/README.md)**
@@ -25,7 +26,7 @@
 ### 技术评估 / 决策者
 
 - **[Technical Overview](overview/README.md)**
-  技术评估 / 决策者阅读入口，概览系统能力、性能指标、应用场景。
+  5 分钟快速了解：系统定位、核心能力、架构决策、适用场景、风险评估。适合评估是否选型。
 
 ---
 
@@ -56,4 +57,4 @@
 
 **维护者主页**: [Ding-Kaiyue](https://github.com/Ding-Kaiyue)
 
-**最后更新**: 2026年1月21日 
+**最后更新**: 2026年1月27日 
