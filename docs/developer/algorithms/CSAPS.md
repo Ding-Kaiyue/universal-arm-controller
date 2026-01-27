@@ -39,14 +39,29 @@ CSAPS 平滑解决的核心问题是：**对通过示教（教学编程）方式
 ### 2.1 问题定义
 
 给定：
-- 示教录制的关节轨迹：$\{\mathbf{q}_{0}, \mathbf{q}_{1}, \ldots, \mathbf{q}_{N}\}$，其中 $\mathbf{q}_{i} \in \mathbb{R}^{n_{\text{dof}}}$
-- 采样时刻：$\{t_0, t_1, \ldots, t_N\}$（通常为均匀采样，如 500 Hz）
+- 示教录制的关节轨迹：
+  $$
+  \{\mathbf{q}_{0}, \mathbf{q}_{1}, \ldots, \mathbf{q}_{N}\}$，其中 $\mathbf{q}_{i} \in \mathbb{R}^{n_{\text{dof}}}
+  $$
+- 采样时刻：
+  $$
+  \{t_0, t_1, \ldots, t_N\}$（通常为均匀采样，如 500 Hz）
+  $$
 - 采样中包含的噪声和抖动（主要来自人手操作的不规则性）
 
 求解：
-- 平滑的关节轨迹函数：$\mathbf{q}_{\text{smooth}}(t)$
-- 对应的速度曲线：$\dot{\mathbf{q}}_{\text{smooth}}(t)$
-- 对应的加速度曲线：$\ddot{\mathbf{q}}_{\text{smooth}}(t)$
+- 平滑的关节轨迹函数：
+  $$
+  \mathbf{q}_{\text{smooth}}(t)
+  $$
+- 对应的速度曲线：
+  $$
+  \dot{\mathbf{q}}_{\text{smooth}}(t)
+  $$
+- 对应的加速度曲线：
+  $$
+  \ddot{\mathbf{q}}_{\text{smooth}}(t)
+  $$
 
 约束条件：
 - **光滑性**：生成的轨迹应为 $C^2$ 连续（位置、速度、加速度连续，在数值精度范围内）
