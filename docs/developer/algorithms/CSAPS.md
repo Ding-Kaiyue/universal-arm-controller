@@ -57,14 +57,9 @@ $$
 
 求解：
 
-- 平滑的关节轨迹函数$
-\mathbf{q}_{\text{smooth}}(t)$
-
-- 对应的速度曲线：$
-\dot{\mathbf{q}}_{\text{smooth}}(t)$
-
-- 对应的加速度曲线：$
-\ddot{\mathbf{q}}_{\text{smooth}}(t)$
+- 平滑的关节轨迹函数：$\mathbf{q}_{\text{smooth}}(t)$
+- 对应的速度曲线：$\dot{\mathbf{q}}_{\text{smooth}}(t)$
+- 对应的加速度曲线：$\ddot{\mathbf{q}}_{\text{smooth}}(t)$
 
 约束条件：
 
