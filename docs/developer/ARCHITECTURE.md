@@ -483,8 +483,7 @@ HardwareManager **明确不允许**：
 > 位于 `hardware_driver/src/driver/` 中的 MotorDriver  
 > 以及 `hardware_driver/src/protocol/` 中的 motor_protocol。  
 >  
-> 这些实现细节被**严格限制在硬件驱动层内部**，  
-> 不允许向控制层或编排层泄漏。
+> 这些实现细节被**严格限制在硬件驱动层内部**，不允许向控制层或编排层泄漏。
 
 该边界保证了：
 
