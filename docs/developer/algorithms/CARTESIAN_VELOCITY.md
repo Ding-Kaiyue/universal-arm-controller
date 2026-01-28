@@ -31,7 +31,10 @@
   - 线性速度： $\mathbf{v}_{\text{linear}} = (v_x, v_y, v_z) \in \mathbb{R}^3$（m/s）
   - 角速度： $\boldsymbol{\omega} = (\omega_x, \omega_y, \omega_z) \in \mathbb{R}^3$（rad/s）
 - 当前关节位置： $\mathbf{q} \in \mathbb{R}^{n_{\text{dof}}}$（弧度）
-- 关节速度限制： $\dot{\mathbf{q}}_{\max,j} \in \mathbb{R}^{n_{\text{dof}}}$ （rad/s，各关节可不同）
+- 关节速度限制： 
+$$
+\dot{\mathbf{q}}_{\max,j} \in \mathbb{R}^{n_{\text{dof}}}\text{（rad/s，各关节可不同）}
+$$ 
 
 **输出**：
 - 关节速度命令： $\dot{\mathbf{q}} \in \mathbb{R}^{n_{\text{dof}}}$（rad/s，满足约束）
@@ -158,6 +161,7 @@ $$\alpha = \begin{cases}
 \end{cases}$$
 
 **应用**： 
+
 $$
 \mathbf{v}_{\text{ee,scaled}} = \alpha \cdot \mathbf{v}_{\text{ee}}
 $$
@@ -189,11 +193,15 @@ $$\|\mathbf{v}_{\text{reconstructed}} - \mathbf{v}_{\text{ee,scaled}}\|_2 < 10^{
 
 1. **速度限制**： 
    
-   $$|\dot{q}_j| \leq \dot{q}_{\max,j}$$
+   $$
+   |\dot{q}_j| \leq \dot{q}_{\max,j}
+   $$
 
    若违反，统一缩放所有关节速度： 
 
-   $$\dot{\mathbf{q}}_{\text{scaled}} = \min_j \frac{\dot{q}_{\max,j}}{|\dot{q}_j|} \cdot \dot{\mathbf{q}}$$
+   $$
+   \dot{\mathbf{q}}_{\text{scaled}} = \min_j \frac{\dot{q}_{\max,j}}{|\dot{q}_j|} \cdot \dot{\mathbf{q}}
+   $$
 
 2. **位置边界**：
    - 若 $q_j \leq q_{\min,j}$ 且 $\dot{q}_j < 0$，拒绝该方向
