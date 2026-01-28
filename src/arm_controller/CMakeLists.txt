@@ -110,6 +110,11 @@ add_library(arm_controller_lib
   src/utils/velocity_qp_solver.cpp
   src/utils/velocity_abb_solver.cpp
   src/utils/velocity_strict_solver.cpp
+  src/arm_controller_api.cpp
+  src/ipc/shm_manager.cpp
+  src/ipc/command_producer.cpp
+  src/ipc/controller_state_manager.cpp
+  src/ipc/ipc_context.cpp
   # 只保留测试需要的控制器
   src/controller/system_start/system_start_controller.cpp
   src/controller/joint_velocity/joint_velocity_controller.cpp
