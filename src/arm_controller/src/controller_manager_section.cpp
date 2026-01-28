@@ -58,11 +58,14 @@ void ControllerManagerNode::post_init() {
         start_working_controller("SystemStart", mapping);
         RCLCPP_INFO(this->get_logger(),
             "✅ Starting default controller for mapping: %s", mapping.c_str());
-
     }
 
-    // 然后切换到 HoldState 保持当前位置
-    start_working_controller("HoldState", "single_arm");
+    // 然后切换到 HoldState 保持当前位置（为每个mapping都启动）
+    for (const auto& mapping : mappings) {
+        start_working_controller("HoldState", mapping);
+        RCLCPP_INFO(this->get_logger(),
+            "✅ Switching to HoldState for mapping: %s", mapping.c_str());
+    }
 
     RCLCPP_INFO(this->get_logger(), "Controller Manager Node post-initialization complete");
 }
