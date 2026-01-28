@@ -47,7 +47,7 @@
 求解：
 - 轨迹持续时间 $T$（最小化）
 - 沿路径的时间参数函数 $s(t)$（从 0 到 1，归一化路径坐标）
-- 每个关键点的速度 $\dot{\mathbf{q}}_i \in \mathbb{R}^{n_{dof}}$ 和加速度 $\ddot{\mathbf{q}}_i \in \mathbb{R}^{n_{dof}}$
+- 每个关键点的速度 $\dot{\mathbf{q}}_i \in \mathbb{R}^{n_{dof}}$， 加速度 $\ddot{\mathbf{q}}_i \in \mathbb{R}^{n_{dof}}$ 
 
 约束条件（对每个关节 $j$ 独立）： 
 
