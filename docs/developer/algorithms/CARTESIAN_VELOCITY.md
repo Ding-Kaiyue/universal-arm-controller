@@ -27,14 +27,14 @@
 ### 2.1 输入与输出
 
 **输入**：
-- 末端执行器目标速度（笛卡尔空间）：$\mathbf{v}_{\text{ee}} \in \mathbb{R}^6$
-  - 线性速度：$\mathbf{v}_{\text{linear}} = (v_x, v_y, v_z) \in \mathbb{R}^3$（m/s）
-  - 角速度：$\boldsymbol{\omega} = (\omega_x, \omega_y, \omega_z) \in \mathbb{R}^3$（rad/s）
-- 当前关节位置：$\mathbf{q} \in \mathbb{R}^{n_{\text{dof}}}$（弧度）
-- 关节速度限制：$\dot{\mathbf{q}}_{\max,j} \in \mathbb{R}^{n_{\text{dof}}}$（rad/s，各关节可不同）
+- 末端执行器目标速度（笛卡尔空间）： $\mathbf{v}_{\text{ee}} \in \mathbb{R}^6$
+  - 线性速度： $\mathbf{v}_{\text{linear}} = (v_x, v_y, v_z) \in \mathbb{R}^3$（m/s）
+  - 角速度： $\boldsymbol{\omega} = (\omega_x, \omega_y, \omega_z) \in \mathbb{R}^3$（rad/s）
+- 当前关节位置： $\mathbf{q} \in \mathbb{R}^{n_{\text{dof}}}$（弧度）
+- 关节速度限制： $\dot{\mathbf{q}}_{\max,j} \in \mathbb{R}^{n_{\text{dof}}}$（rad/s，各关节可不同）
 
 **输出**：
-- 关节速度命令：$\dot{\mathbf{q}} \in \mathbb{R}^{n_{\text{dof}}}$（rad/s，满足约束）
+- 关节速度命令： $\dot{\mathbf{q}} \in \mathbb{R}^{n_{\text{dof}}}$（rad/s，满足约束）
 
 ### 2.2 核心约束关系
 
@@ -55,7 +55,7 @@ $$|\dot{q}_j| \leq \dot{q}_{\max,j}, \quad j = 1, \ldots, n_{\text{dof}}$$
 
 #### 奇异性指标
 
-**最小奇异值**：$\sigma_{\min} = \min_i \sigma_i(\mathbf{J})$，其中 $\sigma_i$ 是雅可比矩阵的第 $i$ 个奇异值（通过 SVD 分解得到）
+**最小奇异值**： $\sigma_{\min} = \min_i \sigma_i(\mathbf{J})$，其中 $\sigma_i$ 是雅可比矩阵的第 $i$ 个奇异值（通过 SVD 分解得到）
 
 用来衡量当前配置离奇异点的距离：
 - $\sigma_{\min} > 0.05$：远离奇异点，全速可达
@@ -66,15 +66,15 @@ $$|\dot{q}_j| \leq \dot{q}_{\max,j}, \quad j = 1, \ldots, n_{\text{dof}}$$
 
 雅可比方程 $\mathbf{v}_{\text{ee}} = \mathbf{J} \cdot \dot{\mathbf{q}}$ 在以下情况下**无唯一解**：
 
-1. **欠定**（$n_{\text{dof}} > 6$，冗余臂）
+1. **欠定**（ $n_{\text{dof}} > 6$ ，冗余臂）
    - 多个 $\dot{\mathbf{q}}$ 能产生同一个 $\mathbf{v}_{\text{ee}}$
    - 需要额外目标函数（如最小范数、避碰等）
 
-2. **超定**（$n_{\text{dof}} < 6$，非全向臂）
+2. **超定**（ $n_{\text{dof}} < 6$ ，非全向臂）
    - 某些笛卡尔方向可能无法精确达到
    - 需要投影或近似算法
 
-3. **奇异**（$\det(\mathbf{J}) = 0$ 或 $\sigma_{\min} \approx 0$）
+3. **奇异**（ $\det(\mathbf{J}) = 0$ 或 $\sigma_{\min} \approx 0$）
    - 雅可比不可逆或病态
    - 需要阻尼或其他正则化手段
 
@@ -103,7 +103,7 @@ $$\dot{\mathbf{q}} = \mathbf{J}^+ \cdot \mathbf{v}_{\text{ee}}$$
 
 $$\mathbf{J}^+ = \mathbf{J}^T (\mathbf{J}\mathbf{J}^T + \lambda^2 \mathbf{I})^{-1}$$
 
-参数：$\lambda = 10^{-4}$（阻尼因子，可通过参数配置调整）
+参数： $\lambda = 10^{-4}$ （阻尼因子，可通过参数配置调整）
 
 ### 3.2 速度求解方法对比与架构选择
 
@@ -157,7 +157,7 @@ $$\alpha = \begin{cases}
 0.0 & \text{if } \sigma_{\min} \leq 0.01
 \end{cases}$$
 
-**应用**：$\mathbf{v}_{\text{ee,scaled}} = \alpha \cdot \mathbf{v}_{\text{ee}}$
+**应用**： $\mathbf{v}_{\text{ee,scaled}} = \alpha \cdot \mathbf{v}_{\text{ee}}$
 
 **优点**：
 - 用户感知平滑，不会突然拒绝指令
@@ -184,10 +184,10 @@ $$\|\mathbf{v}_{\text{reconstructed}} - \mathbf{v}_{\text{ee,scaled}}\|_2 < 10^{
 
 对每个关节 $j$，检验：
 
-1. **速度限制**：
+1. **速度限制**： 
    $$|\dot{q}_j| \leq \dot{q}_{\max,j}$$
 
-   若违反，统一缩放所有关节速度：
+   若违反，统一缩放所有关节速度： 
    $$\dot{\mathbf{q}}_{\text{scaled}} = \min_j \frac{\dot{q}_{\max,j}}{|\dot{q}_j|} \cdot \dot{\mathbf{q}}$$
 
 2. **位置边界**：
@@ -277,7 +277,7 @@ $$\cos \theta > 0.98$$
 
 6. **应用奇异性降速**
    - 计算 $\sigma_{\min}(\mathbf{J})$，得到缩放因子 $\alpha$
-   - $\mathbf{v}_{\text{ee,scaled}} = \alpha \cdot \mathbf{v}_{\text{ee}}$
+   -  $\mathbf{v}_{\text{ee,scaled}} = \alpha \cdot \mathbf{v}_{\text{ee}}$
 
 7. **求解关节速度**
    - 调用 VelocityStrictSolver→solve()
@@ -289,7 +289,7 @@ $$\cos \theta > 0.98$$
    - 获取 $\tau_g(\mathbf{q})$，加到 effort 字段
 
 10. **发送电机指令**
-    - MIT 模式：position=0, velocity=$\dot{\mathbf{q}}$, effort=$\tau_g$, kp=0.0, kd=0.01
+    - MIT 模式：position=0, velocity= $\dot{\mathbf{q}}$ , effort= $\tau_g$ , kp=0.0, kd=0.01
 
 ---
 
@@ -337,7 +337,7 @@ $$\cos \theta > 0.98$$
 
 #### 场景 3：接近奇异点
 
-**初始条件**：配置接近奇异点（$\sigma_{\min} \approx 0.02$），用户输入水平速度
+**初始条件**：配置接近奇异点（ $\sigma_{\min} \approx 0.02$ ），用户输入水平速度
 
 **期望行为**：
 - 自动降速至 20% 左右
