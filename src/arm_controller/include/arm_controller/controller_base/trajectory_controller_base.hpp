@@ -16,7 +16,6 @@ class TrajectoryControllerBase : public ModeControllerBase {
 public:
     explicit TrajectoryControllerBase(std::string mode) : ModeControllerBase(mode) {}
     virtual ~TrajectoryControllerBase() = default;
-    // virtual void handle_message(std::any msg) override = 0;
 };
 
 template<typename T>
@@ -49,8 +48,8 @@ public:
         // 创建订阅（使用映射作为键存储多个订阅）
         subscriptions_[mapping] = node_->create_subscription<T>(
             input_topic, rclcpp::QoS(10).reliable(),
-            [this](const typename T::SharedPtr msg) {
-                if (!is_active_) return;
+            [this, mapping](const typename T::SharedPtr msg) {
+                if (!is_active(mapping)) return;
                 trajectory_callback(msg);
             }
         );
@@ -63,20 +62,12 @@ public:
 
     virtual void trajectory_callback(const typename T::SharedPtr msg) = 0;
 
-    // void handle_message(std::any msg) override final{
-    //     try {
-    //         auto typed_msg = std::any_cast<typename T::SharedPtr>(msg);
-    //         trajectory_callback(typed_msg);
-    //     } catch (const std::bad_any_cast& e) {
-    //         RCLCPP_ERROR_STREAM(rclcpp::get_logger("TrajectoryControllerImpl"), "Failed to cast message to type " << typeid(T).name());
-    //     }
-    // }
-
-    virtual void start(const std::string& mapping) override = 0;
-    virtual bool stop(const std::string& mapping) override = 0;
+    // 直接执行轨迹命令 - 通过 IPC 命令队列消费线程调用
+    // 参数会自动填充/裁短以匹配控制器要求的数据格式
+    virtual bool execute(const std::string& mapping, const std::vector<double>& parameters) = 0;
     
     // 轨迹控制器通常需要钩子状态来安全停止
-    bool needs_hook_state() const override { return true; }
+    std::unordered_map<std::string, bool> needs_hook_state() const override { return {}; }
 
 protected:
     rclcpp::Node::SharedPtr node_;
@@ -92,11 +83,6 @@ protected:
             RCLCPP_INFO(node_->get_logger(), "[%s] Cleaned up subscription for mapping: %s",
                        get_mode().c_str(), mapping.c_str());
         }
-    }
-
-    // 子类可以重写此方法以从消息中提取 mapping 信息
-    virtual std::string get_mapping_from_message([[maybe_unused]] const typename T::SharedPtr msg) {
-        return "";  // 默认实现
     }
 
     // 加载插值器配置的辅助方法

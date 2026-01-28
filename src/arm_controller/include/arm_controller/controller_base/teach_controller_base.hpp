@@ -41,16 +41,16 @@ public:
         // 创建订阅 - 两个话题都使用同一个 callback
         subscriptions_[mapping + "0"] = node_->create_subscription<std_msgs::msg::String>(
             input_topic0, rclcpp::QoS(10).reliable(),
-            [this](const std_msgs::msg::String::SharedPtr msg) {
-                if (!is_active_) return;
+            [this, mapping](const std_msgs::msg::String::SharedPtr msg) {
+                if (!is_active(mapping)) return;
                 teach_callback(msg);
             }
         );
 
         subscriptions_[mapping + "1"] = node_->create_subscription<std_msgs::msg::String>(
             input_topic1, rclcpp::QoS(10).reliable(),
-            [this](const std_msgs::msg::String::SharedPtr msg) {
-                if (!is_active_) return;
+            [this, mapping](const std_msgs::msg::String::SharedPtr msg) {
+                if (!is_active(mapping)) return;
                 on_teaching_control(msg);
             }
         );
@@ -64,6 +64,10 @@ public:
     virtual void teach_callback(const std_msgs::msg::String::SharedPtr msg) = 0;
     virtual void on_teaching_control(const std_msgs::msg::String::SharedPtr msg) = 0;
 
+    // 直接执行示教命令 - 通过 IPC 命令队列消费线程调用
+    // command: 示教操作命令（如"start_record", "start_replay"等）
+    virtual bool execute_teach_command(const std::string& mapping, const std::string& command) = 0;
+
     void start(const std::string& mapping = "") override = 0;
     bool stop(const std::string& mapping = "") override = 0;
 
@@ -73,7 +77,7 @@ public:
     virtual void complete(const std::string& mapping = "") = 0;
 
     // 记录复现功能默认需要钩子状态来安全停止
-    bool needs_hook_state() const override { return true; }
+    std::unordered_map<std::string, bool> needs_hook_state() const override { return {}; }
 
 protected:
     // 设置示教模式标志 - 防止安全限位检查触发急停

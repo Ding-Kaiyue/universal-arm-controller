@@ -14,6 +14,18 @@ public:
 
     virtual void start(const std::string& mapping) override = 0;
     virtual bool stop(const std::string& mapping) override = 0;
+
+    // 进入模式 - 用户通过 IPC 调用此方法进入当前 mode
+    virtual bool enter_mode(const std::string& mapping = "") {
+        start(mapping);
+        return is_active(mapping);
+    }
+
+    // 退出模式 - 用户通过 IPC 调用此方法退出当前 mode
+    virtual bool exit_mode(const std::string& mapping = "") {
+        return stop(mapping);
+    }
+
 protected:
     rclcpp::Node::SharedPtr node_;
 };

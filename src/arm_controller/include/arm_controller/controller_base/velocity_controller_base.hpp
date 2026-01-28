@@ -42,8 +42,8 @@ public:
         // 创建订阅
         subscriptions_[mapping] = node_->create_subscription<T>(
             input_topic, rclcpp::QoS(10).reliable(),
-            [this](const typename T::SharedPtr msg) {
-                if (!is_active_) return;
+            [this, mapping](const typename T::SharedPtr msg) {
+                if (!is_active(mapping)) return;
                 velocity_callback(msg);
             }
         );
@@ -54,20 +54,15 @@ public:
 
     virtual void velocity_callback(const typename T::SharedPtr msg) = 0;
 
-    // void handle_message(std::any msg) override final{
-    //     try {
-    //         auto typed_msg = std::any_cast<typename T::SharedPtr>(msg);
-    //         velocity_callback(typed_msg);
-    //     } catch (const std::bad_any_cast& e) {
-    //         RCLCPP_ERROR_STREAM(rclcpp::get_logger("VelocityControllerImpl"), "Failed to cast message to type " << typeid(T).name());
-    //     }
-    // }
+    // 直接发送速度命令 - 通过 IPC 命令队列消费线程调用
+    // 参数会自动填充/裁短以匹配控制器要求的数据格式
+    virtual bool send_velocity(const std::string& mapping, const std::vector<double>& velocity) = 0;
 
     void start(const std::string& mapping) override = 0;
     bool stop(const std::string& mapping) override = 0;
 
     // 速度控制器通常需要钩子状态来安全停止
-    bool needs_hook_state() const override { return true; }
+    std::unordered_map<std::string, bool> needs_hook_state() const override { return {}; }
 
 protected:
     rclcpp::Node::SharedPtr node_;

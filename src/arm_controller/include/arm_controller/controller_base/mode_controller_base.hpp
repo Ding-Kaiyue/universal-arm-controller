@@ -3,6 +3,7 @@
 
 #include <any>
 #include <string>
+#include <unordered_map>
 
 
 class ModeControllerBase {
@@ -13,18 +14,27 @@ public:
     // 初始化订阅 - 子类可以重写以创建话题订阅
     virtual void init_subscriptions(const std::string& mapping = "") { (void)mapping; }
 
-    virtual void start(const std::string& mapping = "") { (void)mapping; is_active_ = true; }
-    virtual bool stop(const std::string& mapping = "") { (void)mapping; is_active_ = false; return is_active_;}
-    
-    // virtual void handle_message(std::any msg) = 0;
+    virtual void start(const std::string& mapping = "") {
+        std::string normalized = normalize_mapping(mapping);
+        active_mappings_[normalized] = true;
+    }
+    virtual bool stop(const std::string& mapping = "") {
+        std::string normalized = normalize_mapping(mapping);
+        active_mappings_[normalized] = false;
+        return !active_mappings_[normalized];
+    }
 
-    bool is_active() const { return is_active_; }
+    bool is_active(const std::string& mapping = "") const {
+        std::string normalized = normalize_mapping(mapping);
+        auto it = active_mappings_.find(normalized);
+        return (it != active_mappings_.end()) ? it->second : false;
+    }
     
     // 获取控制器模式名称
     std::string get_mode() const { return mode_; }
     
-    // 检查是否需要钩子状态进行安全转移
-    virtual bool needs_hook_state() const { return false; }
+    // 检查某 mapping 是否需要钩子状态进行安全转移
+    virtual std::unordered_map<std::string, bool> needs_hook_state() const { return {}; }
 
     // helper: normalize mapping ("" -> "single_arm")
     static std::string normalize_mapping(const std::string& mapping) {
@@ -32,7 +42,8 @@ public:
     }
     
 protected:
-    bool is_active_ = false;
+    // 记录每个 mapping 的活跃状态: key=mapping名称, value=是否活跃
+    std::unordered_map<std::string, bool> active_mappings_;
 
 private:
     std::string mode_;
