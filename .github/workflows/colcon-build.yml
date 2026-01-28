@@ -159,6 +159,9 @@ jobs:
         run: |
           source /opt/ros/humble/setup.bash
           source /tmp/trac_ik_ws/install/setup.bash
+          # First pass: build trajectory planning interfaces and dependencies
+          colcon build --packages-up-to trajectory_planning_interfaces trajectory_planning_v3 --cmake-args -DCMAKE_BUILD_TYPE=Release || true
+          # Second pass: full build
           colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 
       - name: Upload build cache
