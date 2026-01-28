@@ -38,8 +38,8 @@
 ### 2.1 问题定义
 
 给定：
-- 关节空间路径： $\mathbf{q}_0, \mathbf{q}_1, \ldots, \mathbf{q}_N$ 
-  - 其中 $\mathbf{q}_i \in \mathbb{R}^{n_{dof}}$ （N+1 个关键点，每个点包含 $n_{dof}$ 个关节）
+- 关节空间路径： $\mathbf{q}_0, \mathbf{q}_1, \ldots, \mathbf{q}_N$  
+  其中 $\mathbf{q}_i \in \mathbb{R}^{n_{\mathrm{dof}}}$
 - 关节速度限制： $v_{\max,j}$ 对每个关节 $j = 1, \ldots, n_{dof}$（各关节可不同）
 - 关节加速度限制： $a_{\max,j}$ 对每个关节 $j = 1, \ldots, n_{dof}$（各关节可不同）
 - 速度缩放因子： $\alpha_v \in (0, 1]$（全局缩放，表示使用最大速度的百分比）
@@ -48,8 +48,9 @@
 求解：
 - 轨迹持续时间 $T$（最小化）
 - 沿路径的时间参数函数 $s(t)$（从 0 到 1，归一化路径坐标）
-- 每个关键点的速度 $\dot{\mathbf{q}}_i \in \mathbb{R}^{n_{dof}}$
-- 每个关键点的加速度 $\ddot{\mathbf{q}}_i \in \mathbb{R}^{n_{dof}}$ 
+- 每个关键点的速度 $\dot{\mathbf{q}}_i \in \mathbb{R}^{n_{\mathrm{dof}}}$ 
+- 每个关键点的加速度 $\ddot{\mathbf{q}}_i \in \mathbb{R}^{n_{\mathrm{dof}}}$
+
 
 约束条件（对每个关节 $j$ 独立）： 
 
