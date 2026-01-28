@@ -39,7 +39,7 @@
 
 给定：
 - 关节空间路径： $\mathbf{q}_0, \mathbf{q}_1, \ldots, \mathbf{q}_N$  
-  其中 $\mathbf{q}_i \in \mathbb{R}^{n}$（$n$ 为关节自由度数）
+  其中 $\mathbf{q}_i \in \mathbb{R}^{n}$（ $n$ 为关节自由度数）
 - 关节速度限制： $v_{\max,j}$ 对每个关节 $j = 1, \ldots, n_{dof}$（各关节可不同）
 - 关节加速度限制： $a_{\max,j}$ 对每个关节 $j = 1, \ldots, n_{dof}$（各关节可不同）
 - 速度缩放因子： $\alpha_v \in (0, 1]$（全局缩放，表示使用最大速度的百分比）

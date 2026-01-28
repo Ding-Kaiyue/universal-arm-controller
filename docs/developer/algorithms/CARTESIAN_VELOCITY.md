@@ -31,7 +31,7 @@
   - 线性速度： $\mathbf{v}_{\text{linear}} = (v_x, v_y, v_z) \in \mathbb{R}^3$（m/s）
   - 角速度： $\boldsymbol{\omega} = (\omega_x, \omega_y, \omega_z) \in \mathbb{R}^3$（rad/s）
 - 当前关节位置： $\mathbf{q} \in \mathbb{R}^{n_{\text{dof}}}$（弧度）
-- 关节速度限制： $\dot{\mathbf{q}}_{\max,j} \in \mathbb{R}^{n_{\text{dof}}}$（rad/s，各关节可不同）
+- 关节速度限制： $\dot{\mathbf{q}}_{\max,j} \in \mathbb{R}^{n_{\text{dof}}}$ （rad/s，各关节可不同）
 
 **输出**：
 - 关节速度命令： $\dot{\mathbf{q}} \in \mathbb{R}^{n_{\text{dof}}}$（rad/s，满足约束）
@@ -157,7 +157,10 @@ $$\alpha = \begin{cases}
 0.0 & \text{if } \sigma_{\min} \leq 0.01
 \end{cases}$$
 
-**应用**： $\mathbf{v}_{\text{ee,scaled}} = \alpha \cdot \mathbf{v}_{\text{ee}}$
+**应用**： 
+$$
+\mathbf{v}_{\text{ee,scaled}} = \alpha \cdot \mathbf{v}_{\text{ee}}
+$$
 
 **优点**：
 - 用户感知平滑，不会突然拒绝指令
@@ -185,9 +188,11 @@ $$\|\mathbf{v}_{\text{reconstructed}} - \mathbf{v}_{\text{ee,scaled}}\|_2 < 10^{
 对每个关节 $j$，检验：
 
 1. **速度限制**： 
+   
    $$|\dot{q}_j| \leq \dot{q}_{\max,j}$$
 
    若违反，统一缩放所有关节速度： 
+
    $$\dot{\mathbf{q}}_{\text{scaled}} = \min_j \frac{\dot{q}_{\max,j}}{|\dot{q}_j|} \cdot \dot{\mathbf{q}}$$
 
 2. **位置边界**：
@@ -277,18 +282,21 @@ $$\cos \theta > 0.98$$
 
 6. **应用奇异性降速**
    - 计算 $\sigma_{\min}(\mathbf{J})$，得到缩放因子 $\alpha$
-   -  $\mathbf{v}_{\text{ee,scaled}} = \alpha \cdot \mathbf{v}_{\text{ee}}$
+   -  
+$$
+\mathbf{v}_{\text{ee,scaled}} = \alpha \cdot \mathbf{v}_{\text{ee}}
+$$
 
-7. **求解关节速度**
+1. **求解关节速度**
    - 调用 VelocityStrictSolver→solve()
 
-8. **多层验证**
+2. **多层验证**
    - 投影误差检验、关节约束检验、方向一致性检验
 
-9. **应用重力补偿**
+3. **应用重力补偿**
    - 获取 $\tau_g(\mathbf{q})$，加到 effort 字段
 
-10. **发送电机指令**
+4.  **发送电机指令**
     - MIT 模式：position=0, velocity= $\dot{\mathbf{q}}$ , effort= $\tau_g$ , kp=0.0, kd=0.01
 
 ---
