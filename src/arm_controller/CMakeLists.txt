@@ -220,6 +220,36 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+# === Build Examples ===
+file(GLOB EXAMPLE_SOURCES example/example_*.cpp)
+if(EXAMPLE_SOURCES)
+  foreach(EXAMPLE_FILE ${EXAMPLE_SOURCES})
+    get_filename_component(EXAMPLE_NAME ${EXAMPLE_FILE} NAME_WE)
+    add_executable(${EXAMPLE_NAME} ${EXAMPLE_FILE})
+
+    # When BUILD_TESTING=ON, library has coverage flags, so examples must also have them
+    if(BUILD_TESTING)
+      if(CMAKE_COMPILER_IS_GNUCXX)
+        target_compile_options(${EXAMPLE_NAME} PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+        target_link_options(${EXAMPLE_NAME} PRIVATE --coverage -fprofile-arcs -ftest-coverage)
+      endif()
+    endif()
+
+    target_link_libraries(${EXAMPLE_NAME}
+      arm_controller_lib
+    )
+    ament_target_dependencies(${EXAMPLE_NAME}
+      rclcpp
+      std_msgs
+      sensor_msgs
+      geometry_msgs
+    )
+    install(TARGETS ${EXAMPLE_NAME}
+      DESTINATION bin
+    )
+  endforeach()
+endif()
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
