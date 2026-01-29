@@ -119,6 +119,7 @@ void CartesianVelocityController::initialize_moveit_service() {
 }
 
 void CartesianVelocityController::velocity_callback(
+    const std::string& mapping,
     const geometry_msgs::msg::TwistStamped::SharedPtr msg)
 {
     // ✅ Twist latch 模式：仅缓存最新命令

@@ -22,23 +22,23 @@ controllers:
   - key: HoldState
     class: HoldStateController
 
-  - key: JointVelocity
-    class: JointVelocityController
-    input_topic:
-      name: /controller_api/joint_velocity_action/{mapping}
-      type: sensor_msgs/msg/JointState
+  # - key: JointVelocity
+  #   class: JointVelocityController
+  #   input_topic:
+  #     name: /controller_api/joint_velocity_action/{mapping}
+  #     type: sensor_msgs/msg/JointState
 
-  - key: CartesianVelocity
-    class: CartesianVelocityController
-    input_topic:
-      name: /controller_api/cartesian_velocity_action/{mapping}
-      type: geometry_msgs/msg/Twist
+  # - key: CartesianVelocity
+  #   class: CartesianVelocityController
+  #   input_topic:
+  #     name: /controller_api/cartesian_velocity_action/{mapping}
+  #     type: geometry_msgs/msg/Twist
 
-  - key: Move2Initial
-    class: Move2InitialController
+  # - key: Move2Initial
+  #   class: Move2InitialController
 
-  - key: Move2Start
-    class: Move2StartController
+  # - key: Move2Start
+  #   class: Move2StartController
 
   - key: ROS2ActionControl
     class: ROS2ActionControlController
@@ -61,36 +61,36 @@ controllers:
       name: /controller_api/movel_action/{mapping}
       type: geometry_msgs/msg/Pose
 
-  - key: PointRecord
-    class: PointRecordController
-    input_topics:
-      - name: /controller_api/point_record_action/{mapping}
-        type: std_msgs/msg/String
-      - name: /controller_api/point_record_control/{mapping}
-        type: std_msgs/msg/String
-  - key: PointReplay
-    class: PointReplayController
-    input_topics:
-      - name: /controller_api/point_replay_action/{mapping}
-        type: std_msgs/msg/String
-      - name: /controller_api/point_replay_control/{mapping}
-        type: std_msgs/msg/String
+  # - key: PointRecord
+  #   class: PointRecordController
+  #   input_topics:
+  #     - name: /controller_api/point_record_action/{mapping}
+  #       type: std_msgs/msg/String
+  #     - name: /controller_api/point_record_control/{mapping}
+  #       type: std_msgs/msg/String
+  # - key: PointReplay
+  #   class: PointReplayController
+  #   input_topics:
+  #     - name: /controller_api/point_replay_action/{mapping}
+  #       type: std_msgs/msg/String
+  #     - name: /controller_api/point_replay_control/{mapping}
+  #       type: std_msgs/msg/String
 
-  - key: TrajectoryRecord
-    class: TrajectoryRecordController
-    input_topics:
-      - name: /controller_api/trajectory_record_action/{mapping}
-        type: std_msgs/msg/String
-      - name: /controller_api/trajectory_record_control/{mapping}
-        type: std_msgs/msg/String
+  # - key: TrajectoryRecord
+  #   class: TrajectoryRecordController
+  #   input_topics:
+  #     - name: /controller_api/trajectory_record_action/{mapping}
+  #       type: std_msgs/msg/String
+  #     - name: /controller_api/trajectory_record_control/{mapping}
+  #       type: std_msgs/msg/String
 
-  - key: TrajectoryReplay
-    class: TrajectoryReplayController
-    input_topics:
-      - name: /controller_api/trajectory_replay_action/{mapping}
-        type: std_msgs/msg/String
-      - name: /controller_api/trajectory_replay_control/{mapping}
-        type: std_msgs/msg/String
+  # - key: TrajectoryReplay
+  #   class: TrajectoryReplayController
+  #   input_topics:
+  #     - name: /controller_api/trajectory_replay_action/{mapping}
+  #       type: std_msgs/msg/String
+  #     - name: /controller_api/trajectory_replay_control/{mapping}
+  #       type: std_msgs/msg/String
 
 # MoveIt 速度缩放参数
 # 全局默认值（0.0~1.0）

@@ -17,7 +17,7 @@ public:
     bool stop(const std::string& mapping) override;
 
 protected:
-    void velocity_callback(const sensor_msgs::msg::JointState::SharedPtr msg) override;
+    void velocity_callback(const std::string& mapping, const sensor_msgs::msg::JointState::SharedPtr msg) override;
     bool send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities);
 
 private:

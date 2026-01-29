@@ -65,7 +65,7 @@ bool JointVelocityController::stop(const std::string& mapping) {
     return true;
 }
 
-void JointVelocityController::velocity_callback(const sensor_msgs::msg::JointState::SharedPtr msg) {
+void JointVelocityController::velocity_callback(const std::string& mapping, const sensor_msgs::msg::JointState::SharedPtr msg) {
     if (!is_active_) return;
 
     // ✅ Velocity latch 模式：仅缓存最新命令

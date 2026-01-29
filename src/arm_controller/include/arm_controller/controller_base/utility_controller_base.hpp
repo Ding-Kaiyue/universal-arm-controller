@@ -10,10 +10,11 @@ public:
     explicit UtilityControllerBase(std::string mode, rclcpp::Node::SharedPtr node)
         : ModeControllerBase(mode), node_(node) {}
     virtual ~UtilityControllerBase() = default;
-    // void handle_message(std::any /*msg*/) override final {}
 
-    virtual void start(const std::string& mapping) override = 0;
-    virtual bool stop(const std::string& mapping) override = 0;
+    // 子类必须实现这两个方法，执行自己的初始化/清理逻辑
+    // 最后需要调用 ModeControllerBase::start/stop() 来更新 active_mappings_ 状态
+    virtual void start(const std::string& mapping) = 0;
+    virtual bool stop(const std::string& mapping) = 0;
 
     // 进入模式 - 用户通过 IPC 调用此方法进入当前 mode
     virtual bool enter_mode(const std::string& mapping = "") {

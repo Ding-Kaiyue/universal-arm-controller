@@ -13,8 +13,6 @@ ROS2ActionControlController::ROS2ActionControlController(const rclcpp::Node::Sha
 ROS2ActionControlController::~ROS2ActionControlController() {}
 
 void ROS2ActionControlController::start(const std::string& mapping) {
-    is_active_ = true;
-
     // 验证硬件管理器可用性
     if (!hardware_manager_) {
         RCLCPP_WARN(node_->get_logger(), "[%s] ROS2ActionControl: Hardware manager not available", mapping.c_str());
@@ -26,11 +24,15 @@ void ROS2ActionControlController::start(const std::string& mapping) {
         return;
     }
 
-    RCLCPP_INFO(node_->get_logger(), "ROS2ActionControl: Ready to execute trajectories via action server");
+    RCLCPP_INFO(node_->get_logger(), "[%s] ROS2ActionControl: Ready to execute trajectories via action server", mapping.c_str());
+
+    // 调用基类 start() 设置 per-mapping 的 active_mappings_[mapping] = true
+    ModeControllerBase::start(mapping);
 }
 
 bool ROS2ActionControlController::stop(const std::string& mapping) {
-    is_active_ = false;
+    // 调用基类 stop() 设置 per-mapping 的 active_mappings_[mapping] = false
+    ModeControllerBase::stop(mapping);
     RCLCPP_INFO(node_->get_logger(), "[%s] ROS2ActionControlController deactivated", mapping.c_str());
     return true;
 }

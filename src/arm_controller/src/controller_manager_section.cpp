@@ -319,12 +319,13 @@ bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::
     auto key_pair = std::make_pair(current_mode_it->second, mapping);
     auto it = controller_map_.find(key_pair);
     if (it != controller_map_.end()) {
-        need_hook = it->second->needs_hook_state();
+        // 获取该 controller 的 per-mapping hook 状态
+        std::unordered_map<std::string, bool> hook_state_map = it->second->needs_hook_state();
+        auto hook_it = hook_state_map.find(mapping);
+        need_hook = (hook_it != hook_state_map.end()) ? hook_it->second : false;
+
         it->second->stop(mapping);
-
-        // 注意：话题订阅由控制器在 start() 中动态创建
-        // 当 stop() 调用时，控制器会停止处理消息（通过 is_active_ 标志）
-
+        
         RCLCPP_INFO(this->get_logger(), "[%s] Stopped controller for mode: %s, needs_hook: %s",
                     mapping.c_str(), current_mode_.c_str(), need_hook ? "true" : "false");
         return true;
@@ -345,8 +346,8 @@ bool ControllerManagerNode::enter_hook_state(const std::string& target_mode, con
             // 设置目标状态
             hold_controller->set_target_mode(target_mode);
 
-            // 设置转换就绪回调
-            hold_controller->set_transition_ready_callback([this, mapping]() {
+            // 设置转换就绪回调 - 现在传递 mapping 参数
+            hold_controller->set_transition_ready_callback([this](const std::string& mapping) {
                 // 条件满足时，自动执行状态转换
                 this->on_transition_ready(mapping);
             });

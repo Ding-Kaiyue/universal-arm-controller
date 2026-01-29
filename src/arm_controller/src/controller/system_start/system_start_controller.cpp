@@ -13,8 +13,6 @@ SystemStartController::SystemStartController(const rclcpp::Node::SharedPtr& node
 SystemStartController::~SystemStartController() {}
 
 void SystemStartController::start(const std::string& mapping) {
-    is_active_ = true;
-
     // 验证硬件管理器可用性
     if (!hardware_manager_) {
         RCLCPP_WARN(node_->get_logger(), "[%s] SystemStart: Hardware manager not available", mapping.c_str());
@@ -57,10 +55,14 @@ void SystemStartController::start(const std::string& mapping) {
         return;
     }
     RCLCPP_INFO(node_->get_logger(), "[%s] ✅ SystemStart: System initialized and ready", mapping.c_str());
+
+    // 调用基类 start() 设置 per-mapping 的 active_mappings_[mapping] = true
+    ModeControllerBase::start(mapping);
 }
 
 bool SystemStartController::stop(const std::string& mapping) {
-    is_active_ = false;
+    // 调用基类 stop() 设置 per-mapping 的 active_mappings_[mapping] = false
+    ModeControllerBase::stop(mapping);
     RCLCPP_INFO(node_->get_logger(), "[%s] SystemStartController deactivated", mapping.c_str());
     return true;
 }

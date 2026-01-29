@@ -10,8 +10,8 @@
 
 class HoldStateController final : public UtilityControllerBase {
 public:
-    // 转换就绪回调函数类型
-    using TransitionReadyCallback = std::function<void()>;
+    // 转换就绪回调函数类型 - 现在包含 mapping 参数
+    using TransitionReadyCallback = std::function<void(const std::string&)>;
 
     explicit HoldStateController(const rclcpp::Node::SharedPtr& node);
     ~HoldStateController() override = default;
@@ -23,7 +23,7 @@ public:
     void set_target_mode(const std::string& target_mode) { target_mode_ = target_mode; }
     std::string get_target_state() const { return target_mode_; }
 
-    // 设置转换就绪回调函数
+    // 设置转换就绪回调函数 - 现在是 per-mapping 的
     void set_transition_ready_callback(TransitionReadyCallback callback) {
         transition_ready_callback_ = callback;
     }
@@ -43,7 +43,8 @@ private:
     std::unordered_map<std::string, MappingContext> mapping_contexts_;
     std::shared_ptr<HardwareManager> hardware_manager_;
 
-    // 全局回调（调用者会由 controller manager 设置）
+    // Per-mapping 回调（调用者会由 controller manager 设置）
+    // 回调现在会接收 mapping 参数，确保只影响指定的 mapping
     TransitionReadyCallback transition_ready_callback_;
 
     // internal helpers

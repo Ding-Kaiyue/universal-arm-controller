@@ -37,7 +37,7 @@ public:
 
 private:
     void initialize_moveit_service();
-    void velocity_callback(const geometry_msgs::msg::TwistStamped::SharedPtr msg) override;
+    void velocity_callback(const std::string& mapping, const geometry_msgs::msg::TwistStamped::SharedPtr msg) override;
     void control_loop();  // 10ms 定时控制循环
 
     bool send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities);

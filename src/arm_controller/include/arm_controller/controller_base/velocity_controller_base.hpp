@@ -10,7 +10,6 @@ class VelocityControllerBase : public ModeControllerBase {
 public:
     explicit VelocityControllerBase(std::string mode) : ModeControllerBase(mode) {}
     virtual ~VelocityControllerBase() = default;
-    // virtual void handle_message(std::any msg) override = 0;
 };
 
 template<typename T>
@@ -44,7 +43,7 @@ public:
             input_topic, rclcpp::QoS(10).reliable(),
             [this, mapping](const typename T::SharedPtr msg) {
                 if (!is_active(mapping)) return;
-                velocity_callback(msg);
+                velocity_callback(mapping, msg);
             }
         );
 
@@ -52,15 +51,14 @@ public:
                    get_mode().c_str(), input_topic.c_str(), mapping.c_str());
     }
 
-    virtual void velocity_callback(const typename T::SharedPtr msg) = 0;
+    virtual void velocity_callback(const std::string& mapping, const typename T::SharedPtr msg) = 0;
 
     // 直接发送速度命令 - 通过 IPC 命令队列消费线程调用
     // 参数会自动填充/裁短以匹配控制器要求的数据格式
     virtual bool send_velocity(const std::string& mapping, const std::vector<double>& velocity) = 0;
 
-    void start(const std::string& mapping) override = 0;
-    bool stop(const std::string& mapping) override = 0;
-
+    virtual void command_queue_consumer_thread() = 0;
+    
     // 速度控制器通常需要钩子状态来安全停止
     std::unordered_map<std::string, bool> needs_hook_state() const override { return {}; }
 

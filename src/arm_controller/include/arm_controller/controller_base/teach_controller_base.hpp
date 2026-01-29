@@ -68,14 +68,13 @@ public:
     // command: 示教操作命令（如"start_record", "start_replay"等）
     virtual bool execute_teach_command(const std::string& mapping, const std::string& command) = 0;
 
-    void start(const std::string& mapping = "") override = 0;
-    bool stop(const std::string& mapping = "") override = 0;
-
     virtual void pause(const std::string& mapping = "") = 0;
     virtual void resume(const std::string& mapping = "") = 0;
     virtual void cancel(const std::string& mapping = "") = 0;
     virtual void complete(const std::string& mapping = "") = 0;
 
+    virtual void command_queue_consumer_thread() = 0;
+    
     // 记录复现功能默认需要钩子状态来安全停止
     std::unordered_map<std::string, bool> needs_hook_state() const override { return {}; }
 

@@ -50,7 +50,7 @@ public:
             input_topic, rclcpp::QoS(10).reliable(),
             [this, mapping](const typename T::SharedPtr msg) {
                 if (!is_active(mapping)) return;
-                trajectory_callback(msg);
+                trajectory_callback(mapping, msg);
             }
         );
 
@@ -60,11 +60,13 @@ public:
 
     virtual void plan_and_execute(const std::string& mapping, const typename T::SharedPtr msg) = 0;
 
-    virtual void trajectory_callback(const typename T::SharedPtr msg) = 0;
+    virtual void trajectory_callback(const std::string& mapping, const typename T::SharedPtr msg) = 0;
 
     // 直接执行轨迹命令 - 通过 IPC 命令队列消费线程调用
     // 参数会自动填充/裁短以匹配控制器要求的数据格式
     virtual bool execute(const std::string& mapping, const std::vector<double>& parameters) = 0;
+    
+    virtual void command_queue_consumer_thread() = 0;
     
     // 轨迹控制器通常需要钩子状态来安全停止
     std::unordered_map<std::string, bool> needs_hook_state() const override { return {}; }
