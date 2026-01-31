@@ -319,4 +319,4 @@ ros2 run tf2_tools tf2_echo base_link Link6
 
 > [!NOTE]
 > 本文档侧重于“如何使用控制接口”。  
-> 如果你是开发者，想深入理解控制器实现、插件机制或架构设计，请参阅 **[系统架构与组件说明](overview/ARCHITECTURE.md)** 。
+> 如果你是开发者，想深入理解控制器实现、插件机制或架构设计，请参阅 **[系统架构与组件说明](../developer/ARCHITECTURE.md)** 。

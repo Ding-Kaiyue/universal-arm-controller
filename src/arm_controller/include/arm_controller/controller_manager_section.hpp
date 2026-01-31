@@ -34,7 +34,7 @@ private:
     // 控制器管理
     bool start_working_controller(const std::string& mode_name, const std::string& mapping = "");
     bool stop_working_controller(bool& need_hook, const std::string& mapping = "");
-    bool check_work_mode(const std::string& target_mode) const;
+    bool check_work_mode(const std::string& target_mode, const std::string& mapping = "") const;
 
     // 高级状态管理
     bool enter_hook_state(const std::string& target_mode, const std::string& mapping = "");
@@ -71,12 +71,11 @@ private:
     // 控制器映射：(key, mapping) -> controller 实例
     // 每个 (控制器类型, 硬件映射) 对都有独立的 controller 实例
     std::map<std::pair<std::string, std::string>, std::shared_ptr<ModeControllerBase>> controller_map_;
+
+    // Per-mapping 状态管理
     std::map<std::string, std::string> mapping_to_mode_;  // 每个 mapping 的当前模式
-    std::string current_mode_;  // 当前全局模式
-    std::string target_mode_;
-    bool in_hook_state_;
-    bool emergency_stop_active_;
-    bool safety_zone_violation_;
+    std::unordered_map<std::string, std::string> mapping_target_mode_;  // 每个 mapping 的目标模式
+    std::unordered_map<std::string, bool> mapping_in_hook_state_;  // 每个 mapping 的钩子状态
 
     // 配置和缓存
     YAML::Node yaml_config_;

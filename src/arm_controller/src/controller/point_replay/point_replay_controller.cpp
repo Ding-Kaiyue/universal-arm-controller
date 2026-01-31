@@ -140,7 +140,8 @@ void PointReplayController::initialize_planning_services() {
                 auto motion_planning_service = std::make_shared<trajectory_planning::application::services::MotionPlanningService>(
                     moveit_adapter,
                     tracik_adapter,
-                    node_);
+                    node_,
+                    hardware_manager_->get_robot_type(mapping));
 
                 if (!motion_planning_service) {
                     RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ PointReplay: Failed to create MotionPlanningService", mapping.c_str());

@@ -1,9 +1,9 @@
 #include "arm_controller/dynamics/gravity_compensator.hpp"
 
-// Pinocchio 头文件只在 cpp 中包含，加快编译速度
 #include <pinocchio/parsers/urdf.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
-#include <pinocchio/algorithm/joint-configuration.hpp>
+
+#include <Eigen/Dense>
 
 #include <map>
 #include <mutex>
@@ -16,9 +16,15 @@ namespace dynamics {
 class GravityCompensator::Impl {
 public:
     // Pinocchio 模型和数据 (每个 mapping 一份)
-    std::map<std::string, pinocchio::Model> models;
-    std::map<std::string, pinocchio::Data> data;
-    std::map<std::string, std::string> urdf_paths;
+    pinocchio::Model model;
+    pinocchio::Data data;
+    bool model_loaded{false};
+
+    struct JointGroup {
+        std::vector<size_t> indices;   // 在 model.nq 中的 idx_q
+    };
+
+    std::map<std::string, JointGroup> groups;
 
     // 线程安全
     mutable std::mutex mutex;
@@ -28,89 +34,122 @@ GravityCompensator::GravityCompensator() : impl_(std::make_unique<Impl>()) {}
 
 GravityCompensator::~GravityCompensator() = default;
 
-bool GravityCompensator::loadModel(const std::string& mapping, const std::string& urdf_path) {
+bool GravityCompensator::loadUrdf(const std::string& urdf_path) {
     std::lock_guard<std::mutex> lock(impl_->mutex);
-
     try {
-        pinocchio::Model model;
-        pinocchio::urdf::buildModel(urdf_path, model);
+        pinocchio::urdf::buildModel(urdf_path, impl_->model);
+        impl_->data = pinocchio::Data(impl_->model);
+        impl_->model_loaded = true;
 
-        impl_->models[mapping] = model;
-        impl_->data[mapping] = pinocchio::Data(model);
-        impl_->urdf_paths[mapping] = urdf_path;
+        // 设置重力加速度（Z方向向下，9.81 m/s^2）
+        impl_->model.gravity.linear() = Eigen::Vector3d(0.0, 0.0, -9.81);
 
-        std::cout << "[GravityCompensator] Model loaded for '" << mapping
-                  << "' from " << urdf_path
-                  << " (nq=" << model.nq << ", nv=" << model.nv << ")" << std::endl;
+        std::cout << "[GravityCompensator] URDF loaded: "
+                  << urdf_path
+                  << " (nq=" << impl_->model.nq
+                  << ", nv=" << impl_->model.nv << ")"
+                  << ", gravity set to [0, 0, -9.81]"
+                  << std::endl;
 
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "[GravityCompensator] Failed to load model for '" << mapping
-                  << "': " << e.what() << std::endl;
+        std::cerr << "[GravityCompensator] Failed to load URDF: "
+                  << e.what() << std::endl;
         return false;
     }
 }
 
-bool GravityCompensator::hasModel(const std::string& mapping) const {
+bool GravityCompensator::registerMapping(
+    const std::string& mapping,
+    const std::vector<std::string>& joint_names) {
+
     std::lock_guard<std::mutex> lock(impl_->mutex);
-    return impl_->models.find(mapping) != impl_->models.end();
+
+    if (!impl_->model_loaded) {
+        std::cerr << "[GravityCompensator] Model not loaded, cannot register mapping: "
+                  << mapping << std::endl;
+        return false;
+    }
+
+    Impl::JointGroup group;
+
+    for (const auto& joint_name : joint_names) {
+        if (!impl_->model.existJointName(joint_name)) {
+            std::cerr << "[GravityCompensator] Joint not found in URDF: "
+                      << joint_name << std::endl;
+            return false;
+        }
+
+        const auto joint_id = impl_->model.getJointId(joint_name);
+        const auto idx_q = impl_->model.joints[joint_id].idx_q();
+        group.indices.push_back(static_cast<size_t>(idx_q));
+    }
+
+    impl_->groups[mapping] = std::move(group);
+
+    std::cout << "[GravityCompensator] Mapping registered: "
+              << mapping << " (dof=" << impl_->groups[mapping].indices.size()
+              << ")" << std::endl;
+
+    return true;
 }
 
-std::vector<double> GravityCompensator::computeGravityTorques(
+bool GravityCompensator::hasMapping(const std::string& mapping) const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    return impl_->groups.find(mapping) != impl_->groups.end();
+}
+
+size_t GravityCompensator::getDof(const std::string& mapping) const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+
+    auto it = impl_->groups.find(mapping);
+    if (it == impl_->groups.end()) {
+        return 0;
+    }
+    return it->second.indices.size();
+}
+
+std::vector<double> GravityCompensator::computeGravity(
     const std::string& mapping,
     const std::vector<double>& joint_positions) {
 
     std::lock_guard<std::mutex> lock(impl_->mutex);
 
-    // 检查模型是否存在
-    auto model_it = impl_->models.find(mapping);
-    if (model_it == impl_->models.end()) {
-        std::cerr << "[GravityCompensator] Model not found for mapping: " << mapping << std::endl;
-        return std::vector<double>();
+    auto it = impl_->groups.find(mapping);
+    if (it == impl_->groups.end()) {
+        std::cerr << "[GravityCompensator] Mapping not found: "
+                  << mapping << std::endl;
+        return {};
     }
 
-    auto& model = model_it->second;
-    auto& data = impl_->data[mapping];
-
-    // 构建配置向量 q
-    Eigen::VectorXd q = Eigen::VectorXd::Zero(model.nq);
-    size_t num_joints = std::min(joint_positions.size(), static_cast<size_t>(model.nq));
-    for (size_t i = 0; i < num_joints; ++i) {
-        q(i) = joint_positions[i];
+    const auto& indices = it->second.indices;
+    if (joint_positions.size() != indices.size()) {
+        std::cerr << "[GravityCompensator] Joint position size mismatch for mapping "
+                  << mapping << ": expect " << indices.size()
+                  << ", got " << joint_positions.size() << std::endl;
+        return {};
     }
 
-    // 零速度和零加速度 (只计算重力项)
-    Eigen::VectorXd v = Eigen::VectorXd::Zero(model.nv);
-    Eigen::VectorXd a = Eigen::VectorXd::Zero(model.nv);
+    Eigen::VectorXd q = Eigen::VectorXd::Zero(impl_->model.nq);
+    Eigen::VectorXd v = Eigen::VectorXd::Zero(impl_->model.nv);
+    Eigen::VectorXd a = Eigen::VectorXd::Zero(impl_->model.nv);
 
-    // 使用 RNEA 算法计算重力力矩
-    // tau = M(q) * 0 + C(q, 0) * 0 + g(q) = g(q)
-    Eigen::VectorXd tau = pinocchio::rnea(model, data, q, v, a);
-
-    // 转换为 std::vector
-    std::vector<double> gravity_torques(tau.data(), tau.data() + tau.size());
-
-    return gravity_torques;
-}
-
-size_t GravityCompensator::getNumJoints(const std::string& mapping) const {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-
-    auto it = impl_->models.find(mapping);
-    if (it == impl_->models.end()) {
-        return 0;
+    // 使用正确的索引映射设置关节位置
+    for (size_t i = 0; i < joint_positions.size(); ++i) {
+        q(indices[i]) = joint_positions[i];
     }
-    return static_cast<size_t>(it->second.nq);
-}
 
-std::string GravityCompensator::getUrdfPath(const std::string& mapping) const {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    // 使用 RNEA 计算重力力矩
+    Eigen::VectorXd tau = pinocchio::rnea(impl_->model, impl_->data, q, v, a);
 
-    auto it = impl_->urdf_paths.find(mapping);
-    if (it == impl_->urdf_paths.end()) {
-        return "";
+    // 根据 indices 提取对应的力矩
+    std::vector<double> result;
+    result.reserve(joint_positions.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+        result.push_back(tau(indices[i]));
     }
-    return it->second;
+
+    return result;
 }
 
 }  // namespace dynamics

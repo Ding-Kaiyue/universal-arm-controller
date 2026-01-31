@@ -156,10 +156,10 @@ private:
     std::map<std::string, std::vector<double>> start_position_config_;      // mapping -> start position
     std::map<std::string, JointLimits> joint_limits_config_;                // mapping -> joint limits
     std::map<std::string, std::string> robot_type_config_;                  // mapping -> robot type
-    std::map<std::string, std::string> urdf_path_config_;                   // mapping -> URDF file path
 
     // ============= 重力补偿计算器 =============
     std::shared_ptr<arm_controller::dynamics::GravityCompensator> gravity_compensator_;
+    std::string loaded_urdf_path_;  // 追踪已加载的URDF路径（全局，所有mapping共享一个URDF Model）
 
     // =============  状态监控变量 =============
     mutable std::mutex status_mutex_;
@@ -191,7 +191,7 @@ private:
     bool load_joint_limits_config();
     bool load_hardware_config();
     void clear_mappings();  // 清除所有映射
-    bool parse_mapping(const std::string& mapping_name, const YAML::Node& mapping_node); // 解析单个mapping
+    bool parse_mapping(const std::string& mapping_name, const YAML::Node& mapping_node, bool skip_gravity_registration = false); // 解析单个mapping
     void initialize_joint_state(const std::string& mapping_name); // 初始化JointState
 
     // 安全检查方法

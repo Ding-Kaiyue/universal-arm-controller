@@ -1,0 +1,108 @@
+joint_limits:
+  left_joint1:
+    has_position_limits: true
+    min_position: -2.9670
+    max_position: 2.9670
+    has_velocity_limits: true
+    max_velocity: 3.14     # rad/s
+    has_acceleration_limits: true
+    max_acceleration: 2.62 # rad/s^2
+
+  left_joint2:
+    has_position_limits: true
+    min_position: -1.5708
+    max_position: 1.5708
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 2.62
+
+  left_joint3:
+    has_position_limits: true
+    min_position: -1.5708
+    max_position: 1.5708
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 2.62
+
+  left_joint4:
+    has_position_limits: true
+    min_position: -2.9670
+    max_position: 2.9670
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 2.62
+
+  left_joint5:
+    has_position_limits: true
+    min_position: -1.5708
+    max_position: 1.5708
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 2.62
+
+  left_joint6:
+    has_position_limits: true
+    min_position: -2.9670
+    max_position: 2.9670
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 2.62
+
+  right_joint1:
+    has_position_limits: true
+    min_position: -2.9670
+    max_position: 2.9670
+    has_velocity_limits: true
+    max_velocity: 3.14     # rad/s
+    has_acceleration_limits: true
+    max_acceleration: 2.62 # rad/s^2
+
+  right_joint2:
+    has_position_limits: true
+    min_position: -1.5708
+    max_position: 1.5708
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 2.62
+
+  right_joint3:
+    has_position_limits: true
+    min_position: -1.5708
+    max_position: 1.5708
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 2.62
+
+  right_joint4:
+    has_position_limits: true
+    min_position: -2.9670
+    max_position: 2.9670
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 2.62
+
+  right_joint5:
+    has_position_limits: true
+    min_position: -1.5708
+    max_position: 1.5708
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 2.62
+
+  right_joint6:
+    has_position_limits: true
+    min_position: -2.9670
+    max_position: 2.9670
+    has_velocity_limits: true
+    max_velocity: 3.14
+    has_acceleration_limits: true
+    max_acceleration: 2.62

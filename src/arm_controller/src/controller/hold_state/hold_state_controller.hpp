@@ -20,12 +20,17 @@ public:
     bool stop(const std::string& mapping) override;
 
     // 设置目标状态，当钩子状态完成时切换到该状态
-    void set_target_mode(const std::string& target_mode) { target_mode_ = target_mode; }
-    std::string get_target_state() const { return target_mode_; }
+    void set_target_mode(const std::string& mapping, const std::string& target_mode) {
+        mapping_target_modes_[mapping] = target_mode;
+    }
+    std::string get_target_state(const std::string& mapping) const {
+        auto it = mapping_target_modes_.find(mapping);
+        return it != mapping_target_modes_.end() ? it->second : "";
+    }
 
     // 设置转换就绪回调函数 - 现在是 per-mapping 的
-    void set_transition_ready_callback(TransitionReadyCallback callback) {
-        transition_ready_callback_ = callback;
+    void set_transition_ready_callback(const std::string& mapping, TransitionReadyCallback callback) {
+        mapping_callbacks_[mapping] = callback;
     }
 
     // 检查是否可以安全切换到目标状态
@@ -39,13 +44,12 @@ private:
         std::vector<double> hold_positions;  // 记录当前关节位置以保持状态
     };
 
-    std::string target_mode_;
     std::unordered_map<std::string, MappingContext> mapping_contexts_;
     std::shared_ptr<HardwareManager> hardware_manager_;
 
-    // Per-mapping 回调（调用者会由 controller manager 设置）
-    // 回调现在会接收 mapping 参数，确保只影响指定的 mapping
-    TransitionReadyCallback transition_ready_callback_;
+    // Per-mapping target modes and callbacks
+    std::unordered_map<std::string, std::string> mapping_target_modes_;
+    std::unordered_map<std::string, TransitionReadyCallback> mapping_callbacks_;
 
     // internal helpers
     void safety_check_timer_callback(const std::string& mapping);

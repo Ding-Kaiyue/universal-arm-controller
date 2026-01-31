@@ -2,6 +2,8 @@
 #include "controller_interface.hpp"
 #include <chrono>
 #include <thread>
+#include <sstream>
+#include <iomanip>
 
 HoldStateController::HoldStateController(const rclcpp::Node::SharedPtr& node)
     : UtilityControllerBase("HoldState", node)
@@ -29,6 +31,23 @@ void HoldStateController::start(const std::string& mapping) {
         // 获取当前关节位置和速度
         ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
         auto current_velocities = hardware_manager_->get_current_joint_velocities(normalized_mapping);
+
+        // 打印HoldState启动时的实时电机状态（用于调试抖动）
+        if (!ctx.hold_positions.empty() && !current_velocities.empty()) {
+            std::stringstream ss;
+            ss << "HoldState activated - motor state: pos: [";
+            for (size_t i = 0; i < ctx.hold_positions.size(); ++i) {
+                if (i > 0) ss << ", ";
+                ss << std::fixed << std::setprecision(4) << ctx.hold_positions[i];
+            }
+            ss << "] vel: [";
+            for (size_t i = 0; i < current_velocities.size(); ++i) {
+                if (i > 0) ss << ", ";
+                ss << std::fixed << std::setprecision(4) << current_velocities[i];
+            }
+            ss << "]";
+            RCLCPP_WARN(node_->get_logger(), "[%s] %s", normalized_mapping.c_str(), ss.str().c_str());
+        }
 
         if (!ctx.hold_positions.empty()) {
             // 检查是否所有关节速度都接近0（阈值：0.01 rad/s）
@@ -69,7 +88,15 @@ void HoldStateController::start(const std::string& mapping) {
 
     mapping_contexts_.emplace(normalized_mapping, std::move(ctx));
 
-    RCLCPP_INFO(node_->get_logger(), "HoldStateController activated for mapping '%s'", normalized_mapping.c_str());
+    // Retrieve per-mapping target mode if it exists
+    std::string target_mode = "";
+    auto mode_it = mapping_target_modes_.find(normalized_mapping);
+    if (mode_it != mapping_target_modes_.end()) {
+        target_mode = mode_it->second;
+    }
+
+    RCLCPP_INFO(node_->get_logger(), "[%s] ✅ HoldStateController activated - timer started for safety checks (target_mode_='%s')",
+                normalized_mapping.c_str(), target_mode.c_str());
 
     // 调用基类 start() 设置 per-mapping 的 active_mappings_[mapping] = true
     ModeControllerBase::start(mapping);
@@ -109,9 +136,17 @@ bool HoldStateController::can_transition_to_target(const std::string& mapping) {
         return false;
     }
 
+    // Get per-mapping target mode
+    auto mode_it = mapping_target_modes_.find(normalized_mapping);
+    if (mode_it == mapping_target_modes_.end()) {
+        RCLCPP_DEBUG(node_->get_logger(), "[%s] No target mode set for this mapping", normalized_mapping.c_str());
+        return false;
+    }
+    const std::string& target_mode = mode_it->second;
+
     // 如果目标是快速切换模式，直接允许
-    if (target_mode_ == "Disable" || target_mode_ == "EmergencyStop") {
-        RCLCPP_INFO(node_->get_logger(), "[%s] Target %s - skipping safety checks", normalized_mapping.c_str(), target_mode_.c_str());
+    if (target_mode == "Disable" || target_mode == "EmergencyStop") {
+        RCLCPP_INFO(node_->get_logger(), "[%s] Target %s - skipping safety checks", normalized_mapping.c_str(), target_mode.c_str());
         return true;
     }
 
@@ -159,7 +194,7 @@ bool HoldStateController::can_transition_to_target(const std::string& mapping) {
     bool all_conditions_met = ctx.transition_ready && is_robot_stopped && are_joints_within_limits && is_system_healthy;
 
     if (all_conditions_met) {
-        RCLCPP_INFO(node_->get_logger(), "All safety conditions met - transition allowed to %s", target_mode_.c_str());
+        RCLCPP_INFO(node_->get_logger(), "All safety conditions met - transition allowed to %s", target_mode.c_str());
     }
 
     return all_conditions_met;
@@ -191,11 +226,24 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
         }
     }
 
+    // Get per-mapping target mode and callback
+    auto mode_it = mapping_target_modes_.find(normalized_mapping);
+    auto callback_it = mapping_callbacks_.find(normalized_mapping);
+
     // 只在有目标模式且有回调时才检查转换条件
-    if (!target_mode_.empty() && transition_ready_callback_) {
+    if (mode_it != mapping_target_modes_.end() && callback_it != mapping_callbacks_.end()) {
+        const std::string& target_mode = mode_it->second;
+        const TransitionReadyCallback& callback = callback_it->second;
+
+        RCLCPP_DEBUG(node_->get_logger(),
+            "[%s] HoldState timer: checking transition to target_mode_='%s'",
+            normalized_mapping.c_str(), target_mode.c_str());
+
         // 检查是否可以安全转换到目标状态
         if (can_transition_to_target(normalized_mapping)) {
-            RCLCPP_INFO(node_->get_logger(), "Safety conditions satisfied, triggering transition to %s", target_mode_.c_str());
+            RCLCPP_WARN(node_->get_logger(),
+                "🚨 [%s] Safety conditions satisfied for transition to %s - CALLING CALLBACK",
+                normalized_mapping.c_str(), target_mode.c_str());
 
             // 关键：在调用回调前停止定时器，避免竞态条件
             if (ctx.safety_timer) {
@@ -204,9 +252,21 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
             }
 
             // 调用回调 - 传入 mapping 参数，确保只影响该 mapping
-            transition_ready_callback_(normalized_mapping);
+            callback(normalized_mapping);
+        } else {
+            RCLCPP_DEBUG(node_->get_logger(),
+                "[%s] Safety conditions NOT met for transition to %s - waiting",
+                normalized_mapping.c_str(), target_mode.c_str());
         }
         // 如果条件不满足，继续等待下一次检查
+    } else {
+        // Get per-mapping target mode for logging (callback may not exist yet)
+        auto mode_it_for_log = mapping_target_modes_.find(normalized_mapping);
+        std::string target_mode_str = (mode_it_for_log != mapping_target_modes_.end()) ? mode_it_for_log->second : "";
+
+        RCLCPP_DEBUG(node_->get_logger(),
+            "[%s] HoldState timer: no target mode (target_mode_='%s') or no callback",
+            normalized_mapping.c_str(), target_mode_str.c_str());
     }
     // 如果没有目标模式，说明这是 HoldState 终止状态，保持等待
 }

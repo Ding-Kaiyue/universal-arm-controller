@@ -88,19 +88,40 @@ bool HardwareManager::unregister_motor_recorder() {
 
 bool HardwareManager::is_robot_stopped(const std::string& mapping) const {
     const double velocity_threshold = 0.01; // rad/s
-    
+
     std::lock_guard<std::mutex> lock(joint_state_mutex_);
-    
+
     // 从mapping获取对应的joint state
     auto it = mapping_joint_states_.find(mapping);
-    const auto& joint_state = it != mapping_joint_states_.end() ? 
+    const auto& joint_state = it != mapping_joint_states_.end() ?
                              it->second : sensor_msgs::msg::JointState{};
-    
+
+    // 调试：打印velocity大小和内容
+    RCLCPP_DEBUG(node_->get_logger(), "[%s] is_robot_stopped check: velocity.size()=%zu",
+                 mapping.c_str(), joint_state.velocity.size());
+
+    if (joint_state.velocity.empty()) {
+        RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  is_robot_stopped: velocity vector is EMPTY! Returning TRUE",
+                    mapping.c_str());
+    } else {
+        for (size_t i = 0; i < std::min(size_t(3), joint_state.velocity.size()); ++i) {
+            RCLCPP_DEBUG(node_->get_logger(), "[%s] velocity[%zu]=%.6f rad/s",
+                         mapping.c_str(), i, joint_state.velocity[i]);
+        }
+    }
+
     // 检查该mapping的所有关节速度是否接近零
     for (size_t i = 0; i < joint_state.velocity.size(); ++i) {
         bool velocity_too_high = std::abs(joint_state.velocity[i]) > velocity_threshold;
-        if (velocity_too_high) return false;
+        if (velocity_too_high) {
+            RCLCPP_DEBUG(node_->get_logger(), "[%s] velocity[%zu] too high (%.6f > %.6f), returning FALSE",
+                         mapping.c_str(), i, std::abs(joint_state.velocity[i]), velocity_threshold);
+            return false;
+        }
     }
+
+    RCLCPP_INFO(node_->get_logger(), "[%s] is_robot_stopped returning TRUE (velocity.size=%zu)",
+                mapping.c_str(), joint_state.velocity.size());
     return true;
 }
 
@@ -394,6 +415,39 @@ void HardwareManager::on_motor_status_update(const std::string& interface,
         check_safety_limits(interface, motor_id, status);
     }
 
+    // 打印电机实时状态（用于调试轨迹执行）
+    // 每 20 次状态更新打印一次，避免日志过多
+    static std::unordered_map<std::string, uint32_t> update_counters;
+    auto& counter = update_counters[interface];
+    counter++;
+
+    if (counter % 20 == 0) {
+        // 获取该interface对应的mapping
+        auto mapping_it = interface_to_mapping_.find(interface);
+        if (mapping_it != interface_to_mapping_.end()) {
+            const std::string& mapping = mapping_it->second;
+            auto positions = get_current_joint_positions(mapping);
+            auto velocities = get_current_joint_velocities(mapping);
+
+            if (!positions.empty() && !velocities.empty()) {
+                std::stringstream ss;
+                ss << "[" << interface << "/" << mapping << "] Motor " << motor_id
+                   << " - pos: [";
+                for (size_t i = 0; i < std::min(size_t(3), positions.size()); ++i) {
+                    if (i > 0) ss << ", ";
+                    ss << std::fixed << std::setprecision(3) << positions[i];
+                }
+                ss << "...] vel: [";
+                for (size_t i = 0; i < std::min(size_t(3), velocities.size()); ++i) {
+                    if (i > 0) ss << ", ";
+                    ss << std::fixed << std::setprecision(4) << velocities[i];
+                }
+                ss << "...]";
+                RCLCPP_DEBUG(node_->get_logger(), "%s", ss.str().c_str());
+            }
+        }
+    }
+
     publish_joint_state();
 }
 
@@ -538,7 +592,7 @@ bool HardwareManager::load_joint_limits_config() {
 
 bool HardwareManager::load_hardware_config() {
     try {
-        // 1. 加载配置文件 
+        // 1. 加载配置文件
         std::string package_path = ament_index_cpp::get_package_share_directory("arm_controller");
         std::string config_file = package_path + "/config/hardware_config.yaml";
         YAML::Node config = YAML::LoadFile(config_file);
@@ -553,25 +607,64 @@ bool HardwareManager::load_hardware_config() {
         // 3. 清空旧配置
         clear_mappings();
 
-        // 4. 遍历并解析所有mapping节点
+        // 4. 第一阶段：解析所有配置但不注册 gravity mapping，同时加载 URDF
+        std::map<std::string, YAML::Node> mapping_configs;
         for (auto it = hardware_node.begin(); it != hardware_node.end(); ++it) {
             std::string key = it->first.as<std::string>();
-            
+
             std::string mapping_name;
             if (key.find("_mapping") != std::string::npos) {
-                // 支持传统的 *_mapping 格式，提取mapping名称（去掉_mapping后缀）
                 mapping_name = key.substr(0, key.find("_mapping"));
             } else {
-                // 支持直接的mapping名称
                 mapping_name = key;
             }
-            
-            if (!parse_mapping(mapping_name, it->second)) {
+
+            mapping_configs[mapping_name] = it->second;
+
+            // 在第一阶段就加载 URDF（只加载一次）
+            if (!parse_mapping(mapping_name, it->second, true)) {  // true = skip_gravity_registration
                 RCLCPP_ERROR(node_->get_logger(), "❎ Failed to parse mapping: %s", mapping_name.c_str());
-                return false; // 某个mapping错误则终止
+                return false;
+            }
+        }
+
+        // 5. 第二阶段：为所有 mapping 注册 gravity compensation
+        // 首先确保重力补偿器已创建并加载了 URDF
+        if (!gravity_compensator_) {
+            RCLCPP_INFO(node_->get_logger(), "Creating GravityCompensator in second phase...");
+            gravity_compensator_ = std::make_shared<arm_controller::dynamics::GravityCompensator>();
+
+            // 使用第一阶段加载的 URDF 路径
+            if (!loaded_urdf_path_.empty()) {
+                RCLCPP_INFO(node_->get_logger(), "Loading URDF from first phase: %s", loaded_urdf_path_.c_str());
+                if (!gravity_compensator_->loadUrdf(loaded_urdf_path_)) {
+                    RCLCPP_WARN(node_->get_logger(), "Failed to load URDF in second phase: %s", loaded_urdf_path_.c_str());
+                } else {
+                    RCLCPP_INFO(node_->get_logger(), "✅ URDF loaded in second phase: %s", loaded_urdf_path_.c_str());
+                }
+            } else {
+                RCLCPP_WARN(node_->get_logger(), "No URDF path available from first phase");
+            }
+        }
+
+        RCLCPP_INFO(node_->get_logger(), "[DEBUG] gravity_compensator_ is %s", gravity_compensator_ ? "VALID" : "NULL");
+        for (const auto& [mapping_name, mapping_node] : mapping_configs) {
+            if (mapping_node["joint_names"]) {
+                std::vector<std::string> joint_names = mapping_node["joint_names"].as<std::vector<std::string>>();
+                RCLCPP_INFO(node_->get_logger(), "[DEBUG] Registering gravity mapping for %s with joints: ", mapping_name.c_str());
+                for (const auto& jname : joint_names) {
+                    RCLCPP_INFO(node_->get_logger(), "[DEBUG]   - %s", jname.c_str());
+                }
+                if (gravity_compensator_ && !gravity_compensator_->registerMapping(mapping_name, joint_names)) {
+                    RCLCPP_WARN(node_->get_logger(), "[%s] Failed to register gravity mapping", mapping_name.c_str());
+                } else if (gravity_compensator_) {
+                    RCLCPP_INFO(node_->get_logger(), "[%s] Gravity mapping registered with %zu joints",
+                        mapping_name.c_str(), joint_names.size());
+                }
             }
             initialize_joint_state(mapping_name);
         }
+
         RCLCPP_INFO(node_->get_logger(), "✅ Hardware config loaded successfully.");
         return true;
     } catch (const std::exception& e) {
@@ -595,13 +688,16 @@ void HardwareManager::clear_mappings() {
     start_position_config_.clear();
     joint_limits_config_.clear();
     robot_type_config_.clear();
-    urdf_path_config_.clear();
 
     // 重置重力补偿计算器
     gravity_compensator_.reset();
+    loaded_urdf_path_.clear();
 }
 
-bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML::Node& mapping_node) {
+bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML::Node& mapping_node, bool skip_gravity_registration) {
+    RCLCPP_INFO(node_->get_logger(), "[PARSE_MAPPING] Starting for mapping: %s (skip_gravity=%d)",
+                mapping_name.c_str(), skip_gravity_registration);
+
     if (!mapping_node) {
         RCLCPP_ERROR(node_->get_logger(), "❎ Mapping node is null for '%s'", mapping_name.c_str());
         return false;
@@ -611,7 +707,7 @@ bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML:
         mapping_node["robot_type"] ? mapping_node["robot_type"].as<std::string>() : "unknown_robot";
 
     // ===== 接口映射 =====
-    std::string interface = 
+    std::string interface =
         mapping_node["interface"] ? mapping_node["interface"].as<std::string>() : "unknown_interface";
     mapping_to_interface_[mapping_name] = interface;
     interface_to_mapping_[interface] = mapping_name;
@@ -631,11 +727,11 @@ bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML:
     // ===== 规划组名称 =====
     planning_group_config_[mapping_name] =
         mapping_node["planning_group"] ? mapping_node["planning_group"].as<std::string>() : "unknown_group";
-    
+
     // ===== 坐标系 =====
     frame_id_config_[mapping_name] =
         mapping_node["frame_id"] ? mapping_node["frame_id"].as<std::string>() : "unknown_frame_id";
-    
+
     // ===== 初始位置 =====
     initial_position_config_[mapping_name] =
         mapping_node["initial_position"] ? mapping_node["initial_position"].as<std::vector<double>>() : std::vector<double>{};
@@ -643,7 +739,7 @@ bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML:
     // ===== 启动位置 =====
     start_position_config_[mapping_name] =
         mapping_node["start_position"] ? mapping_node["start_position"].as<std::vector<double>>() : std::vector<double>{};
-    
+
     RCLCPP_INFO(node_->get_logger(), "✅ Loaded mapping [%s]: interface=%s, controller=%s, group=%s, frame_id=%s, joints=%zu",
         mapping_name.c_str(),
         mapping_to_interface_[mapping_name].c_str(),
@@ -653,31 +749,23 @@ bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML:
         joint_names_config_[mapping_name].size()
     );
 
-    // ===== URDF路径 (可选配置，默认根据robot_type自动查找) =====
+    // ===== URDF路径 (根据robot_type自动查找) =====
     std::string urdf_path;
-    if (mapping_node["urdf_path"]) {
-        urdf_path = mapping_node["urdf_path"].as<std::string>();
-    } else {
-        // 根据 robot_type 自动查找 URDF 文件
-        try {
-            std::string robot_desc_path = ament_index_cpp::get_package_share_directory("robot_description");
-            urdf_path = robot_desc_path + "/urdf/" + robot_type_config_[mapping_name] + ".urdf";
-        } catch (const std::exception& e) {
-            RCLCPP_WARN(node_->get_logger(), "[%s] Could not find robot_description package: %s",
-                mapping_name.c_str(), e.what());
-        }
+    try {
+        std::string robot_desc_path = ament_index_cpp::get_package_share_directory("robot_description");
+        urdf_path = robot_desc_path + "/urdf/" + robot_type_config_[mapping_name] + ".urdf";
+    } catch (const std::exception& e) {
+        RCLCPP_WARN(node_->get_logger(), "[%s] Could not find robot_description package: %s",
+            mapping_name.c_str(), e.what());
     }
-    urdf_path_config_[mapping_name] = urdf_path;
 
-    // ===== 加载重力补偿模型 =====
+    // ===== 加载重力补偿模型 URDF (只在第一阶段加载) =====
+    // 第一阶段：记录 URDF 路径，供第二阶段使用
+    // 第二阶段：使用 URDF 路径创建和初始化重力补偿器
     if (!urdf_path.empty()) {
-        // 确保 gravity_compensator_ 已初始化
-        if (!gravity_compensator_) {
-            gravity_compensator_ = std::make_shared<arm_controller::dynamics::GravityCompensator>();
-        }
-        if (!gravity_compensator_->loadModel(mapping_name, urdf_path)) {
-            RCLCPP_WARN(node_->get_logger(), "[%s] Failed to load gravity model, gravity compensation disabled",
-                mapping_name.c_str());
+        if (loaded_urdf_path_ != urdf_path) {
+            RCLCPP_INFO(node_->get_logger(), "[%s] URDF path: %s", mapping_name.c_str(), urdf_path.c_str());
+            loaded_urdf_path_ = urdf_path;
         }
     }
 
@@ -1154,8 +1242,8 @@ bool HardwareManager::wait_for_trajectory_completion(const std::string& mapping,
             std::lock_guard<std::mutex> lock(execution_mutex_);
             auto it = mapping_to_execution_id_.find(mapping);
             if (it == mapping_to_execution_id_.end()) {
-                RCLCPP_DEBUG(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping (already completed or not started)", mapping.c_str());
-                return true;  // ✅ 改为返回 true：没有活跃轨迹意味着已完成
+                RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  No active trajectory execution found for mapping - trajectory may not have been started", mapping.c_str());
+                return false;  // 改为返回 false：没有活跃轨迹意味着轨迹未开始或已被清理
             }
             execution_id = it->second;
         }
@@ -1187,21 +1275,29 @@ std::vector<double> HardwareManager::compute_gravity_torques(const std::string& 
 std::vector<double> HardwareManager::compute_gravity_torques(const std::string& mapping, const std::vector<double>& joint_positions) {
     // 检查重力补偿计算器是否存在
     if (!gravity_compensator_) {
-        RCLCPP_DEBUG(node_->get_logger(), "[DEBUG] gravity_compensator_ is null, returning zero torques");
+        RCLCPP_DEBUG(node_->get_logger(), "[%s] gravity_compensator_ is null, returning zero torques", mapping.c_str());
         return std::vector<double>(joint_positions.size(), 0.0);
     }
 
-    if (!gravity_compensator_->hasModel(mapping)) {
+    if (!gravity_compensator_->hasMapping(mapping)) {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
-            "[%s] Gravity model not loaded, returning zero torques", mapping.c_str());
+            "[%s] Gravity mapping not registered, returning zero torques", mapping.c_str());
+        return std::vector<double>(joint_positions.size(), 0.0);
+    }
+
+    // 检查关节数量是否匹配
+    size_t expected_dof = gravity_compensator_->getDof(mapping);
+    if (joint_positions.size() != expected_dof) {
+        RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,
+            "[%s] Joint position size mismatch: expect %zu, got %zu",
+            mapping.c_str(), expected_dof, joint_positions.size());
         return std::vector<double>(joint_positions.size(), 0.0);
     }
 
     // 调用 GravityCompensator 计算重力矩
-    RCLCPP_DEBUG(node_->get_logger(), "[DEBUG] Calling computeGravityTorques for mapping: %s, positions size: %zu",
+    RCLCPP_DEBUG(node_->get_logger(), "[%s] Computing gravity torques for %zu joints",
                  mapping.c_str(), joint_positions.size());
-    std::vector<double> gravity_torques = gravity_compensator_->computeGravityTorques(mapping, joint_positions);
-    RCLCPP_DEBUG(node_->get_logger(), "[DEBUG] computeGravityTorques returned %zu torques", gravity_torques.size());
+    std::vector<double> gravity_torques = gravity_compensator_->computeGravity(mapping, joint_positions);
 
     if (gravity_torques.empty()) {
         RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 5000,

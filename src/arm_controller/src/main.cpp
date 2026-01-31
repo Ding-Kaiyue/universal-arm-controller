@@ -13,13 +13,34 @@ int main(int argc, char** argv) {
             rclcpp::contexts::get_global_default_context()->is_valid());
 
     try {
-        // 初始化IPC命令队列
-        arm_controller::CommandQueueIPC::cleanup();
-        if (!arm_controller::CommandQueueIPC::getInstance().initialize()) {
-            RCLCPP_FATAL(rclcpp::get_logger("main"), "Failed to initialize IPC command queue");
-            return 1;
+        // 初始化IPC命令队列，带超时和重试机制
+        RCLCPP_INFO(rclcpp::get_logger("main"), "Attempting to clean up old IPC resources...");
+        try {
+            arm_controller::CommandQueueIPC::cleanup();
+            RCLCPP_INFO(rclcpp::get_logger("main"), "Old IPC resources cleaned up");
+        } catch (const std::exception& e) {
+            RCLCPP_WARN(rclcpp::get_logger("main"), "Warning during IPC cleanup: %s", e.what());
         }
-        RCLCPP_INFO(rclcpp::get_logger("main"), "✅ IPC command queue initialized");
+
+        // 初始化IPC，带重试
+        int max_retries = 3;
+        bool ipc_initialized = false;
+        for (int attempt = 1; attempt <= max_retries; ++attempt) {
+            RCLCPP_INFO(rclcpp::get_logger("main"), "IPC initialization attempt %d/%d", attempt, max_retries);
+            if (arm_controller::CommandQueueIPC::getInstance().initialize()) {
+                ipc_initialized = true;
+                RCLCPP_INFO(rclcpp::get_logger("main"), "✅ IPC command queue initialized successfully");
+                break;
+            }
+            if (attempt < max_retries) {
+                RCLCPP_WARN(rclcpp::get_logger("main"), "IPC initialization failed, retrying in 500ms...");
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+        }
+
+        if (!ipc_initialized) {
+            RCLCPP_WARN(rclcpp::get_logger("main"), "⚠️  Failed to initialize IPC command queue after %d attempts. Continuing without IPC support.", max_retries);
+        }
 
         // 创建多线程执行器
         rclcpp::executors::MultiThreadedExecutor executor;

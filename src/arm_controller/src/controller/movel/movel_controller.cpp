@@ -109,7 +109,7 @@ void MoveLController::initialize_planning_services() {
 
                 // 创建轨迹规划服务
                 auto motion_planning_service = std::make_shared<trajectory_planning::application::services::MotionPlanningService>(
-                    moveit_adapter, tracik_adapter, node_);
+                    moveit_adapter, tracik_adapter, node_, hardware_manager_->get_robot_type(mapping));
 
                 if (!motion_planning_service) {
                     RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Failed to create MotionPlanningService", mapping.c_str());

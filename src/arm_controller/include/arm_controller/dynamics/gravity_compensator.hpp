@@ -11,10 +11,12 @@ namespace dynamics {
 /**
  * @brief 重力补偿计算器
  *
- * 使用 Pinocchio 库基于 URDF 模型计算机械臂各关节的重力补偿力矩。
- * 支持多个机器人模型（通过 mapping 区分）。
+ * - 使用 Pinocchio 库基于 URDF 模型计算机械臂各关节的重力补偿力矩。
+ * - 一个 URDF 对应一个完整模型
+ * - 支持在同一 URDF 中注册多个 joint mapping（如 left_arm / right_arm）
  *
  * 使用 PIMPL 模式隐藏 Pinocchio 实现细节，加快编译速度。
+ * mapping 的语义：一组 joint（JointGroup），而不是一个独立模型
  */
 class GravityCompensator {
 public:
@@ -27,42 +29,39 @@ public:
 
     /**
      * @brief 加载 URDF 模型
-     * @param mapping 机器人映射名称
      * @param urdf_path URDF 文件路径
      * @return 是否加载成功
      */
-    bool loadModel(const std::string& mapping, const std::string& urdf_path);
+    bool loadUrdf(const std::string& urdf_path);
 
     /**
-     * @brief 检查模型是否已加载
-     * @param mapping 机器人映射名称
-     * @return 是否已加载
+     * @brief 注册一个 joint mapping
+     * @param mapping mapping 名称（如 left_arm / right_arm）
+     * @param joint_names 该 mapping 对应的关节名（URDF 中的 joint name）
+     * @return 是否成功
      */
-    bool hasModel(const std::string& mapping) const;
+    bool registerMapping(const std::string& mapping,
+                         const std::vector<std::string>& joint_names);
 
     /**
-     * @brief 计算重力补偿力矩
-     * @param mapping 机器人映射名称
-     * @param joint_positions 关节位置 (弧度)
-     * @return 各关节的重力补偿力矩，如果模型未加载则返回空向量
+     * @brief 是否存在 mapping
      */
-    std::vector<double> computeGravityTorques(const std::string& mapping,
-                                              const std::vector<double>& joint_positions);
+    bool hasMapping(const std::string& mapping) const;
 
     /**
-     * @brief 获取模型的关节数量
-     * @param mapping 机器人映射名称
-     * @return 关节数量，如果模型未加载则返回 0
+     * @brief 获取 mapping 的自由度
      */
-    size_t getNumJoints(const std::string& mapping) const;
+    size_t getDof(const std::string& mapping) const;
 
     /**
-     * @brief 获取已加载模型的 URDF 路径
-     * @param mapping 机器人映射名称
-     * @return URDF 路径，如果未加载则返回空字符串
+     * @brief 计算某个 mapping 的重力补偿力矩
+     * @param mapping mapping 名称
+     * @param joint_positions mapping 对应的关节位置
+     * @return 重力补偿力矩（顺序与 joint_names 一致）
      */
-    std::string getUrdfPath(const std::string& mapping) const;
-
+    std::vector<double> computeGravity(
+        const std::string& mapping,
+        const std::vector<double>& joint_positions);
 private:
     // PIMPL: 隐藏 Pinocchio 实现细节
     class Impl;
