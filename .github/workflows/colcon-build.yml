@@ -163,9 +163,9 @@ jobs:
           colcon build --packages-select trajectory_planning_interfaces hardware_driver controller_interfaces --cmake-args -DCMAKE_BUILD_TYPE=Release
           # Source the newly built packages
           source install/setup.bash
-          # Second pass: build trajectory_planning_v3 and trajectory_interpolator before arm_controller
-          colcon build --packages-select trajectory_planning_v3 trajectory_interpolator --cmake-args -DCMAKE_BUILD_TYPE=Release
-          # Source again to make trajectory_planning_v3 available
+          # Second pass: build trajectory_planning_v3, trajectory_interpolator, and csaps before arm_controller
+          colcon build --packages-select trajectory_planning_v3 trajectory_interpolator csaps --cmake-args -DCMAKE_BUILD_TYPE=Release
+          # Source again to make all dependencies available
           source install/setup.bash
           # Third pass: full build
           colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
