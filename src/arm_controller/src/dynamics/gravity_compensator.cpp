@@ -44,13 +44,6 @@ bool GravityCompensator::loadUrdf(const std::string& urdf_path) {
         // 设置重力加速度（Z方向向下，9.81 m/s^2）
         impl_->model.gravity.linear() = Eigen::Vector3d(0.0, 0.0, -9.81);
 
-        std::cout << "[GravityCompensator] URDF loaded: "
-                  << urdf_path
-                  << " (nq=" << impl_->model.nq
-                  << ", nv=" << impl_->model.nv << ")"
-                  << ", gravity set to [0, 0, -9.81]"
-                  << std::endl;
-
         return true;
     } catch (const std::exception& e) {
         std::cerr << "[GravityCompensator] Failed to load URDF: "
@@ -86,10 +79,6 @@ bool GravityCompensator::registerMapping(
     }
 
     impl_->groups[mapping] = std::move(group);
-
-    std::cout << "[GravityCompensator] Mapping registered: "
-              << mapping << " (dof=" << impl_->groups[mapping].indices.size()
-              << ")" << std::endl;
 
     return true;
 }

@@ -32,23 +32,6 @@ void HoldStateController::start(const std::string& mapping) {
         ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
         auto current_velocities = hardware_manager_->get_current_joint_velocities(normalized_mapping);
 
-        // 打印HoldState启动时的实时电机状态（用于调试抖动）
-        if (!ctx.hold_positions.empty() && !current_velocities.empty()) {
-            std::stringstream ss;
-            ss << "HoldState activated - motor state: pos: [";
-            for (size_t i = 0; i < ctx.hold_positions.size(); ++i) {
-                if (i > 0) ss << ", ";
-                ss << std::fixed << std::setprecision(4) << ctx.hold_positions[i];
-            }
-            ss << "] vel: [";
-            for (size_t i = 0; i < current_velocities.size(); ++i) {
-                if (i > 0) ss << ", ";
-                ss << std::fixed << std::setprecision(4) << current_velocities[i];
-            }
-            ss << "]";
-            RCLCPP_WARN(node_->get_logger(), "[%s] %s", normalized_mapping.c_str(), ss.str().c_str());
-        }
-
         if (!ctx.hold_positions.empty()) {
             // 检查是否所有关节速度都接近0（阈值：0.01 rad/s）
             bool all_velocities_zero = true;
@@ -62,9 +45,6 @@ void HoldStateController::start(const std::string& mapping) {
 
             // 如果速度不为0，发送保持命令来停止电机；否则不需要做任何处理
             if (!all_velocities_zero) {
-                RCLCPP_INFO(node_->get_logger(),
-                           "[%s] Robot is moving, sending hold command to stop at current position",
-                           normalized_mapping.c_str());
                 hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
             }
         } else {
@@ -95,8 +75,8 @@ void HoldStateController::start(const std::string& mapping) {
         target_mode = mode_it->second;
     }
 
-    RCLCPP_INFO(node_->get_logger(), "[%s] ✅ HoldStateController activated - timer started for safety checks (target_mode_='%s')",
-                normalized_mapping.c_str(), target_mode.c_str());
+    // RCLCPP_INFO(node_->get_logger(), "[%s] ✅ HoldStateController activated - timer started for safety checks (target_mode_='%s')",
+    //             normalized_mapping.c_str(), target_mode.c_str());
 
     // 调用基类 start() 设置 per-mapping 的 active_mappings_[mapping] = true
     ModeControllerBase::start(mapping);
@@ -120,7 +100,7 @@ bool HoldStateController::stop(const std::string& mapping) {
     // 移除上下文
     mapping_contexts_.erase(it);
 
-    RCLCPP_INFO(node_->get_logger(), "HoldStateController stopped for mapping '%s'", normalized_mapping.c_str());
+    // RCLCPP_INFO(node_->get_logger(), "HoldStateController stopped for mapping '%s'", normalized_mapping.c_str());
 
     // 调用基类 stop() 设置 per-mapping 的 active_mappings_[mapping] = false
     ModeControllerBase::stop(mapping);
@@ -193,9 +173,9 @@ bool HoldStateController::can_transition_to_target(const std::string& mapping) {
     // 只有当所有安全条件同时满足时才允许转换
     bool all_conditions_met = ctx.transition_ready && is_robot_stopped && are_joints_within_limits && is_system_healthy;
 
-    if (all_conditions_met) {
-        RCLCPP_INFO(node_->get_logger(), "All safety conditions met - transition allowed to %s", target_mode.c_str());
-    }
+    // if (all_conditions_met) {
+    //     RCLCPP_INFO(node_->get_logger(), "All safety conditions met - transition allowed to %s", target_mode.c_str());
+    // }
 
     return all_conditions_met;
 }
@@ -235,16 +215,8 @@ void HoldStateController::safety_check_timer_callback(const std::string& mapping
         const std::string& target_mode = mode_it->second;
         const TransitionReadyCallback& callback = callback_it->second;
 
-        RCLCPP_DEBUG(node_->get_logger(),
-            "[%s] HoldState timer: checking transition to target_mode_='%s'",
-            normalized_mapping.c_str(), target_mode.c_str());
-
         // 检查是否可以安全转换到目标状态
         if (can_transition_to_target(normalized_mapping)) {
-            RCLCPP_WARN(node_->get_logger(),
-                "🚨 [%s] Safety conditions satisfied for transition to %s - CALLING CALLBACK",
-                normalized_mapping.c_str(), target_mode.c_str());
-
             // 关键：在调用回调前停止定时器，避免竞态条件
             if (ctx.safety_timer) {
                 ctx.safety_timer->cancel();

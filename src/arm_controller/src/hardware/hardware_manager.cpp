@@ -415,39 +415,6 @@ void HardwareManager::on_motor_status_update(const std::string& interface,
         check_safety_limits(interface, motor_id, status);
     }
 
-    // 打印电机实时状态（用于调试轨迹执行）
-    // 每 20 次状态更新打印一次，避免日志过多
-    static std::unordered_map<std::string, uint32_t> update_counters;
-    auto& counter = update_counters[interface];
-    counter++;
-
-    if (counter % 20 == 0) {
-        // 获取该interface对应的mapping
-        auto mapping_it = interface_to_mapping_.find(interface);
-        if (mapping_it != interface_to_mapping_.end()) {
-            const std::string& mapping = mapping_it->second;
-            auto positions = get_current_joint_positions(mapping);
-            auto velocities = get_current_joint_velocities(mapping);
-
-            if (!positions.empty() && !velocities.empty()) {
-                std::stringstream ss;
-                ss << "[" << interface << "/" << mapping << "] Motor " << motor_id
-                   << " - pos: [";
-                for (size_t i = 0; i < std::min(size_t(3), positions.size()); ++i) {
-                    if (i > 0) ss << ", ";
-                    ss << std::fixed << std::setprecision(3) << positions[i];
-                }
-                ss << "...] vel: [";
-                for (size_t i = 0; i < std::min(size_t(3), velocities.size()); ++i) {
-                    if (i > 0) ss << ", ";
-                    ss << std::fixed << std::setprecision(4) << velocities[i];
-                }
-                ss << "...]";
-                RCLCPP_DEBUG(node_->get_logger(), "%s", ss.str().c_str());
-            }
-        }
-    }
-
     publish_joint_state();
 }
 
@@ -462,7 +429,7 @@ void HardwareManager::update_joint_state(const std::string& interface, uint32_t 
                              "Unknown interface: %s", interface.c_str());
         return;
     }
-    
+
     const std::string& mapping = mapping_it->second;
     const auto& motor_ids = get_motors_id(mapping);
 
@@ -504,7 +471,6 @@ void HardwareManager::update_joint_state(const std::string& interface, uint32_t 
         std::lock_guard<std::mutex> status_lock(status_mutex_);
         system_healthy_ = (status.temperature < 850); // 简单的健康检查, 温度低于85℃认为正常
     }
-
 }
 
 void HardwareManager::publish_joint_state() {
@@ -512,17 +478,31 @@ void HardwareManager::publish_joint_state() {
 
     std::lock_guard<std::mutex> lock(joint_state_mutex_);
 
-    // 遍历所有 mapping → joint_state
+    // 合并所有 mapping 的 joint_state 到一条消息中
+    sensor_msgs::msg::JointState combined_state;
+    combined_state.header.stamp = node_->now();
+    combined_state.header.frame_id = "world";  // 全局坐标系
+
+    // 遍历所有 mapping，合并关节名称和状态
     for (const auto& [mapping, joint_state] : mapping_joint_states_) {
-        auto state_copy = joint_state;  // 拷贝一份，以免修改 map 中原始数据
-        
-        // 填充 header 信息
-        state_copy.header.stamp = node_->now();
-        state_copy.header.frame_id = get_frame_id(mapping);
+        // 添加该mapping的所有关节名称、位置、速度、力矩
+        for (size_t i = 0; i < joint_state.name.size(); ++i) {
+            combined_state.name.push_back(joint_state.name[i]);
+            if (i < joint_state.position.size()) {
+                combined_state.position.push_back(joint_state.position[i]);
+            }
+            if (i < joint_state.velocity.size()) {
+                combined_state.velocity.push_back(joint_state.velocity[i]);
+            }
+            if (i < joint_state.effort.size()) {
+                combined_state.effort.push_back(joint_state.effort[i]);
+            }
+        }
+    }
 
-        // 发布当前 mapping 的 JointState
-        joint_state_pub_->publish(state_copy);
-
+    // 发布合并后的 JointState
+    if (!combined_state.name.empty()) {
+        joint_state_pub_->publish(combined_state);
     }
 }
 
@@ -647,14 +627,9 @@ bool HardwareManager::load_hardware_config() {
             }
         }
 
-        RCLCPP_INFO(node_->get_logger(), "[DEBUG] gravity_compensator_ is %s", gravity_compensator_ ? "VALID" : "NULL");
         for (const auto& [mapping_name, mapping_node] : mapping_configs) {
             if (mapping_node["joint_names"]) {
                 std::vector<std::string> joint_names = mapping_node["joint_names"].as<std::vector<std::string>>();
-                RCLCPP_INFO(node_->get_logger(), "[DEBUG] Registering gravity mapping for %s with joints: ", mapping_name.c_str());
-                for (const auto& jname : joint_names) {
-                    RCLCPP_INFO(node_->get_logger(), "[DEBUG]   - %s", jname.c_str());
-                }
                 if (gravity_compensator_ && !gravity_compensator_->registerMapping(mapping_name, joint_names)) {
                     RCLCPP_WARN(node_->get_logger(), "[%s] Failed to register gravity mapping", mapping_name.c_str());
                 } else if (gravity_compensator_) {
@@ -1066,18 +1041,6 @@ std::string HardwareManager::execute_trajectory_async(
                 positions_rad.push_back(pos_deg * M_PI / 180.0);
             }
             point.efforts = compute_gravity_torques(mapping, positions_rad);
-
-            // 每隔一定点数输出一次重力矩信息（避免日志过多）
-            if (idx == 0 || idx == trajectory_with_efforts.points.size() - 1 || idx % 100 == 0) {
-                std::stringstream ss;
-                ss << "[" << mapping << "] Point " << idx << " gravity torques: [";
-                for (size_t j = 0; j < point.efforts.size(); ++j) {
-                    ss << std::fixed << std::setprecision(3) << point.efforts[j];
-                    if (j < point.efforts.size() - 1) ss << ", ";
-                }
-                ss << "] Nm";
-                RCLCPP_INFO(node_->get_logger(), "%s", ss.str().c_str());
-            }
         }
 
         // 调用硬件驱动的异步执行方法
@@ -1089,7 +1052,6 @@ std::string HardwareManager::execute_trajectory_async(
                 std::lock_guard<std::mutex> lock(execution_mutex_);
                 mapping_to_execution_id_[mapping] = execution_id;
             }
-            RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Trajectory execution started (ID: %s)", mapping.c_str(), execution_id.c_str());
         } else {
             RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to start trajectory execution", mapping.c_str());
         }

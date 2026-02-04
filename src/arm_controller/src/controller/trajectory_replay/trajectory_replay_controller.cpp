@@ -308,9 +308,6 @@ void TrajectoryReplayController::execute_trajectory(
             RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ TrajectoryReplay: Failed to execute trajectory", mapping.c_str());
             return;
         }
-
-        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ TrajectoryReplay: Trajectory execution started (ID: %s)", 
-                    mapping.c_str(), current_execution_id_.c_str());
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ TrajectoryReplay: Exception during trajectory execution: %s", mapping.c_str(), e.what());
         return;

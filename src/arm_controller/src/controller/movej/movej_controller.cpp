@@ -5,8 +5,8 @@
 #include <controller_interfaces/srv/work_mode.hpp>
 #include <set>
 
-// ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'single_arm'}"
-// ros2 topic pub --once /controller_api/movej_action/single_arm sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
+// ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveJ', mapping: 'left_arm'}"
+// ros2 topic pub --once /controller_api/movej_action/left_arm sensor_msgs/msg/JointState "{position: [0.2618, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 // ros2 topic pub --once /trajectory_control controller_interfaces/msg/TrajectoryControl "{mapping: 'single_arm', action: 'Cancel'}"
 
 MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
@@ -23,11 +23,19 @@ MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹规划服务
     initialize_planning_services();
 
+    // 启动后台规划工作线程
+    if (!planning_worker_running_) {
+        planning_worker_running_ = true;
+        planning_worker_ = std::make_unique<std::thread>(&MoveJController::planning_worker_thread, this);
+    }
+
+    // 等待一小段时间让 ROS 参数和 MoveIt 初始化完成
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
     // 启动IPC命令队列消费线程（早期启动以接收API发送的命令）
     if (!consumer_running_) {
         consumer_running_ = true;
         queue_consumer_ = std::make_unique<std::thread>(&MoveJController::command_queue_consumer_thread, this);
-        RCLCPP_INFO(node_->get_logger(), "✅ MoveJ: IPC queue consumer thread started early");
     }
 }
 
@@ -64,8 +72,12 @@ bool MoveJController::stop(const std::string& mapping) {
 }
 
 void MoveJController::trajectory_callback(const std::string& mapping, const sensor_msgs::msg::JointState::SharedPtr msg) {
-    // 使用传入的 mapping 进行规划和执行
-    plan_and_execute(mapping, msg);
+    // 规划和执行在后台工作线程中进行
+    {
+        std::lock_guard<std::mutex> lock(planning_queue_mutex_);
+        planning_queue_.push({mapping, msg});
+    }
+    planning_queue_cv_.notify_one();
 }
 
 void MoveJController::initialize_planning_services() {
@@ -170,6 +182,10 @@ void MoveJController::plan_and_execute(const std::string& mapping, const sensor_
     }
 
     last_planning_success_[mapping] = true;
+
+    RCLCPP_INFO(node_->get_logger(), "[%s] [MoveJ] Planned %zu pts, duration=%.2f s",
+                mapping.c_str(), planning_result.trajectory.size(),
+                planning_result.trajectory.total_duration().seconds());
 
     // 检查轨迹点数
     if (planning_result.trajectory.size() < 3) {
@@ -278,8 +294,6 @@ void MoveJController::execute_trajectory(
         bool wait_success = hardware_manager_->wait_for_trajectory_completion(mapping);
         last_planning_success_[mapping] = wait_success;
 
-        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveJ: Trajectory execution started (ID: %s)",
-                   mapping.c_str(), execution_id.c_str());
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Exception during trajectory execution: %s",
                     mapping.c_str(), e.what());
@@ -295,16 +309,14 @@ void MoveJController::command_queue_consumer_thread() {
 
     while (consumer_running_) {
         // 使用带过滤的 pop，只获取 MoveJ 命令
+        // popWithFilter 会阻塞直到有匹配的命令（顺序执行）
         if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "MoveJ")) {
-            continue;
+            continue;  // 只在异常时继续
         }
 
         std::string mode = cmd.get_mode();
         std::string mapping = cmd.get_mapping();
         std::string cmd_id = cmd.get_command_id();
-
-        RCLCPP_INFO(node_->get_logger(), "[%s] MoveJ: Received IPC command (ID: %s)",
-                   mapping.c_str(), cmd_id.c_str());
 
         // 获取 per-mapping 的互斥锁，确保同一手臂的命令串行执行
         std::lock_guard<std::mutex> execution_lock(arm_controller::CommandQueueIPC::getMappingExecutionMutex(mapping));
@@ -341,6 +353,12 @@ void MoveJController::command_queue_consumer_thread() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             if (state_mgr) {
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::IDLE);
+                // 命令执行完成后
+                arm_controller::ipc::ExecutorControllerState executor_state;
+                strncpy(executor_state.current_mode, mode.c_str(), sizeof(executor_state.current_mode) - 1);
+                executor_state.current_mode[sizeof(executor_state.current_mode) - 1] = '\0';  // 确保字符串以空字符结尾
+                executor_state.execution_state = (int)arm_controller::ipc::ExecutionState::IDLE;
+                state_mgr->updateFromExecutor(executor_state);
             }
         } catch (const std::exception& e) {
             RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in MoveJ command execution: %s",
@@ -352,5 +370,29 @@ void MoveJController::command_queue_consumer_thread() {
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::IDLE);
             }
         }
+        // 通知其他 consumers
+        arm_controller::CommandQueueIPC::getInstance().notifyConsumers();
+    }
+}
+
+void MoveJController::planning_worker_thread() {
+    while (planning_worker_running_) {
+        PlanningTask task;
+        {
+            std::unique_lock<std::mutex> lock(planning_queue_mutex_);
+            planning_queue_cv_.wait(lock, [this] {
+                return !planning_queue_.empty() || !planning_worker_running_;
+            });
+
+            if (!planning_worker_running_) break;
+
+            if (planning_queue_.empty()) continue;
+
+            task = planning_queue_.front();
+            planning_queue_.pop();
+        }
+
+        // 在队列外执行规划和执行（释放队列锁）
+        plan_and_execute(task.mapping, task.msg);
     }
 }

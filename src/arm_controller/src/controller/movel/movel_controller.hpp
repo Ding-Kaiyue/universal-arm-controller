@@ -11,6 +11,9 @@
 #include "arm_controller/ipc/command_queue_ipc.hpp"
 #include <thread>
 #include <atomic>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
 
 class MoveLController final : public TrajectoryControllerImpl<geometry_msgs::msg::Pose> {
 public:
@@ -42,6 +45,9 @@ private:
 
     void command_queue_consumer_thread() override;
 
+    // 后台规划工作线程
+    void planning_worker_thread();
+
     // 硬件接口
     std::shared_ptr<HardwareManager> hardware_manager_;
 
@@ -57,6 +63,17 @@ private:
     // 队列消费者线程
     std::unique_ptr<std::thread> queue_consumer_;
     std::atomic<bool> consumer_running_{false};
+
+    // 规划任务队列（用于异步规划）
+    struct PlanningTask {
+        std::string mapping;
+        geometry_msgs::msg::Pose::SharedPtr msg;
+    };
+    std::queue<PlanningTask> planning_queue_;
+    std::mutex planning_queue_mutex_;
+    std::condition_variable planning_queue_cv_;
+    std::unique_ptr<std::thread> planning_worker_;
+    std::atomic<bool> planning_worker_running_{false};
 
     // 规划状态追踪
     std::map<std::string, bool> last_planning_success_;

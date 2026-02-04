@@ -295,7 +295,7 @@ ros2 topic echo /joint_states
 
 **查看末端位姿**
 ```bash
-ros2 run tf2_tools tf2_echo base_link Link6
+ros2 run tf2_ros tf2_echo base_link Link6
 ```
 
 ---

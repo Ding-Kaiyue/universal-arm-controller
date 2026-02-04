@@ -1,6 +1,7 @@
 #include "movec_ipc_interface.hpp"
 #include "arm_controller/ipc/command_producer.hpp"
 #include "arm_controller/ipc/controller_state_manager.hpp"
+#include <iostream>
 
 namespace arm_controller::movec {
 
@@ -28,6 +29,9 @@ bool MoveCIPCInterface::execute(const std::vector<double>& waypoints,
         return false;
     }
 
+    std::cerr << "[MoveCIPCInterface] Executing MoveC command for mapping=" << mapping
+              << " with " << waypoints.size() << " waypoints" << std::endl;
+
     // 转移到 MoveC 模式
     state_mgr->transitionToMode("MoveC");
     // 设置执行状态为待执行
@@ -47,9 +51,11 @@ bool MoveCIPCInterface::execute(const std::vector<double>& waypoints,
 
     if (!producer->pushCommand(cmd)) {
         setLastError("Failed to push command: " + producer->getLastError());
+        std::cerr << "[MoveCIPCInterface] ❌ Push failed: " << getLastError() << std::endl;
         return false;
     }
 
+    std::cerr << "[MoveCIPCInterface] ✅ Command queued successfully" << std::endl;
     return true;
 }
 

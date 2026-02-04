@@ -187,7 +187,7 @@ bool CommandProducer::pushCommand(const TrajectoryCommand& cmd) {
 
         boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
         queue->push_back(cmd);
-        condition->notify_one();
+        condition->notify_all();  // 唤醒所有等待的consumer，让它们竞争取queue头部的命令
 
         last_error_ = "";
         return true;

@@ -45,7 +45,7 @@ void ControllerStateManager::initializeCurrentMode(const std::string& mode) {
     current_mode_ = mode;
     target_mode_ = mode;
     execution_state_ = ExecutionState::IDLE;
-    std::cout << "🔧 [" << mapping_ << "] Initialized mode: " << mode << std::endl;
+    std::cout << "[" << mapping_ << "] Initialized mode: " << mode << std::endl;
 }
 
 bool ControllerStateManager::need_stop_before_transition_(

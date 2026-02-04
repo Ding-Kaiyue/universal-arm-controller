@@ -285,9 +285,6 @@ void PointReplayController::execute_trajectory(
             return;
         }
 
-        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ PointReplay: Trajectory execution started (ID: %s)",
-                    mapping.c_str(), current_execution_id_.c_str());
-
         // 等待执行完成
         hardware_manager_->wait_for_trajectory_completion(mapping);
         current_execution_id_.clear();

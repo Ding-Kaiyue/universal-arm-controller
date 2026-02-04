@@ -112,9 +112,6 @@ protected:
                 }
 
                 interpolator.setInterpolationConfig(spline_config);
-                RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Loaded interpolator config - dt:%.3fs vel:%.2f acc:%.2f jerk:%.2f",
-                            get_mode().c_str(), spline_config.target_dt, spline_config.max_velocity,
-                            spline_config.max_acceleration, spline_config.max_jerk);
             }
         } catch (const std::exception& e) {
             RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  Failed to load interpolator config: %s, using defaults",

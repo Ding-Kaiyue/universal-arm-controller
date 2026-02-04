@@ -1,6 +1,7 @@
 #include "movel_ipc_interface.hpp"
 #include "arm_controller/ipc/command_producer.hpp"
 #include "arm_controller/ipc/controller_state_manager.hpp"
+#include <iostream>
 
 namespace arm_controller::movel {
 
@@ -29,6 +30,9 @@ bool MoveLIPCInterface::execute(double x, double y, double z,
         return false;
     }
 
+    std::cerr << "[MoveLIPCInterface] Executing MoveL command for mapping=" << mapping
+              << " position=(" << x << "," << y << "," << z << ")" << std::endl;
+
     // 转移到 MoveL 模式
     state_mgr->transitionToMode("MoveL");
     // 设置执行状态为待执行
@@ -48,9 +52,11 @@ bool MoveLIPCInterface::execute(double x, double y, double z,
 
     if (!producer->pushCommand(cmd)) {
         setLastError("Failed to push command: " + producer->getLastError());
+        std::cerr << "[MoveLIPCInterface] ❌ Push failed: " << getLastError() << std::endl;
         return false;
     }
 
+    std::cerr << "[MoveLIPCInterface] ✅ Command queued successfully" << std::endl;
     return true;
 }
 

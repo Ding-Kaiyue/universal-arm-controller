@@ -7,6 +7,7 @@
 #include "controller/controller_registry.hpp"
 #include "controller_interface.hpp"
 #include <algorithm>
+#include <thread>
 #include <rcl_interfaces/msg/parameter_descriptor.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <yaml-cpp/yaml.h>
@@ -17,8 +18,6 @@
 ControllerManagerNode::ControllerManagerNode()
     : Node("controller_manager_node")
 {
-    RCLCPP_INFO(this->get_logger(), "Initializing Controller Manager Node");
-
     // 在构造函数中声明参数，确保参数立即可用
     rcl_interfaces::msg::ParameterDescriptor descriptor;
     descriptor.read_only = false;
@@ -34,13 +33,9 @@ ControllerManagerNode::ControllerManagerNode()
 
     // 只加载配置，其他初始化延迟到post_init
     load_config();
-
-    RCLCPP_INFO(this->get_logger(), "Controller Manager Node basic initialization complete");
 }
 
 void ControllerManagerNode::post_init() {
-    RCLCPP_INFO(this->get_logger(), "Starting post-initialization");
-
     // 现在可以安全使用shared_from_this()
     init_hardware();
     load_motion_planning_parameters();
@@ -58,18 +53,12 @@ void ControllerManagerNode::post_init() {
     // 启动默认控制器
     for (const auto& mapping : mappings) {
         start_working_controller("SystemStart", mapping);
-        RCLCPP_INFO(this->get_logger(),
-            "✅ Starting default controller for mapping: %s", mapping.c_str());
     }
 
     // 然后切换到 HoldState 保持当前位置（为每个mapping都启动）
     for (const auto& mapping : mappings) {
         start_working_controller("HoldState", mapping);
-        RCLCPP_INFO(this->get_logger(),
-            "✅ Switching to HoldState for mapping: %s", mapping.c_str());
     }
-
-    RCLCPP_INFO(this->get_logger(), "Controller Manager Node post-initialization complete");
 }
 
 void ControllerManagerNode::load_config() {
@@ -117,8 +106,6 @@ void ControllerManagerNode::init_commons() {
         std::string type = item["type"].as<std::string>();
 
         common_topics_[key] = TopicInfo{key, name, type, kind};
-        RCLCPP_INFO(this->get_logger(), "[common] key=%s kind=%s name=%s type=%s",
-            key.c_str(), kind.c_str(), name.c_str(), type.c_str());
     }
 
     // 创建ROS接口

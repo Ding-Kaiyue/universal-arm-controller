@@ -5,8 +5,8 @@
 #include <controller_interfaces/srv/work_mode.hpp>
 #include <set>
 
-// ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveL', mapping: 'single_arm'}"
-// ros2 topic pub --once /controller_api/movel_action/single_arm geometry_msgs/msg/Pose "{position: {x: 0.19, y: 0.0, z: 0.63}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}}"
+// ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveL', mapping: 'left_arm'}"
+// ros2 topic pub --once /controller_api/movel_action/left_arm geometry_msgs/msg/Pose "{position: {x: 0.19, y: 0.0, z: 0.63}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}}"
 
 MoveLController::MoveLController(const rclcpp::Node::SharedPtr& node)
     : TrajectoryControllerImpl<geometry_msgs::msg::Pose>("MoveL", node)
@@ -22,11 +22,18 @@ MoveLController::MoveLController(const rclcpp::Node::SharedPtr& node)
     // 初始化轨迹规划服务
     initialize_planning_services();
 
+    // 启动后台规划工作线程（暂时禁用以调试 IPC 问题）
+    if (!planning_worker_running_) {
+        planning_worker_running_ = true;
+        planning_worker_ = std::make_unique<std::thread>(&MoveLController::planning_worker_thread, this);
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
     // 启动IPC命令队列消费线程（早期启动以接收API发送的命令）
     if (!consumer_running_) {
         consumer_running_ = true;
         queue_consumer_ = std::make_unique<std::thread>(&MoveLController::command_queue_consumer_thread, this);
-        RCLCPP_INFO(node_->get_logger(), "✅ MoveL: IPC queue consumer thread started early");
     }
 }
 
@@ -62,8 +69,12 @@ bool MoveLController::stop(const std::string& mapping) {
 }
 
 void MoveLController::trajectory_callback(const std::string& mapping, const geometry_msgs::msg::Pose::SharedPtr msg) {
-    // 使用传入的 mapping 进行规划和执行
-    plan_and_execute(mapping, msg);
+    // 规划和执行在后台工作线程中进行
+    {
+        std::lock_guard<std::mutex> lock(planning_queue_mutex_);
+        planning_queue_.push({mapping, msg});
+    }
+    planning_queue_cv_.notify_one();
 }
 
 void MoveLController::initialize_planning_services() {
@@ -141,17 +152,6 @@ void MoveLController::plan_and_execute(const std::string& mapping, const geometr
         return;
     }
 
-    // 在规划前同步 MoveIt 状态到当前机械臂位置，确保从正确的起始位置规划
-    if (moveit_adapters_.find(mapping) != moveit_adapters_.end() && moveit_adapters_[mapping]) {
-        auto current_positions = hardware_manager_->get_current_joint_positions(mapping);
-        if (!current_positions.empty()) {
-            moveit_adapters_[mapping]->setStartState(current_positions);
-            RCLCPP_DEBUG(node_->get_logger(), "[%s] MoveL: Synced MoveIt state to current position before planning", mapping.c_str());
-        } else {
-            RCLCPP_WARN(node_->get_logger(), "[%s] MoveL: Failed to get current positions for pre-planning sync", mapping.c_str());
-        }
-    }
-
     // 进行轨迹规划
     auto planning_result = motion_planning_services_[mapping]->planLinearMotion(*msg);
     if (!planning_result.success) {
@@ -161,6 +161,10 @@ void MoveLController::plan_and_execute(const std::string& mapping, const geometr
     }
 
     last_planning_success_[mapping] = true;
+
+    RCLCPP_INFO(node_->get_logger(), "[%s] [MoveL] Planned %zu pts, duration=%.2f s",
+                mapping.c_str(), planning_result.trajectory.size(),
+                planning_result.trajectory.total_duration().seconds());
 
     // 检查轨迹点数
     if (planning_result.trajectory.size() < 3) {
@@ -216,8 +220,8 @@ bool MoveLController::execute(const std::string& mapping, const std::vector<doub
     pose_state->orientation.z = parameters[5];
     pose_state->orientation.w = parameters[6];
 
-    // 初始化规划状态为未尝试
-    last_planning_success_[mapping] = true;
+    // 初始化规划状态为失败（未尝试），只有规划成功才会设为true
+    last_planning_success_[mapping] = false;
 
     // 调用原有的 plan_and_execute，它会更新 last_planning_success_
     plan_and_execute(mapping, pose_state);
@@ -272,11 +276,9 @@ void MoveLController::execute_trajectory(
             return;
         }
 
-        bool wait_success = hardware_manager_->wait_for_trajectory_completion(mapping, 0);
+        bool wait_success = hardware_manager_->wait_for_trajectory_completion(mapping);
         last_planning_success_[mapping] = wait_success;
 
-        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveL: Trajectory execution started (ID: %s)",
-                   mapping.c_str(), execution_id.c_str());
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveL: Exception during trajectory execution: %s",
                     mapping.c_str(), e.what());
@@ -299,9 +301,6 @@ void MoveLController::command_queue_consumer_thread() {
         std::string mode = cmd.get_mode();
         std::string mapping = cmd.get_mapping();
         std::string cmd_id = cmd.get_command_id();
-
-        RCLCPP_INFO(node_->get_logger(), "[%s] MoveL: Received IPC command (ID: %s)",
-                   mapping.c_str(), cmd_id.c_str());
 
         // 获取 per-mapping 的互斥锁，确保同一手臂的命令串行执行
         std::lock_guard<std::mutex> execution_lock(arm_controller::CommandQueueIPC::getMappingExecutionMutex(mapping));
@@ -338,6 +337,12 @@ void MoveLController::command_queue_consumer_thread() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             if (state_mgr) {
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::IDLE);
+                // 命令执行完成后
+                arm_controller::ipc::ExecutorControllerState executor_state;
+                strncpy(executor_state.current_mode, mode.c_str(), sizeof(executor_state.current_mode) - 1);
+                executor_state.current_mode[sizeof(executor_state.current_mode) - 1] = '\0';  // 确保字符串以空字符结尾
+                executor_state.execution_state = (int)arm_controller::ipc::ExecutionState::IDLE;
+                state_mgr->updateFromExecutor(executor_state);
             }
         } catch (const std::exception& e) {
             RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in MoveL command execution: %s",
@@ -348,6 +353,32 @@ void MoveLController::command_queue_consumer_thread() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::IDLE);
             }
+
+            
         }
+        // 通知其他 consumers
+        arm_controller::CommandQueueIPC::getInstance().notifyConsumers();
+    }
+}
+
+void MoveLController::planning_worker_thread() {
+    while (planning_worker_running_) {
+        PlanningTask task;
+        {
+            std::unique_lock<std::mutex> lock(planning_queue_mutex_);
+            planning_queue_cv_.wait(lock, [this] {
+                return !planning_queue_.empty() || !planning_worker_running_;
+            });
+
+            if (!planning_worker_running_) break;
+
+            if (planning_queue_.empty()) continue;
+
+            task = planning_queue_.front();
+            planning_queue_.pop();
+        }
+
+        // 在队列外执行规划和执行（释放队列锁）
+        plan_and_execute(task.mapping, task.msg);
     }
 }

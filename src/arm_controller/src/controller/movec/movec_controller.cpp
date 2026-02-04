@@ -7,12 +7,17 @@
 #include <set>
 
 // 使用步骤:
-// ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveC', mapping: 'single_arm'}"
+// ros2 service call /controller_api/controller_mode controller_interfaces/srv/WorkMode "{mode: 'MoveC', mapping: 'left_arm'}"
 
 // 注意: planArcMotion 会自动使用当前位置作为起点，所以只需要提供 via_point 和 goal_point
-/* ros2 topic pub --once /controller_api/movec_action/single_arm geometry_msgs/msg/PoseArray "{poses: [
+/* ros2 topic pub --once /controller_api/movec_action/left_arm geometry_msgs/msg/PoseArray "{poses: [
    {position: {x: 0.30, y: 0.0, z: 0.55}, orientation: {x: -0.5, y: 0.5, z: -0.5, w: 0.5}},
    {position: {x: 0.25, y: 0.0, z: 0.60}, orientation: {x: -0.4777, y: 0.4777, z: -0.5213, w: 0.5213}}
+   ]}"
+*/
+/* ros2 topic pub --once /controller_api/movec_action/left_arm geometry_msgs/msg/PoseArray "{poses: [
+   {position: {x: 0.23, y: -0.5, z: 0.58}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}},
+   {position: {x: 0.25, y: -0.5, z: 0.55}, orientation: {x: -0.4546, y: 0.4546, z: -0.5417, w: 0.5417}}
    ]}"
 */
 
@@ -26,15 +31,23 @@ MoveCController::MoveCController(const rclcpp::Node::SharedPtr& node)
 
     // ✅ 加载插值器配置
     load_interpolator_config(*trajectory_interpolator_);
-    
+
     // 初始化轨迹规划服务
     initialize_planning_services();
+
+    // 启动后台规划工作线程（暂时禁用以调试 IPC 问题）
+    if (!planning_worker_running_) {
+        planning_worker_running_ = true;
+        planning_worker_ = std::make_unique<std::thread>(&MoveCController::planning_worker_thread, this);
+    }
+
+    // 等待一小段时间让 ROS 参数和 MoveIt 初始化完成
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // 启动IPC命令队列消费线程（早期启动以接收API发送的命令）
     if (!consumer_running_) {
         consumer_running_ = true;
         queue_consumer_ = std::make_unique<std::thread>(&MoveCController::command_queue_consumer_thread, this);
-        RCLCPP_INFO(node_->get_logger(), "✅ MoveC: IPC queue consumer thread started early");
     }
 }
 
@@ -70,8 +83,12 @@ bool MoveCController::stop(const std::string& mapping) {
 }
 
 void MoveCController::trajectory_callback(const std::string& mapping, const geometry_msgs::msg::PoseArray::SharedPtr msg) {
-    // 使用传入的 mapping 进行规划和执行
-    plan_and_execute(mapping, msg);
+    // 规划和执行在后台工作线程中进行
+    {
+        std::lock_guard<std::mutex> lock(planning_queue_mutex_);
+        planning_queue_.push({mapping, msg});
+    }
+    planning_queue_cv_.notify_one();
 }
 
 void MoveCController::initialize_planning_services() {
@@ -149,17 +166,6 @@ void MoveCController::plan_and_execute(const std::string& mapping, const geometr
         return;
     }
 
-    // 在规划前同步 MoveIt 状态到当前机械臂位置，确保从正确的起始位置规划
-    if (moveit_adapters_.find(mapping) != moveit_adapters_.end() && moveit_adapters_[mapping]) {
-        auto current_positions = hardware_manager_->get_current_joint_positions(mapping);
-        if (!current_positions.empty()) {
-            moveit_adapters_[mapping]->setStartState(current_positions);
-            RCLCPP_DEBUG(node_->get_logger(), "[%s] MoveC: Synced MoveIt state to current position before planning", mapping.c_str());
-        } else {
-            RCLCPP_WARN(node_->get_logger(), "[%s] MoveC: Failed to get current positions for pre-planning sync", mapping.c_str());
-        }
-    }
-
     // 将 PoseArray 转换为 MoveCRequest
     trajectory_planning_interfaces::msg::MoveCRequest movec_request;
 
@@ -175,8 +181,15 @@ void MoveCController::plan_and_execute(const std::string& mapping, const geometr
 
     if (!planning_result.success) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveC: Planning failed", mapping.c_str());
+        last_planning_success_[mapping] = false;
         return;
     }
+
+    last_planning_success_[mapping] = true;
+    
+    RCLCPP_INFO(node_->get_logger(), "[%s] [MoveC] Planned %zu pts, duration=%.2f s",
+                mapping.c_str(), planning_result.trajectory.size(),
+                planning_result.trajectory.total_duration().seconds());
 
     // 检查轨迹点数
     if (planning_result.trajectory.size() < 3) {
@@ -237,7 +250,7 @@ bool MoveCController::execute(const std::string& mapping, const std::vector<doub
     }
 
     // 初始化规划状态为未尝试
-    last_planning_success_[mapping] = true;
+    last_planning_success_[mapping] = false;
 
     // 调用原有的 plan_and_execute，它会更新 last_planning_success_
     plan_and_execute(mapping, pose_array_msg);
@@ -295,8 +308,6 @@ void MoveCController::execute_trajectory(
         bool wait_success = hardware_manager_->wait_for_trajectory_completion(mapping);
         last_planning_success_[mapping] = wait_success;
 
-        RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveC: Trajectory execution started (ID: %s)",
-                   mapping.c_str(), execution_id.c_str());
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveC: Exception during trajectory execution: %s",
                     mapping.c_str(), e.what());
@@ -308,20 +319,21 @@ void MoveCController::execute_trajectory(
 void MoveCController::command_queue_consumer_thread() {
     arm_controller::TrajectoryCommandIPC cmd;
     std::map<std::string, std::string> current_mode;
-    std::map<std::string, arm_controller::ipc::ExecutionState> last_state;  // Track last execution state per mapping
+    std::map<std::string, arm_controller::ipc::ExecutionState> last_state;
 
+    int iteration = 0;
     while (consumer_running_) {
+        iteration++;
+
         // 使用带过滤的 pop，只获取 MoveC 命令
+        // popWithFilter 会阻塞直到有匹配的命令（顺序执行）
         if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "MoveC")) {
-            continue;
+            continue;  // 只在异常时继续
         }
 
         std::string mode = cmd.get_mode();
         std::string mapping = cmd.get_mapping();
         std::string cmd_id = cmd.get_command_id();
-
-        RCLCPP_INFO(node_->get_logger(), "[%s] MoveC: Received IPC command (ID: %s)",
-                   mapping.c_str(), cmd_id.c_str());
 
         // 获取 per-mapping 的互斥锁，确保同一手臂的命令串行执行
         std::lock_guard<std::mutex> execution_lock(arm_controller::CommandQueueIPC::getMappingExecutionMutex(mapping));
@@ -358,6 +370,12 @@ void MoveCController::command_queue_consumer_thread() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             if (state_mgr) {
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::IDLE);
+                // 命令执行完成后
+                arm_controller::ipc::ExecutorControllerState executor_state;
+                strncpy(executor_state.current_mode, mode.c_str(), sizeof(executor_state.current_mode) - 1);
+                executor_state.current_mode[sizeof(executor_state.current_mode) - 1] = '\0';  // 确保字符串以空字符结尾
+                executor_state.execution_state = (int)arm_controller::ipc::ExecutionState::IDLE;
+                state_mgr->updateFromExecutor(executor_state);
             }
         } catch (const std::exception& e) {
             RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception in MoveC command execution: %s",
@@ -369,5 +387,29 @@ void MoveCController::command_queue_consumer_thread() {
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::IDLE);
             }
         }
+        // 通知其他 consumers
+        arm_controller::CommandQueueIPC::getInstance().notifyConsumers();
+    }
+}
+
+void MoveCController::planning_worker_thread() {
+    while (planning_worker_running_) {
+        PlanningTask task;
+        {
+            std::unique_lock<std::mutex> lock(planning_queue_mutex_);
+            planning_queue_cv_.wait(lock, [this] {
+                return !planning_queue_.empty() || !planning_worker_running_;
+            });
+
+            if (!planning_worker_running_) break;
+
+            if (planning_queue_.empty()) continue;
+
+            task = planning_queue_.front();
+            planning_queue_.pop();
+        }
+
+        // 在队列外执行规划和执行（释放队列锁）
+        plan_and_execute(task.mapping, task.msg);
     }
 }

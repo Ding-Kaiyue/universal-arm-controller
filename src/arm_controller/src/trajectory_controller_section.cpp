@@ -28,7 +28,6 @@ void TrajectoryControllerNode::init_hardware() {
         rclcpp::shutdown();
         return;
     }
-
 }
 
 void TrajectoryControllerNode::init_trajectory_interpolator() {
@@ -176,32 +175,6 @@ void TrajectoryControllerNode::execute_trajectory(const std::shared_ptr<GoalHand
     const auto goal = goal_handle->get_goal();
     current_goal_handle_ = goal_handle;
 
-    // std::string interface = hardware_manager_->get_interface(mapping);
-    // RCLCPP_INFO(this->get_logger(), "Executing trajectory with %zu points on mapping: %s (interface: %s)",
-    //             goal->trajectory.points.size(), mapping.c_str(), interface.c_str());
-
-    // 打印原始轨迹的信息（特别是最后几个点）
-    if (goal->trajectory.points.size() > 0) {
-        RCLCPP_INFO(this->get_logger(), "=== Original trajectory from MoveIt ===");
-        // size_t print_count = std::min(size_t(3), goal->trajectory.points.size());
-        for (size_t i = 0; i < goal->trajectory.points.size(); ++i) {
-            const auto& point = goal->trajectory.points[i];
-            std::stringstream ss;
-            ss << "[Point " << i << "] pos: [";
-            for (size_t j = 0; j < point.positions.size(); ++j) {
-                if (j > 0) ss << ", ";
-                ss << std::fixed << std::setprecision(2) << point.positions[j];
-            }
-            ss << "] vel: [";
-            for (size_t j = 0; j < point.velocities.size(); ++j) {
-                if (j > 0) ss << ", ";
-                ss << std::fixed << std::setprecision(4) << point.velocities[j];
-            }
-            ss << "]";
-            RCLCPP_INFO(this->get_logger(), "  %s", ss.str().c_str());
-        }
-    }
-
     auto result = std::make_shared<FollowJointTrajectory::Result>();
 
     try {
@@ -238,33 +211,6 @@ void TrajectoryControllerNode::execute_trajectory(const std::shared_ptr<GoalHand
             final_trajectory = trajectory_interpolator_->interpolate();
             RCLCPP_INFO(this->get_logger(), "Interpolation successful, trajectory has %zu points (was %zu)",
                         final_trajectory.points.size(), goal->trajectory.points.size());
-
-            // 打印所有轨迹点的详细信息（用于调试抖动问题）
-            if (final_trajectory.points.size() > 0) {
-                RCLCPP_INFO(this->get_logger(), "=== [%s] Complete interpolated trajectory ===", mapping.c_str());
-                for (size_t i = 0; i < final_trajectory.points.size(); ++i) {
-                    const auto& point = final_trajectory.points[i];
-                    std::stringstream ss;
-                    ss << "[Point " << i << "] t=" << std::fixed << std::setprecision(4) << point.time_from_start
-                       << " pos: [";
-                    for (size_t j = 0; j < point.positions.size(); ++j) {
-                        if (j > 0) ss << ", ";
-                        ss << std::fixed << std::setprecision(4) << point.positions[j];
-                    }
-                    ss << "] vel: [";
-                    for (size_t j = 0; j < point.velocities.size(); ++j) {
-                        if (j > 0) ss << ", ";
-                        ss << std::fixed << std::setprecision(6) << point.velocities[j];
-                    }
-                    ss << "] acc: [";
-                    for (size_t j = 0; j < point.accelerations.size(); ++j) {
-                        if (j > 0) ss << ", ";
-                        ss << std::fixed << std::setprecision(6) << point.accelerations[j];
-                    }
-                    ss << "]";
-                    RCLCPP_INFO(this->get_logger(), "  %s", ss.str().c_str());
-                }
-            }
         }
 
         // 使用异步执行轨迹以支持暂停/恢复/取消（不显示硬件驱动的进度条，避免重复显示）
@@ -279,8 +225,6 @@ void TrajectoryControllerNode::execute_trajectory(const std::shared_ptr<GoalHand
             publish_action_event("action_failed", mapping);
             return;
         }
-
-        RCLCPP_INFO(this->get_logger(), "Trajectory execution started (ID: %s)", execution_id.c_str());
 
         // 等待轨迹执行完成
         if (!hardware_manager_->wait_for_trajectory_completion(mapping)) {

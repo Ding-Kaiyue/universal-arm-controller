@@ -125,7 +125,7 @@ public:
 
             boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
             queue->push_back(new_cmd);
-            cond->notify_one();
+            cond->notify_all();  // 唤醒所有等待的consumer，让它们竞争取queue头部的命令
 
         } catch (const std::exception& e) {
             std::cerr << "CommandQueueIPC::push() failed: " << e.what() << std::endl;
@@ -177,8 +177,6 @@ public:
     }
 
     // 带过滤的 pop 方法：严格按队列顺序分发命令
-    // 只有队列前面的命令类型匹配才返回，否则让其他 controller 去处理
-    // 这样保证了全局的入队顺序
     bool popWithFilter(TrajectoryCommandIPC& cmd, const std::string& target_mode) {
         try {
             if (!shm_manager_ || !shm_manager_->isValid()) {
@@ -195,25 +193,25 @@ public:
                 return false;
             }
 
-            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
+            while (true) {
+                boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
 
-            // 等待直到队列不为空
-            while (queue->empty()) {
-                cond->wait(lock);
+                // 如果队列有命令且头部匹配，立即取出
+                if (!queue->empty() && queue->front().get_mode() == target_mode) {
+                    cmd.set_mode(queue->front().get_mode());
+                    cmd.set_mapping(queue->front().get_mapping());
+                    cmd.set_command_id(queue->front().get_command_id());
+                    cmd.set_parameters(queue->front().get_parameters());
+                    queue->pop_front();
+                    return true;
+                }
+
+                // 队列为空或头部不匹配，短暂等待然后重新检查（100ms超时）
+                auto deadline = boost::posix_time::microsec_clock::universal_time() +
+                               boost::posix_time::milliseconds(100);
+                cond->timed_wait(lock, deadline);
+                // 超时或被通知后，回到 while 循环重新检查条件
             }
-
-            // 检查队列前面的命令类型是否匹配
-            if (!queue->empty() && queue->front().get_mode() == target_mode) {
-                cmd.set_mode(queue->front().get_mode());
-                cmd.set_mapping(queue->front().get_mapping());
-                cmd.set_command_id(queue->front().get_command_id());
-                cmd.set_parameters(queue->front().get_parameters());
-                queue->pop_front();
-                return true;
-            }
-
-            // 前面的命令不匹配当前 controller，让其他 controller 去处理，返回 false
-            return false;
 
         } catch (const std::exception& e) {
             std::cerr << "CommandQueueIPC::popWithFilter() failed: " << e.what() << std::endl;
@@ -255,6 +253,23 @@ public:
 
     static void cleanup() {
         ipc::SharedMemoryManager::cleanup();
+    }
+
+    // 通知等待的 consumers 检查队列（在命令执行完成后调用）
+    void notifyConsumers() {
+        try {
+            if (!shm_manager_ || !shm_manager_->isValid()) {
+                return;
+            }
+            auto cond = shm_manager_->getCondition();
+            auto mutex = shm_manager_->getMutex();
+            if (cond && mutex) {
+                boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
+                cond->notify_all();
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "CommandQueueIPC::notifyConsumers() failed: " << e.what() << std::endl;
+        }
     }
 
     // 获取 per-mapping 的执行互斥锁，确保同一手臂的命令串行执行
