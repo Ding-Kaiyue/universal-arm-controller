@@ -3,7 +3,7 @@
 // 只保留测试需要的控制器
 #include "hold_state/hold_state_controller.hpp"
 #include "system_start/system_start_controller.hpp"
-// #include "joint_velocity/joint_velocity_controller.hpp"
+#include "joint_velocity/joint_velocity_controller.hpp"
 // #include "cartesian_velocity/cartesian_velocity_controller.hpp"
 // #include "move2initial/move2initial_controller.hpp"
 // #include "move2start/move2start_controller.hpp"
@@ -23,8 +23,8 @@ std::unordered_map<std::string, ControllerInterface::Creator> get_available_cont
             return std::make_shared<SystemStartController>(node); }},
         {"HoldStateController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<HoldStateController>(node); }},
-        // {"JointVelocityController", [](rclcpp::Node::SharedPtr node) {
-        //     return std::make_shared<JointVelocityController>(node); }},
+        {"JointVelocityController", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<JointVelocityController>(node); }},
         // {"CartesianVelocityController", [](rclcpp::Node::SharedPtr node) {
         //     return std::make_shared<CartesianVelocityController>(node); }},
         // {"Move2InitialController", [](rclcpp::Node::SharedPtr node) {

@@ -13,7 +13,7 @@
 
 namespace arm_controller {
 
-struct TrajectoryCommandIPC {
+struct CommandIPC {
     static constexpr size_t MAX_MODE_LEN = 64;
     static constexpr size_t MAX_MAPPING_LEN = 64;
     static constexpr size_t MAX_COMMAND_ID_LEN = 128;
@@ -26,7 +26,7 @@ struct TrajectoryCommandIPC {
     size_t param_count;
     uint64_t timestamp;
 
-    TrajectoryCommandIPC() : param_count(0), timestamp(0) {
+    CommandIPC() : param_count(0), timestamp(0) {
         std::memset(mode, 0, MAX_MODE_LEN);
         std::memset(mapping, 0, MAX_MAPPING_LEN);
         std::memset(command_id, 0, MAX_COMMAND_ID_LEN);
@@ -99,7 +99,7 @@ public:
         }
     }
 
-    void push(const TrajectoryCommandIPC& cmd) {
+    void push(const CommandIPC& cmd) {
         try {
             if (!shm_manager_ || !shm_manager_->isValid()) {
                 if (!open()) {
@@ -132,7 +132,7 @@ public:
         }
     }
 
-    bool pop(TrajectoryCommandIPC& cmd, int timeout_ms = 0) {
+    bool pop(CommandIPC& cmd, int timeout_ms = 0) {
         try {
             if (!shm_manager_ || !shm_manager_->isValid()) {
                 if (!open()) {
@@ -177,7 +177,7 @@ public:
     }
 
     // 带过滤的 pop 方法：严格按队列顺序分发命令
-    bool popWithFilter(TrajectoryCommandIPC& cmd, const std::string& target_mode) {
+    bool popWithFilter(CommandIPC& cmd, const std::string& target_mode) {
         try {
             if (!shm_manager_ || !shm_manager_->isValid()) {
                 if (!open()) {

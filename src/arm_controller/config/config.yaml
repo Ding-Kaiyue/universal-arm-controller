@@ -22,11 +22,11 @@ controllers:
   - key: HoldState
     class: HoldStateController
 
-  # - key: JointVelocity
-  #   class: JointVelocityController
-  #   input_topic:
-  #     name: /controller_api/joint_velocity_action/{mapping}
-  #     type: sensor_msgs/msg/JointState
+  - key: JointVelocity
+    class: JointVelocityController
+    input_topic:
+      name: /controller_api/joint_velocity_action/{mapping}
+      type: sensor_msgs/msg/JointState
 
   # - key: CartesianVelocity
   #   class: CartesianVelocityController

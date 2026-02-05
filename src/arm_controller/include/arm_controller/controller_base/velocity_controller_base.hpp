@@ -2,6 +2,7 @@
 #define __VELOCITY_CONTROLLER_BASE_HPP__
 
 #include "arm_controller/controller_base/mode_controller_base.hpp"
+#include "hardware/hardware_manager.hpp"
 #include <rclcpp/rclcpp.hpp>
 #include <any>
 #include <map>

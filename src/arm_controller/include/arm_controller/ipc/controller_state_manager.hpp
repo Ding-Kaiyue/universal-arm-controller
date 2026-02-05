@@ -3,6 +3,7 @@
 #include "ipc_types.hpp"
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 
 namespace arm_controller::ipc {
@@ -82,6 +83,10 @@ private:
     ExecutionState execution_state_; // 当前执行状态
     mutable std::mutex state_mutex_;
     bool in_hook_state_;
+
+    // 需要hook状态才能安全停止的模式列表（轨迹规划模式）
+    // 这些模式在转移到其他模式前需要停止并进入HoldState
+    static const std::unordered_set<std::string> modes_requiring_hook_;
 
     bool need_stop_before_transition_(
         const std::string& from,

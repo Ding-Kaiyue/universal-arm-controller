@@ -74,9 +74,12 @@ ControllerStateManager* IPCContext::getStateManager(const std::string& mapping) 
     // 创建新的状态管理器
     auto manager = std::make_shared<ControllerStateManager>(mapping);
 
-    // 初始化当前模式为 SystemStart（系统启动时的默认模式）
-    // 这样可以正确地追踪 SystemStart -> MoveJ/MoveL 等的转移
-    manager->initializeCurrentMode("SystemStart");
+    // 初始化当前模式为 HoldState（系统启动后的实际默认模式）
+    // 在 ControllerManagerNode::post_init() 中：
+    //   1. 先启动 SystemStart 进行初始化
+    //   2. 然后立即启动 HoldState 作为实际的默认保持状态
+    // 因此 IPC 客户端应该同步到 HoldState
+    manager->initializeCurrentMode("HoldState");
 
     state_managers_[mapping] = manager;
     return manager.get();

@@ -292,7 +292,7 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
 
     // 如果需要钩子状态，进入钩子状态并开始持续监控
     if (need_hook) {
-        RCLCPP_INFO(this->get_logger(), "Need hook state for safe transition to %s", mode_name.c_str());
+        // RCLCPP_INFO(this->get_logger(), "Need hook state for safe transition to %s", mode_name.c_str());
         enter_hook_state(mode_name, mapping);
         return true;    // 进入等待状态，持续监控会处理实际转换
     }
@@ -351,7 +351,7 @@ bool ControllerManagerNode::enter_hook_state(const std::string& target_mode, con
             hold_controller->start(mapping);
             mapping_to_mode_[mapping] = "HoldState";
 
-            RCLCPP_INFO(this->get_logger(), "Entered hook state, target mode: %s", target_mode.c_str());
+            // RCLCPP_INFO(this->get_logger(), "Entered hook state, target mode: %s", target_mode.c_str());
             return true;
         } else {
             RCLCPP_ERROR(this->get_logger(), "Failed to cast HoldState controller");

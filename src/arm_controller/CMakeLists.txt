@@ -80,7 +80,7 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(csaps REQUIRED)
 
-# ✅ 抑制 Boost.Python 找不到 Python 3.10 的警告（这是一个已知问题，不影响编译）
+# 抑制 Boost.Python 找不到 Python 3.10 的警告（这是一个已知问题，不影响编译）
 set(Boost_NO_WARN_NEW_VERSIONS ON)
 
 find_package(pinocchio REQUIRED)
@@ -117,8 +117,9 @@ add_library(arm_controller_lib
   src/ipc/ipc_context.cpp
   # 只保留测试需要的控制器
   src/controller/system_start/system_start_controller.cpp
-  # src/controller/joint_velocity/joint_velocity_controller.cpp
-  # src/controller/joint_velocity/joint_velocity_interface.cpp
+  src/controller/joint_velocity/joint_velocity_controller.cpp
+  src/controller/joint_velocity/joint_velocity_interface.cpp
+  src/controller/joint_velocity/joint_velocity_ipc_interface.cpp
   src/controller/hold_state/hold_state_controller.cpp
   # 其他控制器暂时屏蔽用于测试
   # src/controller/cartesian_velocity/cartesian_velocity_controller.cpp

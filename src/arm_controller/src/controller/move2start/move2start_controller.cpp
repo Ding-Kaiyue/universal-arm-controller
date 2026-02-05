@@ -95,8 +95,6 @@ void Move2StartController::initialize_planning_services() {
                 motion_planning_services_[mapping] = motion_planning_service;
                 mapping_to_planning_group_[mapping] = planning_group;
 
-                RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Move2Start: Planning service initialized (planning group: '%s')",
-                           mapping.c_str(), planning_group.c_str());
             } catch (const std::exception& e) {
                 RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Move2Start: Exception while initializing planning service: %s",
                            mapping.c_str(), e.what());

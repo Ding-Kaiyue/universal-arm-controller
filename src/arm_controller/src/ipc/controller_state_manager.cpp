@@ -3,6 +3,18 @@
 
 namespace arm_controller::ipc {
 
+// 定义需要hook状态才能安全停止的模式
+// 这些是轨迹规划模式，需要在切换前进入HoldState
+const std::unordered_set<std::string> ControllerStateManager::modes_requiring_hook_ = {
+    "MoveJ",
+    "MoveL",
+    "MoveC",
+    "JointVelocity",
+    "CartesianVelocity",
+    "TrajectoryReplay",
+    "PointReplay"
+};
+
 std::string ControllerStateManager::getCurrentMode() const {
     std::lock_guard<std::mutex> lock(state_mutex_);
     return current_mode_;
@@ -37,7 +49,6 @@ void ControllerStateManager::setExecutionState(ExecutionState state) {
         case ExecutionState::FAILED: state_str = "FAILED"; break;
         default: state_str = "UNKNOWN"; break;
     }
-    // std::cout << "[" << mapping_ << "] Execution state: " << state_str << std::endl;
 }
 
 void ControllerStateManager::initializeCurrentMode(const std::string& mode) {
@@ -45,7 +56,6 @@ void ControllerStateManager::initializeCurrentMode(const std::string& mode) {
     current_mode_ = mode;
     target_mode_ = mode;
     execution_state_ = ExecutionState::IDLE;
-    std::cout << "[" << mapping_ << "] Initialized mode: " << mode << std::endl;
 }
 
 bool ControllerStateManager::need_stop_before_transition_(
@@ -56,8 +66,9 @@ bool ControllerStateManager::need_stop_before_transition_(
         return false;
     }
 
-    // 如果当前在任何运动模式（MoveJ, MoveL, MoveC），需要停止
-    if (from == "MoveJ" || from == "MoveL" || from == "MoveC") {
+    // 检查当前模式是否在需要hook的模式列表中
+    // 如果是，则需要停止并进入HoldState
+    if (modes_requiring_hook_.find(from) != modes_requiring_hook_.end()) {
         return true;
     }
 

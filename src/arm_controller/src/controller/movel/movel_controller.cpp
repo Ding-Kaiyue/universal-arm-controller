@@ -46,7 +46,7 @@ void MoveLController::start(const std::string& mapping) {
         );
     }
 
-    // 调用基类 start() 设置 per-mapping 的 is_active_[mapping] = true
+    // 调用基类 start() 设置 per-mapping 的 active_mappings_[mapping] = true
     TrajectoryControllerImpl::start(mapping);
 
     // 在激活时创建话题订阅（如果还没创建的话）
@@ -58,7 +58,7 @@ void MoveLController::start(const std::string& mapping) {
 }
 
 bool MoveLController::stop(const std::string& mapping) {
-    // 调用基类 stop() 设置 per-mapping 的 is_active_[mapping] = false
+    // 调用基类 stop() 设置 per-mapping 的 active_mappings_[mapping] = false
     TrajectoryControllerImpl::stop(mapping);
 
     // 清理该 mapping 的话题订阅
@@ -133,8 +133,6 @@ void MoveLController::initialize_planning_services() {
                 motion_planning_services_[mapping] = motion_planning_service;
                 mapping_to_planning_group_[mapping] = planning_group;
 
-                RCLCPP_INFO(node_->get_logger(), "[%s] ✅ MoveL: Planning service initialized (planning group: '%s')",
-                           mapping.c_str(), planning_group.c_str());
             } catch (const std::exception& e) {
                 RCLCPP_ERROR(node_->get_logger(), "❎ MoveL: Failed to initialize planning services: %s", e.what());
             }
@@ -288,7 +286,7 @@ void MoveLController::execute_trajectory(
 }
 
 void MoveLController::command_queue_consumer_thread() {
-    arm_controller::TrajectoryCommandIPC cmd;
+    arm_controller::CommandIPC cmd;
     std::map<std::string, std::string> current_mode;
     std::map<std::string, arm_controller::ipc::ExecutionState> last_state;  // Track last execution state per mapping
 
