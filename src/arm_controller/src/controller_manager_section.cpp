@@ -42,17 +42,19 @@ void ControllerManagerNode::post_init() {
 
     // 为所有 mapping 初始化默认模式状态
     auto mappings = hardware_manager_->get_all_mappings();
-    for (const auto& mapping : mappings) {
-        mapping_to_mode_[mapping] = "SystemStart";
-    }
 
     init_commons();
     init_action_event_listener();
     init_controllers();
 
-    // 启动默认控制器
+    // 启动默认控制器 - 初始化 MIT 模式
     for (const auto& mapping : mappings) {
-        start_working_controller("SystemStart", mapping);
+        auto key_pair = std::make_pair("SystemStart", mapping);
+        auto it = controller_map_.find(key_pair);
+        if (it != controller_map_.end()) {
+            it->second->start(mapping);
+            mapping_to_mode_[mapping] = "SystemStart";
+        }
     }
 
     // 然后切换到 HoldState 保持当前位置（为每个mapping都启动）

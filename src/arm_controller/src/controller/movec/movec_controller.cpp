@@ -318,16 +318,14 @@ void MoveCController::command_queue_consumer_thread() {
     std::map<std::string, std::string> current_mode;
     std::map<std::string, arm_controller::ipc::ExecutionState> last_state;
 
-    int iteration = 0;
     while (consumer_running_) {
-        iteration++;
 
         // 使用带过滤的 pop，只获取 MoveC 命令
         // popWithFilter 会阻塞直到有匹配的命令（顺序执行）
         if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "MoveC")) {
             continue;  // 只在异常时继续
         }
-
+        
         std::string mode = cmd.get_mode();
         std::string mapping = cmd.get_mapping();
         std::string cmd_id = cmd.get_command_id();
@@ -337,6 +335,20 @@ void MoveCController::command_queue_consumer_thread() {
 
         auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
 
+        // 如果控制器还未激活，先启动该 mapping 的控制器
+        if (!is_active(mapping)) {
+            RCLCPP_INFO(node_->get_logger(), "[%s] Controller not active, starting MoveC controller", mapping.c_str());
+            try {
+                start(mapping);
+            } catch (const std::exception& e) {
+                RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to start MoveC controller: %s", mapping.c_str(), e.what());
+                if (state_mgr) {
+                    state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::FAILED);
+                }
+                continue;
+            }
+        }
+        
         try {
             // 获取状态管理器并更新为执行中
             if (state_mgr) {

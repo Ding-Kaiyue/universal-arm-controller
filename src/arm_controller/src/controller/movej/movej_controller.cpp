@@ -320,6 +320,20 @@ void MoveJController::command_queue_consumer_thread() {
 
         auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
 
+        // 如果控制器还未激活，先启动该 mapping 的控制器
+        if (!is_active(mapping)) {
+            RCLCPP_INFO(node_->get_logger(), "[%s] Controller not active, starting MoveJ controller", mapping.c_str());
+            try {
+                start(mapping);
+            } catch (const std::exception& e) {
+                RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to start MoveJ controller: %s", mapping.c_str(), e.what());
+                if (state_mgr) {
+                    state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::FAILED);
+                }
+                continue;
+            }
+        }
+
         try {
             // 获取状态管理器并更新为执行中
             if (state_mgr) {
