@@ -44,13 +44,13 @@ int main() {
 
     // 创建两个线程，分别控制左右臂
     std::thread left_thread(move_arm, "left_arm", std::vector<double>{0.2, 0.0, 0.0, 0.0, 0.0, 0.0}, duration_ms);
-    std::thread right_thread(move_arm, "right_arm", std::vector<double>{-0.2, 0.0, 0.0, 0.0, 0.0, 0.0}, duration_ms);
+    // std::thread right_thread(move_arm, "right_arm", std::vector<double>{-0.2, 0.0, 0.0, 0.0, 0.0, 0.0}, duration_ms);
 
     // 等待两个线程完成
     left_thread.join();
-    right_thread.join();
+    // right_thread.join();
 
-    std::cout << "✅ 双臂运动完成\n\n";
+    std::cout << "✅ left_arm运动完成\n\n";
 
     // 关闭 IPC
     std::cout << "关闭 IPC ...\n";

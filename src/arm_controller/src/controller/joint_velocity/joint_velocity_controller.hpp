@@ -11,12 +11,17 @@
 #include <chrono>
 #include <condition_variable>
 #include <map>
+#include <set>
 
+// JointVelocityController implements a latch-based velocity controller:
+// - commands update cache only
+// - fixed-rate 10ms control loop
+// - timeout-based stop
 class JointVelocityController final
     : public VelocityControllerImpl<sensor_msgs::msg::JointState> {
 public:
     explicit JointVelocityController(const rclcpp::Node::SharedPtr& node);
-    ~JointVelocityController() override = default;
+    ~JointVelocityController() override;
 
     void start(const std::string& mapping) override;
     bool stop(const std::string& mapping) override;
@@ -36,10 +41,11 @@ private:
     // Per-mapping 实时控制循环（支持多臂）
     struct MappingControlState {
         rclcpp::TimerBase::SharedPtr control_timer;
-        sensor_msgs::msg::JointState last_cmd;
-        std::chrono::steady_clock::time_point last_cmd_time;
+        std::vector<double> last_cmd_velocity;        // 最新的速度命令
+        std::chrono::steady_clock::time_point last_cmd_time;  // 最后一次收到命令的时间
     };
     std::map<std::string, MappingControlState> mapping_states_;
+    std::set<std::string> started_mappings_;  // ⭐ 追踪已启动的映射，避免重复调用 start()
     std::mutex cmd_mutex_;
     std::chrono::steady_clock steady_clock_;
 

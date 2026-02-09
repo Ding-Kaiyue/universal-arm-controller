@@ -235,6 +235,8 @@ void ControllerManagerNode::handle_work_mode(
 }
 
 bool ControllerManagerNode::start_working_controller(const std::string& mode_name, const std::string& mapping) {
+    RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: start_working_controller(%s) called", mapping.c_str(), mode_name.c_str());
+
     // 立即取消任何正在执行的轨迹（所有模式切换都需要这样做）
     if (hardware_manager_) {
         hardware_manager_->cancel_trajectory(mapping);
@@ -256,6 +258,7 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
             auto current_key_pair = std::make_pair(current_mode_it->second, mapping);
             auto current_it = controller_map_.find(current_key_pair);
             if (current_it != controller_map_.end()) {
+                RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: Force stop() for Disable/EmergencyStop mode", mapping.c_str());
                 current_it->second->stop(mapping);
                 RCLCPP_INFO(this->get_logger(), "[%s] Force stopped controller for mode: %s", mapping.c_str(), current_mode_it->second.c_str());
             }
@@ -287,6 +290,7 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
 
     // 停止当前控制器
     bool need_hook = false;
+    RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: About to call stop_working_controller()", mapping.c_str());
     if (!stop_working_controller(need_hook, mapping)) {
         RCLCPP_WARN(this->get_logger(), "Failed to stop current controller");
         return false;
@@ -321,6 +325,8 @@ bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::
         auto hook_it = hook_state_map.find(mapping);
         need_hook = (hook_it != hook_state_map.end()) ? hook_it->second : false;
 
+        RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: stop_working_controller() calling stop() for mode: %s",
+                    mapping.c_str(), current_mode_it->second.c_str());
         it->second->stop(mapping);
 
         RCLCPP_INFO(this->get_logger(), "[%s] Stopped controller for mode: %s, needs_hook: %s",

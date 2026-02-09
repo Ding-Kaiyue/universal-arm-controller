@@ -27,7 +27,10 @@ public:
     bool is_active(const std::string& mapping = "") const {
         std::string normalized = normalize_mapping(mapping);
         auto it = active_mappings_.find(normalized);
-        return (it != active_mappings_.end()) ? it->second : false;
+        bool result = (it != active_mappings_.end()) ? it->second : false;
+        // 追踪 is_active 的调用（仅在非DEBUG时）
+        // RCLCPP_DEBUG(...)  可能无法访问 logger，所以注释掉
+        return result;
     }
     
     // 获取控制器模式名称
