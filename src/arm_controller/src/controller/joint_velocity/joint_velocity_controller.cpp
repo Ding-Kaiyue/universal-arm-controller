@@ -108,9 +108,10 @@ void JointVelocityController::start(const std::string& mapping) {
 }
 
 bool JointVelocityController::stop(const std::string& mapping) {
-    RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  STOP CALLED! mapping_states_ size=%zu", mapping.c_str(), mapping_states_.size());
+    RCLCPP_WARN(node_->get_logger(), "[%s] ⚠️  STOP CALLED! mapping_states_ size=%zu",
+                mapping.c_str(), mapping_states_.size());
 
-    // 清理 timer
+    // 清理 timer 和启动标记
     {
         std::lock_guard<std::mutex> lock(cmd_mutex_);
         auto it = mapping_states_.find(mapping);
@@ -121,6 +122,12 @@ bool JointVelocityController::stop(const std::string& mapping) {
             }
         } else {
             RCLCPP_WARN(node_->get_logger(), "[%s] DEBUG stop(): mapping state not found!", mapping.c_str());
+        }
+
+        // ⭐ 清理启动标记，允许后续重新初始化
+        if (started_mappings_.find(mapping) != started_mappings_.end()) {
+            RCLCPP_INFO(node_->get_logger(), "[%s] DEBUG stop(): Erasing from started_mappings_", mapping.c_str());
+            started_mappings_.erase(mapping);
         }
     }
 
@@ -153,6 +160,10 @@ void JointVelocityController::velocity_callback(const std::string& mapping, cons
         // 仅更新缓存：速度值 + 时间戳
         it->second.last_cmd_velocity = msg->velocity;
         it->second.last_cmd_time = steady_clock_.now();
+        // 标记已收到有效命令
+        it->second.has_valid_command = true;
+        // 新命令到达时，重置超时触发标志（为下次超时做准备）
+        it->second.timeout_triggered = false;
     }
 
     RCLCPP_INFO(node_->get_logger(), "[%s] ✓ Joint velocity command received: %zu joints",
@@ -160,58 +171,70 @@ void JointVelocityController::velocity_callback(const std::string& mapping, cons
 }
 
 void JointVelocityController::control_loop(const std::string& mapping) {
-    // 读取当前状态
     std::vector<double> velocity_to_send;
-    std::chrono::steady_clock::time_point last_cmd_time;
+    bool has_valid_command = false;
+    bool should_send_zero = false;
+    bool should_send_normal = false;
 
+    // ⭐ 第一步：快速获取状态和时间戳（短锁）
     {
         std::lock_guard<std::mutex> lock(cmd_mutex_);
         auto it = mapping_states_.find(mapping);
         if (it == mapping_states_.end()) {
-            RCLCPP_WARN(node_->get_logger(), "[%s] DEBUG control_loop: mapping state not found!", mapping.c_str());
             return;
         }
 
-        velocity_to_send = it->second.last_cmd_velocity;
-        last_cmd_time = it->second.last_cmd_time;
-    }
+        has_valid_command = it->second.has_valid_command;
+        
+        if (!has_valid_command) {
+            // 还没有收到任何命令
+            should_send_zero = true;
+        } else {
+            // 计算时间差
+            auto now = steady_clock_.now();
+            auto time_since_last_cmd = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - it->second.last_cmd_time).count();
 
-    // ⭐ 如果 last_cmd_time 还是默认值（0），说明还没有命令到达
-    // 检查是否为 epoch 时刻（等于 0）
-    if (last_cmd_time == std::chrono::steady_clock::time_point()) {
-        // 还没有收到任何命令，发送零速度等待
-        const auto& joint_names = hardware_manager_->get_joint_names(mapping);
-        std::vector<double> zero_velocities(joint_names.size(), 0.0);
-        send_joint_velocities(mapping, zero_velocities);
-        return;
-    }
+            if (time_since_last_cmd > 300) {
+                // 超时
+                if (!it->second.timeout_triggered) {
+                    RCLCPP_WARN(node_->get_logger(),
+                        "[%s] JointVelocity timeout (>300ms, delta=%ldms), sending zero velocity",
+                        mapping.c_str(), time_since_last_cmd);
+                    it->second.timeout_triggered = true;
+                }
+                should_send_zero = true;
+            } else {
+                // 正常情况
+                should_send_normal = true;
+                velocity_to_send = it->second.last_cmd_velocity;
+                
+                // 恢复超时状态
+                if (it->second.timeout_triggered) {
+                    it->second.timeout_triggered = false;
+                    RCLCPP_INFO(node_->get_logger(),
+                        "[%s] Timeout recovered, resuming normal operation",
+                        mapping.c_str());
+                }
+            }
+        }
+    }  // ← 快速释放锁，总耗时 < 1ms
 
-    auto now = steady_clock_.now();
-    auto time_since_last_cmd = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_cmd_time).count();
-
-    // ⭐ 超时检查：如果距离上一次命令 >100ms，发送零速度
-    if (time_since_last_cmd > 100) {
-        // 发送零速度作为紧急停止
-        const auto& joint_names = hardware_manager_->get_joint_names(mapping);
-        std::vector<double> zero_velocities(joint_names.size(), 0.0);
-        send_joint_velocities(mapping, zero_velocities);
-
-        RCLCPP_WARN(node_->get_logger(),
-            "[%s] JointVelocity timeout (>100ms, delta=%ldms), sending zero velocity",
-            mapping.c_str(), time_since_last_cmd);
-        return;
-    }
-
-    // 检查速度向量有效性
+    // ⭐ 第二步：在锁外执行阻塞的 send_joint_velocities()
     const auto& joint_names = hardware_manager_->get_joint_names(mapping);
-    if (velocity_to_send.size() != joint_names.size()) {
-        RCLCPP_WARN(node_->get_logger(), "[%s] Velocity vector size mismatch: expected %zu, got %zu",
-                    mapping.c_str(), joint_names.size(), velocity_to_send.size());
-        return;
+    
+    if (should_send_zero) {
+        std::vector<double> zero_velocities(joint_names.size(), 0.0);
+        send_joint_velocities(mapping, zero_velocities);
+    } else if (should_send_normal) {
+        // 验证速度向量有效性
+        if (velocity_to_send.size() != joint_names.size()) {
+            RCLCPP_WARN(node_->get_logger(), "[%s] Velocity vector size mismatch: expected %zu, got %zu",
+                        mapping.c_str(), joint_names.size(), velocity_to_send.size());
+            return;
+        }
+        send_joint_velocities(mapping, velocity_to_send);
     }
-
-    // 正常情况：发送当前缓存的速度
-    send_joint_velocities(mapping, velocity_to_send);
 }
 
 bool JointVelocityController::send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities) {
@@ -278,6 +301,10 @@ bool JointVelocityController::send_velocity(const std::string& mapping, const st
         // 只更新缓存，10ms 定时器会读取并发送
         it->second.last_cmd_velocity = velocity;
         it->second.last_cmd_time = steady_clock_.now();
+        // 标记已收到有效命令（来自IPC）
+        it->second.has_valid_command = true;
+        // 新命令到达时，重置超时触发标志
+        it->second.timeout_triggered = false;
         RCLCPP_INFO(node_->get_logger(), "[%s] send_velocity: updated last_cmd_time", mapping.c_str());
     }
 
@@ -289,7 +316,9 @@ void JointVelocityController::command_queue_consumer_thread() {
     arm_controller::CommandIPC cmd;
 
     while (consumer_running_) {
-        if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "JointVelocity")) continue;
+        if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "JointVelocity")) {
+            continue;
+        }
 
         std::string mode = cmd.get_mode();
         std::string mapping = cmd.get_mapping();
@@ -299,39 +328,57 @@ void JointVelocityController::command_queue_consumer_thread() {
             "[JointVelocity IPC] Received command: mapping=%s, mode=%s, id=%s",
             mapping.c_str(), mode.c_str(), cmd_id.c_str());
 
-        std::lock_guard<std::mutex> execution_lock(arm_controller::CommandQueueIPC::getMappingExecutionMutex(mapping));
+        std::lock_guard<std::mutex> execution_lock(
+            arm_controller::CommandQueueIPC::getMappingExecutionMutex(mapping));
 
         auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
 
-        // ⭐ 只在第一次时调用 start()，检查timer是否存在而不是is_active()
-        bool timer_exists = false;
+        // ⭐ Double-Checked Locking：确保 start() 只调用一次
+        bool need_start = false;
         {
             std::lock_guard<std::mutex> lock(cmd_mutex_);
-            auto it = mapping_states_.find(mapping);
-            timer_exists = (it != mapping_states_.end() && it->second.control_timer);
+            // 第一次检查
+            need_start = (started_mappings_.find(mapping) == started_mappings_.end());
+            
+            if (need_start) {
+                // ⭐ 立即标记为已启动，防止其他线程再次调用 start()
+                started_mappings_.insert(mapping);
+            }
         }
-        RCLCPP_INFO(node_->get_logger(), "[%s] DEBUG consumer: timer_exists=%s before start check",
-                    mapping.c_str(), timer_exists ? "true" : "false");
+        // 现在已经在锁内标记，其他线程看到的 need_start 会是 false
 
-        if (!timer_exists) {
+        RCLCPP_INFO(node_->get_logger(), "[%s] DEBUG consumer: need_start=%s",
+                    mapping.c_str(), need_start ? "true" : "false");
+
+        if (need_start) {
             RCLCPP_INFO(node_->get_logger(), "[%s] IPC: calling start()", mapping.c_str());
             try {
                 start(mapping);
                 RCLCPP_INFO(node_->get_logger(), "[%s] IPC: start() succeeded", mapping.c_str());
-            } catch (...) {
-                RCLCPP_WARN(node_->get_logger(), "[%s] IPC: start() failed", mapping.c_str());
+            } catch (const std::exception& e) {
+                RCLCPP_WARN(node_->get_logger(), "[%s] IPC: start() failed - %s", 
+                           mapping.c_str(), e.what());
+                
+                // ⭐ 失败时要移除标记，下次可以重试
+                {
+                    std::lock_guard<std::mutex> lock(cmd_mutex_);
+                    started_mappings_.erase(mapping);
+                }
                 continue;
             }
         }
 
+        // ⭐ send_velocity 总是调用
         auto params = cmd.get_parameters();
-        RCLCPP_INFO(node_->get_logger(), "[%s] IPC: calling send_velocity with %zu params", mapping.c_str(), params.size());
+        RCLCPP_INFO(node_->get_logger(), "[%s] IPC: calling send_velocity with %zu params", 
+                    mapping.c_str(), params.size());
         bool success = send_velocity(mapping, params);
-        RCLCPP_INFO(node_->get_logger(), "[%s] IPC: send_velocity returned %s", mapping.c_str(), success ? "true" : "false");
+        RCLCPP_INFO(node_->get_logger(), "[%s] IPC: send_velocity returned %s", 
+                    mapping.c_str(), success ? "true" : "false");
 
         if (state_mgr) {
             state_mgr->setExecutionState(success ? arm_controller::ipc::ExecutionState::SUCCESS
-                                                : arm_controller::ipc::ExecutionState::FAILED);
+                                                  : arm_controller::ipc::ExecutionState::FAILED);
             state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::IDLE);
 
             arm_controller::ipc::ExecutorControllerState executor_state;

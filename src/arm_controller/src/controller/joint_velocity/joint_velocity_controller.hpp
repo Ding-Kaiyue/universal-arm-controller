@@ -43,6 +43,8 @@ private:
         rclcpp::TimerBase::SharedPtr control_timer;
         std::vector<double> last_cmd_velocity;        // 最新的速度命令
         std::chrono::steady_clock::time_point last_cmd_time;  // 最后一次收到命令的时间
+        bool has_valid_command = false;               // 是否收到过有效命令
+        bool timeout_triggered = false;               // 超时触发状态，用于去重
     };
     std::map<std::string, MappingControlState> mapping_states_;
     std::set<std::string> started_mappings_;  // ⭐ 追踪已启动的映射，避免重复调用 start()
