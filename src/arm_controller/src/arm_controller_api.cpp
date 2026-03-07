@@ -7,6 +7,10 @@ bool IPCLifecycle::initialize(int argc, char** argv) {
     return ipc::IPCContext::getInstance().initialize(argc, argv);
 }
 
+bool IPCLifecycle::initializeAsConsumer(int argc, char** argv) {
+    return ipc::IPCContext::getInstance().initializeAsConsumer(argc, argv);
+}
+
 void IPCLifecycle::shutdown() {
     ipc::IPCContext::getInstance().shutdown();
 }

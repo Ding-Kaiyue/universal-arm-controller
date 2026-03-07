@@ -6,11 +6,57 @@
 #include <rclcpp/rclcpp.hpp>
 #include <any>
 #include <map>
+#include <array>
+#include <atomic>
+#include <mutex>
+#include <cstddef>
+
+// ====================== Lock-free SPSC Queue ======================
+// Single Producer, Single Consumer Queue (Lock-free)
+// Thread-safe for one producer and one consumer thread
+template<typename T, size_t Size>
+class SPSCQueue {
+public:
+    bool push(const T& item) {
+        size_t head = head_.load(std::memory_order_relaxed);
+        size_t next = (head + 1) % Size;
+        if (next == tail_.load(std::memory_order_acquire)) {
+            return false;  // Queue full
+        }
+        buffer_[head] = item;
+        head_.store(next, std::memory_order_release);
+        return true;
+    }
+
+    bool pop(T& item) {
+        size_t tail = tail_.load(std::memory_order_relaxed);
+        if (tail == head_.load(std::memory_order_acquire)) {
+            return false;  // Queue empty
+        }
+        item = buffer_[tail];
+        tail_.store((tail + 1) % Size, std::memory_order_release);
+        return true;
+    }
+
+private:
+    std::array<T, Size> buffer_;
+    std::atomic<size_t> head_{0};
+    std::atomic<size_t> tail_{0};
+};
 
 class VelocityControllerBase : public ModeControllerBase {
 public:
     explicit VelocityControllerBase(std::string mode) : ModeControllerBase(mode) {}
     virtual ~VelocityControllerBase() = default;
+
+    // ✅ hook 请求回调 - 由 ControllerManager 注册
+    using HookRequestCallback = std::function<void(const std::string&, const std::string&)>;  // mapping, target_mode
+    void set_hook_request_callback(HookRequestCallback cb) {
+        hook_request_callback_ = cb;
+    }
+
+protected:
+    HookRequestCallback hook_request_callback_;  // ✅ 派生类可访问
 };
 
 template<typename T>
@@ -40,13 +86,18 @@ public:
         }
 
         // 创建订阅
-        subscriptions_[mapping] = node_->create_subscription<T>(
+        auto subscription = node_->create_subscription<T>(
             input_topic, rclcpp::QoS(10).reliable(),
             [this, mapping](const typename T::SharedPtr msg) {
                 if (!is_active(mapping)) return;
                 velocity_callback(mapping, msg);
             }
         );
+
+        {
+            std::lock_guard<std::mutex> lock(subscriptions_mutex_);
+            subscriptions_[mapping] = subscription;
+        }
 
         RCLCPP_INFO(node_->get_logger(), "[%s] Subscribed to topic: %s (mapping: %s)",
                    get_mode().c_str(), input_topic.c_str(), mapping.c_str());
@@ -59,22 +110,32 @@ public:
     virtual bool send_velocity(const std::string& mapping, const std::vector<double>& velocity) = 0;
 
     virtual void command_queue_consumer_thread() = 0;
-    
-    // 速度控制器通常需要钩子状态来安全停止
-    std::unordered_map<std::string, bool> needs_hook_state() const override { return {}; }
+
+    // ✅ 速度控制器需要钩子状态来安全停止 - 返回所有 active mappings
+    std::unordered_map<std::string, bool> needs_hook_state() const override {
+        std::unordered_map<std::string, bool> result;
+        std::lock_guard<std::mutex> lock(active_mappings_mutex_);
+        for (const auto& [mapping, is_active] : active_mappings_) {
+            if (is_active) {
+                result[mapping] = true;
+            }
+        }
+        return result;
+    }
 
 protected:
     rclcpp::Node::SharedPtr node_;
+    mutable std::mutex subscriptions_mutex_;  // ✅ 保护 subscriptions_ 的并发访问
     std::map<std::string, typename rclcpp::Subscription<T>::SharedPtr> subscriptions_;
 
     // 清理指定 mapping 的订阅 - 在 stop() 时调用
     void cleanup_subscriptions(const std::string& mapping) {
+        std::lock_guard<std::mutex> lock(subscriptions_mutex_);
         auto it = subscriptions_.find(mapping);
         if (it != subscriptions_.end()) {
             it->second.reset();
             subscriptions_.erase(it);
-            RCLCPP_INFO(node_->get_logger(), "[%s] Cleaned up subscription for mapping: %s",
-                       get_mode().c_str(), mapping.c_str());
+            // ⚠️ 不能在stop()中调用RCLCPP_*，node可能已销毁
         }
     }
 

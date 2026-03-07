@@ -9,8 +9,11 @@ namespace arm_controller {
 // ============================================================================
 class IPCLifecycle {
 public:
-    // 初始化 IPC 系统
+    // Producer 初始化（只能 attach 到现有共享内存）
     static bool initialize(int argc = 0, char** argv = nullptr);
+
+    // ✅ NEW: Consumer 初始化（有权创建和清理共享内存）
+    static bool initializeAsConsumer(int argc = 0, char** argv = nullptr);
 
     // 关闭 IPC 系统
     static void shutdown();

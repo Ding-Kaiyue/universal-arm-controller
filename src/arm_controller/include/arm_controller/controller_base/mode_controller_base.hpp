@@ -4,6 +4,7 @@
 #include <any>
 #include <string>
 #include <unordered_map>
+#include <mutex>
 
 
 class ModeControllerBase {
@@ -16,16 +17,19 @@ public:
 
     virtual void start(const std::string& mapping = "") {
         std::string normalized = normalize_mapping(mapping);
+        std::lock_guard<std::mutex> lock(active_mappings_mutex_);
         active_mappings_[normalized] = true;
     }
     virtual bool stop(const std::string& mapping = "") {
         std::string normalized = normalize_mapping(mapping);
+        std::lock_guard<std::mutex> lock(active_mappings_mutex_);
         active_mappings_[normalized] = false;
         return !active_mappings_[normalized];
     }
 
     bool is_active(const std::string& mapping = "") const {
         std::string normalized = normalize_mapping(mapping);
+        std::lock_guard<std::mutex> lock(active_mappings_mutex_);
         auto it = active_mappings_.find(normalized);
         return (it != active_mappings_.end()) ? it->second : false;
     }
@@ -43,6 +47,7 @@ public:
     
 protected:
     // 记录每个 mapping 的活跃状态: key=mapping名称, value=是否活跃
+    mutable std::mutex active_mappings_mutex_;  // ✅ 保护 active_mappings_ 的并发访问
     std::unordered_map<std::string, bool> active_mappings_;
 
 private:

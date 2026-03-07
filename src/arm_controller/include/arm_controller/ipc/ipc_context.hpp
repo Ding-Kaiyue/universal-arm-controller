@@ -27,8 +27,11 @@ public:
     IPCContext(const IPCContext&) = delete;
     IPCContext& operator=(const IPCContext&) = delete;
 
-    // 初始化IPC基础设施
+    // 初始化IPC基础设施（Producer 模式：只 attach）
     bool initialize(int argc = 0, char** argv = nullptr);
+
+    // Consumer 专用初始化（有权创建和清理共享内存）
+    bool initializeAsConsumer(int argc = 0, char** argv = nullptr);
 
     // 关闭IPC基础设施
     void shutdown();
@@ -69,6 +72,7 @@ private:
     // 初始化状态
     bool initialized_ = false;
     std::string last_error_;
+    ipc::Role role_ = ipc::Role::Participant;  // 记录当前角色：只有 Owner 能清理 SHM
 };
 
 }  // namespace arm_controller::ipc

@@ -68,8 +68,18 @@ public:
     
     virtual void command_queue_consumer_thread() = 0;
     
-    // 轨迹控制器通常需要钩子状态来安全停止
-    std::unordered_map<std::string, bool> needs_hook_state() const override { return {}; }
+    // ✅ 轨迹控制器需要钩子状态来安全停止 - 返回所有活跃的 mapping
+    // 如果轨迹正在执行并被要求停止，应该进入 hook 状态确保安全停止
+    std::unordered_map<std::string, bool> needs_hook_state() const override {
+        std::unordered_map<std::string, bool> result;
+        std::lock_guard<std::mutex> lock(active_mappings_mutex_);
+        for (const auto& [mapping, is_active] : active_mappings_) {
+            if (is_active) {
+                result[mapping] = true;
+            }
+        }
+        return result;
+    }
 
 protected:
     rclcpp::Node::SharedPtr node_;

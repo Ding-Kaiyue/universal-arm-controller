@@ -28,11 +28,11 @@ controllers:
       name: /controller_api/joint_velocity_action/{mapping}
       type: sensor_msgs/msg/JointState
 
-  # - key: CartesianVelocity
-  #   class: CartesianVelocityController
-  #   input_topic:
-  #     name: /controller_api/cartesian_velocity_action/{mapping}
-  #     type: geometry_msgs/msg/Twist
+  - key: CartesianVelocity
+    class: CartesianVelocityController
+    input_topic:
+      name: /controller_api/cartesian_velocity_action/{mapping}
+      type: geometry_msgs/msg/Twist
 
   # - key: Move2Initial
   #   class: Move2InitialController

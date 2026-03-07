@@ -122,8 +122,9 @@ add_library(arm_controller_lib
   src/controller/joint_velocity/joint_velocity_ipc_interface.cpp
   src/controller/hold_state/hold_state_controller.cpp
   # 其他控制器暂时屏蔽用于测试
-  # src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
-  # src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
+  src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
+  src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
+  src/controller/cartesian_velocity/cartesian_velocity_ipc_interface.cpp
   # src/controller/move2initial/move2initial_controller.cpp
   # src/controller/move2initial/move2initial_interface.cpp
   # src/controller/move2start/move2start_controller.cpp
@@ -218,6 +219,24 @@ ament_target_dependencies(universial_arm_controller_node
 
 install(TARGETS
   universial_arm_controller_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# === Build HTTP Server ===
+add_executable(arm_controller_http_server
+  src/http_server.cpp
+)
+
+target_link_libraries(arm_controller_http_server
+  arm_controller_lib
+)
+
+ament_target_dependencies(arm_controller_http_server
+  rclcpp
+  std_msgs
+)
+
+install(TARGETS arm_controller_http_server
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -36,10 +36,6 @@ bool ControllerStateManager::isInHookState() const {
 }
 
 void ControllerStateManager::setExecutionState(ExecutionState state) {
-    {
-        std::lock_guard<std::mutex> lock(state_mutex_);
-        execution_state_ = state;
-    }
     std::string state_str;
     switch (state) {
         case ExecutionState::IDLE: state_str = "IDLE"; break;
@@ -49,6 +45,11 @@ void ControllerStateManager::setExecutionState(ExecutionState state) {
         case ExecutionState::FAILED: state_str = "FAILED"; break;
         default: state_str = "UNKNOWN"; break;
     }
+
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        execution_state_ = state;
+    }
 }
 
 void ControllerStateManager::initializeCurrentMode(const std::string& mode) {
@@ -56,6 +57,7 @@ void ControllerStateManager::initializeCurrentMode(const std::string& mode) {
     current_mode_ = mode;
     target_mode_ = mode;
     execution_state_ = ExecutionState::IDLE;
+    in_hook_state_ = false;  // ✅ 清除 hook_state 标志
 }
 
 bool ControllerStateManager::need_stop_before_transition_(

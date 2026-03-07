@@ -1,0 +1,67 @@
+{
+  "tools": [
+    {
+      "name": "movej",
+      "description": "控制机械臂执行 MoveJ 运动。参数为关节位置（弧度）和映射名称。",
+      "type": "http",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/movej",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "positions": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "关节目标位置（弧度），例如 [-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0]"
+          },
+          "mapping": {
+            "type": "string",
+            "description": "机械臂映射",
+            "enum": ["left_arm", "right_arm"],
+            "default": "left_arm"
+          }
+        },
+        "required": ["positions", "mapping"]
+      },
+      "examples": [
+        {
+          "name": "左臂移动到回家位置",
+          "input": {
+            "positions": [-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0],
+            "mapping": "left_arm"
+          }
+        },
+        {
+          "name": "右臂移动到回家位置",
+          "input": {
+            "positions": [-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0],
+            "mapping": "right_arm"
+          }
+        },
+        {
+          "name": "左臂移动到零位置",
+          "input": {
+            "positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "mapping": "left_arm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "check_arm_server",
+      "description": "检查机械臂 HTTP 服务器是否在线",
+      "type": "http",
+      "method": "GET",
+      "url": "http://127.0.0.1:8080/health",
+      "examples": [
+        {
+          "name": "检查服务器状态",
+          "input": {}
+        }
+      ]
+    }
+  ]
+}

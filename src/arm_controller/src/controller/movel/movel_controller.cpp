@@ -292,7 +292,7 @@ void MoveLController::command_queue_consumer_thread() {
 
     while (consumer_running_) {
         // 使用带过滤的 pop，只获取 MoveL 命令
-        if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "MoveL")) {
+        if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "MoveL", 10)) {
             continue;
         }
 
@@ -305,21 +305,23 @@ void MoveLController::command_queue_consumer_thread() {
 
         auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
 
-        // 如果控制器还未激活，先启动该 mapping 的控制器
-        if (!is_active(mapping)) {
-            RCLCPP_INFO(node_->get_logger(), "[%s] Controller not active, starting MoveL controller", mapping.c_str());
-            try {
-                start(mapping);
-            } catch (const std::exception& e) {
-                RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to start MoveL controller: %s", mapping.c_str(), e.what());
-                if (state_mgr) {
-                    state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::FAILED);
-                }
-                continue;
-            }
-        }
-
         try {
+            // ✅ 检查和处理 IPC 侧的模式过渡（包括 hook 检测）
+            if (state_mgr) {
+                bool transition_ok = state_mgr->transitionToMode("MoveL");
+                if (!transition_ok) {
+                    // 需要进入 hook 状态来安全切换
+                    if (state_mgr->isInHookState()) {
+                        RCLCPP_DEBUG(node_->get_logger(), "[%s] 🛑 MoveL in hook state - requesting HoldState transition",
+                                     mapping.c_str());
+                        // 暂停这条命令的处理，让 hook 完成
+                        // 通知其他 consumers 继续处理
+                        arm_controller::CommandQueueIPC::getInstance().notifyConsumers();
+                        continue;
+                    }
+                }
+            }
+
             // 获取状态管理器并更新为执行中
             if (state_mgr) {
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::EXECUTING);
@@ -366,7 +368,7 @@ void MoveLController::command_queue_consumer_thread() {
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::IDLE);
             }
 
-            
+
         }
         // 通知其他 consumers
         arm_controller::CommandQueueIPC::getInstance().notifyConsumers();

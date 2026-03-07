@@ -11,6 +11,14 @@
 
 namespace arm_controller::ipc {
 
+// ============================================================================
+// Role 枚举：定义共享内存所有权角色
+// ============================================================================
+enum class Role {
+    Owner,        // 拥有者：只有 Consumer（main.cpp）可以 create/remove
+    Participant   // 参与者：Producer（example）只能 attach 到现有 SHM
+};
+
 using ManagedShmAllocator =
     boost::interprocess::allocator<TrajectoryCommand,
         boost::interprocess::managed_shared_memory::segment_manager>;
@@ -35,10 +43,12 @@ public:
     SharedMemoryManager() = default;
     ~SharedMemoryManager() = default;
 
-    // 初始化共享内存（管理进程调用）
-    bool initialize();
+    // ✅ 初始化共享内存（根据 Role 决定权限）
+    // Owner：有权 remove/create
+    // Participant：只能 open，不能 create
+    bool initialize(Role role);
 
-    // 打开共享内存（普通进程调用）
+    // 打开现有共享内存（所有角色都可以）
     bool open();
 
     // 获取队列对象
@@ -53,7 +63,7 @@ public:
     // 获取条件变量
     boost::interprocess::named_condition* getCondition();
 
-    // 清理共享内存（管理进程调用）
+    // ✅ 清理共享内存（仅 Owner 可以调用）
     static void cleanup();
 
     // 验证共享内存有效性
@@ -69,6 +79,7 @@ private:
     CommandDeque* queue_ = nullptr;
     ShmHeader* header_ = nullptr;
     bool initialized_ = false;
+    Role role_ = Role::Participant;  // 记录初始化角色
 };
 
 }  // namespace arm_controller::ipc

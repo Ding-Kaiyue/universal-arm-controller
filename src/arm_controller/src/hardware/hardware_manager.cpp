@@ -350,6 +350,26 @@ std::vector<double> HardwareManager::get_current_joint_efforts(const std::string
     return std::vector<double>{};
 }
 
+// ✅ Lock-free 版本：用于实时计算线程，避免竞争 joint_state_mutex_
+std::vector<double> HardwareManager::get_current_joint_positions_lockfree(const std::string& mapping) const {
+    auto it = joint_positions_cache_.find(mapping);
+    if (it == joint_positions_cache_.end() || it->second.empty()) {
+        RCLCPP_WARN(node_->get_logger(),
+                    "[%s] Joint position cache not found, returning empty vector",
+                    mapping.c_str());
+        return std::vector<double>{};
+    }
+
+    std::vector<double> result;
+    result.reserve(it->second.size());
+    for (const auto& atomic_ptr : it->second) {
+        if (atomic_ptr) {
+            result.push_back(atomic_ptr->load(std::memory_order_acquire));
+        }
+    }
+    return result;
+}
+
 bool HardwareManager::send_hold_state_command(const std::string& mapping,
                                                   const std::vector<double>& positions) {
     if (!hardware_driver_) {
@@ -415,6 +435,9 @@ void HardwareManager::on_motor_status_update(const std::string& interface,
         check_safety_limits(interface, motor_id, status);
     }
 
+    // ✅ CRITICAL FIX: 在锁外发布！
+    // publish_joint_state() 会尝试获取 joint_state_mutex_，
+    // 而 update_joint_state() 已经释放了锁，所以这里是安全的
     publish_joint_state();
 }
 
@@ -456,10 +479,19 @@ void HardwareManager::update_joint_state(const std::string& interface, uint32_t 
     joint_state.header.stamp = node_->now();
 
     // 转换单位：度数 → 弧度 (硬件返回度数，ROS需要弧度)
-    joint_state.position[local_index] = status.position * M_PI / 180.0;
+    double position_rad = status.position * M_PI / 180.0;
+    joint_state.position[local_index] = position_rad;
     joint_state.velocity[local_index] = status.velocity * M_PI / 180.0;
 
     joint_state.effort[local_index] = status.effort;
+
+    // ✅ CRITICAL FIX: 同时更新 lock-free 缓存（供计算线程读取，避免竞争）
+    auto cache_it = joint_positions_cache_.find(mapping);
+    if (cache_it != joint_positions_cache_.end() && local_index < static_cast<int>(cache_it->second.size())) {
+        if (cache_it->second[local_index]) {
+            cache_it->second[local_index]->store(position_rad, std::memory_order_release);
+        }
+    }
 
     // 记录最新温度用于调试
     std::string motor_key = mapping + "_motor" + std::to_string(motor_id);
@@ -476,31 +508,34 @@ void HardwareManager::update_joint_state(const std::string& interface, uint32_t 
 void HardwareManager::publish_joint_state() {
     if (!joint_state_pub_) return;
 
-    std::lock_guard<std::mutex> lock(joint_state_mutex_);
-
-    // 合并所有 mapping 的 joint_state 到一条消息中
+    // ✅ CRITICAL FIX: 分离数据复制和发布操作
+    // 1. 在锁内复制数据（快速操作）
     sensor_msgs::msg::JointState combined_state;
-    combined_state.header.stamp = node_->now();
-    combined_state.header.frame_id = "world";  // 全局坐标系
+    {
+        std::lock_guard<std::mutex> lock(joint_state_mutex_);
 
-    // 遍历所有 mapping，合并关节名称和状态
-    for (const auto& [mapping, joint_state] : mapping_joint_states_) {
-        // 添加该mapping的所有关节名称、位置、速度、力矩
-        for (size_t i = 0; i < joint_state.name.size(); ++i) {
-            combined_state.name.push_back(joint_state.name[i]);
-            if (i < joint_state.position.size()) {
-                combined_state.position.push_back(joint_state.position[i]);
-            }
-            if (i < joint_state.velocity.size()) {
-                combined_state.velocity.push_back(joint_state.velocity[i]);
-            }
-            if (i < joint_state.effort.size()) {
-                combined_state.effort.push_back(joint_state.effort[i]);
+        combined_state.header.stamp = node_->now();
+        combined_state.header.frame_id = "world";  // 全局坐标系
+
+        // 遍历所有 mapping，合并关节名称和状态
+        for (const auto& [mapping, joint_state] : mapping_joint_states_) {
+            // 添加该mapping的所有关节名称、位置、速度、力矩
+            for (size_t i = 0; i < joint_state.name.size(); ++i) {
+                combined_state.name.push_back(joint_state.name[i]);
+                if (i < joint_state.position.size()) {
+                    combined_state.position.push_back(joint_state.position[i]);
+                }
+                if (i < joint_state.velocity.size()) {
+                    combined_state.velocity.push_back(joint_state.velocity[i]);
+                }
+                if (i < joint_state.effort.size()) {
+                    combined_state.effort.push_back(joint_state.effort[i]);
+                }
             }
         }
-    }
+    }  // ✅ 锁释放
 
-    // 发布合并后的 JointState
+    // 2. 在锁外发布（可能阻塞，但不持有关键锁）
     if (!combined_state.name.empty()) {
         joint_state_pub_->publish(combined_state);
     }
@@ -756,6 +791,17 @@ void HardwareManager::initialize_joint_state(const std::string& mapping_name) {
     joint_state.effort.resize(joint_names_config_[mapping_name].size(), 0.0);
 
     mapping_joint_states_[mapping_name] = joint_state;
+
+    // ✅ 同时初始化 lock-free 缓存（用于计算线程，避免竞争）
+    {
+        std::lock_guard<std::mutex> lock(cache_init_mutex_);
+        std::vector<std::shared_ptr<std::atomic<double>>> cache;
+        // 为每个关节位置创建一个独立的 atomic<double>
+        for (double pos : joint_state.position) {
+            cache.push_back(std::make_shared<std::atomic<double>>(pos));
+        }
+        joint_positions_cache_[mapping_name] = cache;
+    }
 }
 
 const std::map<std::string, JointLimits>& HardwareManager::get_joint_limits() const {

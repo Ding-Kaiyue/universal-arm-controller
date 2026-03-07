@@ -76,6 +76,7 @@ private:
     std::map<std::string, std::string> mapping_to_mode_;  // 每个 mapping 的当前模式
     std::unordered_map<std::string, std::string> mapping_target_mode_;  // 每个 mapping 的目标模式
     std::unordered_map<std::string, bool> mapping_in_hook_state_;  // 每个 mapping 的钩子状态
+    mutable std::mutex mapping_state_mutex_;  // ✅ 保护以上三个 map 的并发访问
 
     // 配置和缓存
     YAML::Node yaml_config_;

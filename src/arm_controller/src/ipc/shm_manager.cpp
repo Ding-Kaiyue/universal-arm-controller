@@ -4,48 +4,62 @@
 
 namespace arm_controller::ipc {
 
-bool SharedMemoryManager::initialize() {
+bool SharedMemoryManager::initialize(Role role) {
+    role_ = role;
     try {
-        // 清理旧的共享内存（如果存在）
-        try {
-            boost::interprocess::shared_memory_object::remove(SHM_NAME);
-        } catch (...) {}
+        // ✅ 仅 Owner 允许清理旧的共享内存
+        if (role == Role::Owner) {
+            // ✅ CRITICAL: 清理所有可能的残留 IPC 资源
+            // 防止 named_mutex/condition 不一致导致的问题
+            try {
+                boost::interprocess::shared_memory_object::remove(SHM_NAME);
+                boost::interprocess::named_mutex::remove(MUTEX_NAME);
+                boost::interprocess::named_condition::remove(COND_NAME);
+            } catch (...) {
+                // 忽略清理过程中的错误，资源可能不存在
+            }
 
-        // 创建新的共享内存段
-        segment_ = std::make_shared<boost::interprocess::managed_shared_memory>(
-            boost::interprocess::create_only,
-            SHM_NAME,
-            SHM_SIZE);
+            // 创建新的共享内存段
+            segment_ = std::make_shared<boost::interprocess::managed_shared_memory>(
+                boost::interprocess::create_only,
+                SHM_NAME,
+                SHM_SIZE);
 
-        // 初始化 header
-        header_ = segment_->construct<ShmHeader>(HEADER_NAME)();
-        if (!header_) {
-            std::cerr << "Failed to construct ShmHeader" << std::endl;
+            // 初始化 header
+            header_ = segment_->construct<ShmHeader>(HEADER_NAME)();
+            if (!header_) {
+                std::cerr << "Failed to construct ShmHeader" << std::endl;
+                return false;
+            }
+            header_->version = IPC_VERSION;
+            header_->segment_size = SHM_SIZE;
+
+            // 创建命令队列
+            const ManagedShmAllocator alloc(segment_->get_segment_manager());
+            queue_ = segment_->construct<CommandDeque>(QUEUE_NAME)(alloc);
+            if (!queue_) {
+                std::cerr << "Failed to construct CommandDeque" << std::endl;
+                return false;
+            }
+
+            // 创建互斥量和条件变量
+            mutex_ = std::make_shared<boost::interprocess::named_mutex>(
+                boost::interprocess::open_or_create,
+                MUTEX_NAME);
+
+            condition_ = std::make_shared<boost::interprocess::named_condition>(
+                boost::interprocess::open_or_create,
+                COND_NAME);
+
+            initialized_ = true;
+            std::cout << "✅ SharedMemoryManager initialized as Owner (create permission)" << std::endl;
+            return true;
+        } else {
+            // ❌ Participant 不允许调用 initialize
+            std::cerr << "❌ Participant role cannot call initialize()" << std::endl;
+            std::cerr << "   Participant should only use open() method" << std::endl;
             return false;
         }
-        header_->version = IPC_VERSION;
-        header_->segment_size = SHM_SIZE;
-
-        // 创建命令队列
-        const ManagedShmAllocator alloc(segment_->get_segment_manager());
-        queue_ = segment_->construct<CommandDeque>(QUEUE_NAME)(alloc);
-        if (!queue_) {
-            std::cerr << "Failed to construct CommandDeque" << std::endl;
-            return false;
-        }
-
-        // 创建互斥量和条件变量
-        mutex_ = std::make_shared<boost::interprocess::named_mutex>(
-            boost::interprocess::open_or_create,
-            MUTEX_NAME);
-
-        condition_ = std::make_shared<boost::interprocess::named_condition>(
-            boost::interprocess::open_or_create,
-            COND_NAME);
-
-        initialized_ = true;
-        std::cout << "✅ SharedMemoryManager initialized successfully" << std::endl;
-        return true;
 
     } catch (const std::exception& e) {
         std::cerr << "❌ SharedMemoryManager::initialize() failed: " << e.what() << std::endl;
@@ -93,7 +107,8 @@ bool SharedMemoryManager::open() {
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "❌ SharedMemoryManager::open() failed: " << e.what() << std::endl;
+        // ✅ 不打印错误日志，因为 open() 失败时 SHM 可能不存在（第一次启动）
+        // 调用者会根据返回值决定是否创建新 SHM
         return false;
     }
 }

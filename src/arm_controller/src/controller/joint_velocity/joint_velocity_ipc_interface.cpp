@@ -7,6 +7,7 @@ namespace arm_controller::joint_velocity {
 bool JointVelocityIPCInterface::execute(const std::vector<double>& joint_velocities,
                                         const std::string& mapping) {
     if (!ensureInitialized()) {
+        setLastError("IPC not initialized");
         return false;
     }
 
@@ -28,8 +29,8 @@ bool JointVelocityIPCInterface::execute(const std::vector<double>& joint_velocit
         return false;
     }
 
-    // 转移到 JointVelocity 模式
-    state_mgr->transitionToMode("JointVelocity");
+    // 直接初始化状态（清除 hook_state，设置当前模式）
+    state_mgr->initializeCurrentMode("JointVelocity");
     // 设置执行状态为待执行
     state_mgr->setExecutionState(ipc::ExecutionState::PENDING);
 

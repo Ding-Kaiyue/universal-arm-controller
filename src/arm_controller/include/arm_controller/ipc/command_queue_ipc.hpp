@@ -2,6 +2,7 @@
 #define __COMMAND_QUEUE_IPC_HPP__
 
 #include "arm_controller/ipc/shm_manager.hpp"
+#include "arm_controller/ipc/ipc_context.hpp"
 #include "arm_controller/ipc/ipc_types.hpp"
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <string>
@@ -10,6 +11,9 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <atomic>
+#include <thread>
+#include <chrono>
 
 namespace arm_controller {
 
@@ -72,21 +76,40 @@ public:
     }
 
     bool initialize() {
+        shutdown_.store(false, std::memory_order_release);
+        return true;
+    }
+
+    void shutdown() {
+        shutdown_.store(true, std::memory_order_release);
+
         try {
-            shm_manager_ = std::make_shared<ipc::SharedMemoryManager>();
-            if (!shm_manager_->initialize()) {
-                std::cerr << "CommandQueueIPC::initialize() failed to create shared memory" << std::endl;
-                return false;
+            if (shm_manager_ && shm_manager_->isValid()) {
+                auto cond = shm_manager_->getCondition();
+                auto mutex = shm_manager_->getMutex();
+                if (cond && mutex) {
+                    // ✅ 改用 try_to_lock 避免在 shutdown 时死锁
+                    boost::interprocess::scoped_lock<boost::interprocess::named_mutex>
+                        lock(*mutex, boost::interprocess::try_to_lock);
+                    if (lock) {
+                        cond->notify_all();
+                    }
+                }
             }
-            return true;
         } catch (const std::exception& e) {
-            std::cerr << "CommandQueueIPC::initialize() failed: " << e.what() << std::endl;
-            return false;
+            std::cerr << "CommandQueueIPC::shutdown() failed: " << e.what() << std::endl;
         }
+
+        // ✅ CRITICAL: 清理本地的 shm_manager_ 引用
+        // 这是 IPCContext 清理完全后的最后一步，确保所有 SHM 资源被释放
+        shm_manager_.reset();
     }
 
     bool open() {
         try {
+            // ✅ 重置 shutdown 标志，允许重新打开
+            shutdown_.store(false, std::memory_order_release);
+
             shm_manager_ = std::make_shared<ipc::SharedMemoryManager>();
             if (!shm_manager_->open()) {
                 std::cerr << "CommandQueueIPC::open() failed to open shared memory" << std::endl;
@@ -124,7 +147,20 @@ public:
             new_cmd.set_parameters(cmd.get_parameters());
 
             boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
-            queue->push_back(new_cmd);
+
+            // ✅ CRITICAL: 在持有锁后再次检查 SHM 有效性
+            if (!shm_manager_ || !shm_manager_->isValid()) {
+                std::cerr << "CommandQueueIPC::push() SHM closed during push" << std::endl;
+                return;
+            }
+
+            auto valid_queue = shm_manager_->getQueue();
+            if (!valid_queue) {
+                std::cerr << "CommandQueueIPC::push() queue became invalid" << std::endl;
+                return;
+            }
+
+            valid_queue->push_back(new_cmd);
             cond->notify_all();  // 唤醒所有等待的consumer，让它们竞争取queue头部的命令
 
         } catch (const std::exception& e) {
@@ -134,42 +170,83 @@ public:
 
     bool pop(CommandIPC& cmd, int timeout_ms = 0) {
         try {
-            if (!shm_manager_ || !shm_manager_->isValid()) {
-                if (!open()) {
+            // ✅ 在循环外进行初始检查，但在循环内每次都重新验证
+            auto start_time = std::chrono::steady_clock::now();
+
+            while (true) {
+                // ✅ CRITICAL: 在循环的每次迭代中都重新检查 SHM 有效性
+                if (!shm_manager_ || !shm_manager_->isValid()) {
+                    return false;  // SHM 已关闭
+                }
+
+                auto current_mutex = shm_manager_->getMutex();
+                auto current_queue = shm_manager_->getQueue();
+                auto current_cond = shm_manager_->getCondition();
+
+                if (!current_queue || !current_mutex || !current_cond) {
+                    return false;  // queue、mutex 或 cond 已被销毁
+                }
+
+                boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*current_mutex);
+
+                // ✅ 再次验证（在持有锁后）
+                if (!shm_manager_ || !shm_manager_->isValid()) {
+                    return false;  // SHM 在等待锁的过程中被关闭
+                }
+
+                auto valid_queue = shm_manager_->getQueue();
+                if (!valid_queue || valid_queue->empty()) {
+                    // 队列空，决定是否等待
+                    if (timeout_ms <= 0 && shutdown_.load(std::memory_order_acquire) == false) {
+                        // 无限等待，继续轮询
+                        lock.unlock();
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        continue;
+                    } else if (timeout_ms > 0) {
+                        // 有超时时间
+                        auto deadline = boost::posix_time::microsec_clock::universal_time() +
+                                        boost::posix_time::milliseconds(timeout_ms);
+                        current_cond->timed_wait(lock, deadline);
+                    } else {
+                        // timeout_ms == 0 或 shutdown，直接返回
+                        return false;
+                    }
+                }
+
+                // 再次检查 shutdown 标志
+                if (shutdown_.load(std::memory_order_acquire)) {
                     return false;
                 }
-            }
 
-            auto queue = shm_manager_->getQueue();
-            auto mutex = shm_manager_->getMutex();
-            auto cond = shm_manager_->getCondition();
-
-            if (!queue || !mutex || !cond) {
-                return false;
-            }
-
-            boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
-
-            if (queue->empty()) {
-                if (timeout_ms <= 0) return false;
-
-                auto deadline = boost::posix_time::microsec_clock::universal_time() +
-                    boost::posix_time::milliseconds(timeout_ms);
-                if (!cond->timed_wait(lock, deadline)) {
+                // ✅ 最后再次验证队列有效性
+                if (!shm_manager_ || !shm_manager_->isValid()) {
                     return false;
                 }
-            }
 
-            if (!queue->empty()) {
-                const auto& ipc_cmd = queue->front();
-                cmd.set_mode(ipc_cmd.get_mode());
-                cmd.set_mapping(ipc_cmd.get_mapping());
-                cmd.set_command_id(ipc_cmd.get_command_id());
-                cmd.set_parameters(ipc_cmd.get_parameters());
-                queue->pop_front();
-                return true;
+                auto final_queue = shm_manager_->getQueue();
+                if (final_queue && !final_queue->empty()) {
+                    const auto& ipc_cmd = final_queue->front();
+                    cmd.set_mode(ipc_cmd.get_mode());
+                    cmd.set_mapping(ipc_cmd.get_mapping());
+                    cmd.set_command_id(ipc_cmd.get_command_id());
+                    cmd.set_parameters(ipc_cmd.get_parameters());
+                    final_queue->pop_front();
+                    return true;
+                }
+
+                // 检查是否超时
+                if (timeout_ms > 0) {
+                    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - start_time).count();
+                    if (elapsed >= timeout_ms) {
+                        return false;
+                    }
+                }
+
+                // 短暂睡眠后重试
+                lock.unlock();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
-            return false;
         } catch (const std::exception& e) {
             std::cerr << "CommandQueueIPC::pop() failed: " << e.what() << std::endl;
             return false;
@@ -177,42 +254,65 @@ public:
     }
 
     // 带过滤的 pop 方法：严格按队列顺序分发命令
-    bool popWithFilter(CommandIPC& cmd, const std::string& target_mode) {
+    // timeout_ms: 总超时时间（毫秒）。设置为负数表示无限等待。
+    bool popWithFilter(CommandIPC& cmd, const std::string& target_mode, int timeout_ms = -1) {
         try {
-            if (!shm_manager_ || !shm_manager_->isValid()) {
-                if (!open()) {
-                    return false;
-                }
-            }
-
-            auto queue = shm_manager_->getQueue();
-            auto mutex = shm_manager_->getMutex();
-            auto cond = shm_manager_->getCondition();
-
-            if (!queue || !mutex || !cond) {
-                return false;
-            }
+            auto start_time = std::chrono::steady_clock::now();
+            const int POLL_INTERVAL_MS = 1;
 
             while (true) {
-                boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
-
-                // 如果队列有命令且头部匹配，立即取出
-                if (!queue->empty() && queue->front().get_mode() == target_mode) {
-                    cmd.set_mode(queue->front().get_mode());
-                    cmd.set_mapping(queue->front().get_mapping());
-                    cmd.set_command_id(queue->front().get_command_id());
-                    cmd.set_parameters(queue->front().get_parameters());
-                    queue->pop_front();
-                    return true;
+                // ✅ 频繁检查 shutdown 标志，响应 Ctrl-C
+                if (shutdown_.load(std::memory_order_acquire)) {
+                    return false;
                 }
 
-                // 队列为空或头部不匹配，短暂等待然后重新检查（100ms超时）
-                auto deadline = boost::posix_time::microsec_clock::universal_time() +
-                               boost::posix_time::milliseconds(100);
-                cond->timed_wait(lock, deadline);
-                // 超时或被通知后，回到 while 循环重新检查条件
-            }
+                // ✅ CRITICAL: 在循环的每次迭代中都从 IPCContext 获取 shm_manager
+                // 防止主线程调用 close() 销毁对象后，我们仍在使用悬空指针
+                auto shm_manager = ipc::IPCContext::getInstance().getSharedMemoryManager();
+                if (!shm_manager || !shm_manager->isValid()) {
+                    return false;  // SHM 已关闭，立即返回
+                }
 
+                auto current_mutex = shm_manager->getMutex();
+                if (!current_mutex) {
+                    return false;  // mutex 已被销毁
+                }
+
+                {
+                    // ✅ 改用 try_to_lock 避免死锁：如果无法立即获取锁，就跳过这一轮
+                    boost::interprocess::scoped_lock<boost::interprocess::named_mutex>
+                        lock(*current_mutex, boost::interprocess::try_to_lock);
+
+                    // 只有成功获取锁才处理
+                    if (lock) {
+                        // ✅ CRITICAL: 再次检查 SHM 有效性，防止 close() 导致的竞态
+                        shm_manager = ipc::IPCContext::getInstance().getSharedMemoryManager();
+                        if (shm_manager && shm_manager->isValid()) {
+                            auto valid_queue = shm_manager->getQueue();
+                            if (valid_queue && !valid_queue->empty() && valid_queue->front().get_mode() == target_mode) {
+                                cmd.set_mode(valid_queue->front().get_mode());
+                                cmd.set_mapping(valid_queue->front().get_mapping());
+                                cmd.set_command_id(valid_queue->front().get_command_id());
+                                cmd.set_parameters(valid_queue->front().get_parameters());
+                                valid_queue->pop_front();
+                                return true;
+                            }
+                        }
+                    }
+                }  // ← 立即释放锁（如果成功获取的话）
+
+                // 检查是否超时（仅在 timeout_ms >= 0 时）
+                if (timeout_ms >= 0) {
+                    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - start_time).count();
+                    if (elapsed >= timeout_ms) {
+                        return false;  // 超时，返回 false
+                    }
+                }
+
+                // ✅ 简单的非阻塞睡眠（1ms），支持快速响应 Ctrl-C
+                std::this_thread::sleep_for(std::chrono::milliseconds(POLL_INTERVAL_MS));
+            }
         } catch (const std::exception& e) {
             std::cerr << "CommandQueueIPC::popWithFilter() failed: " << e.what() << std::endl;
             return false;
@@ -285,6 +385,7 @@ private:
     ~CommandQueueIPC() = default;
 
     std::shared_ptr<ipc::SharedMemoryManager> shm_manager_;
+    std::atomic<bool> shutdown_{false};
 };
 
 } // namespace arm_controller

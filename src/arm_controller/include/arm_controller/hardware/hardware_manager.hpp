@@ -74,6 +74,9 @@ public:
     std::vector<double> get_current_joint_positions(const std::string& mapping) const;
     std::vector<double> get_current_joint_velocities(const std::string& mapping) const;
     std::vector<double> get_current_joint_efforts(const std::string& mapping) const;
+
+    // ✅ Lock-free 版本：用于实时计算线程，避免竞争 joint_state_mutex_
+    std::vector<double> get_current_joint_positions_lockfree(const std::string& mapping) const;
     bool send_hold_state_command(const std::string& mapping, const std::vector<double>& positions);
 
     // ============= 重力矩计算接口 =============
@@ -142,6 +145,12 @@ private:
     // ============= 关节状态发布 =============
     mutable std::mutex joint_state_mutex_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
+
+    // ============= Lock-free 关节位置缓存（用于实时读取，避免竞争） =============
+    // 计算线程使用此缓存，避免竞争 joint_state_mutex_
+    // 使用 shared_ptr<atomic<double>> 避免 vector 重新分配问题
+    std::unordered_map<std::string, std::vector<std::shared_ptr<std::atomic<double>>>> joint_positions_cache_;
+    std::mutex cache_init_mutex_;  // 仅用于初始化，不在热路径上
 
     // ============= 配置信息 (按mapping) =============
     std::map<std::string, std::string> mapping_to_interface_;               // mapping -> interface

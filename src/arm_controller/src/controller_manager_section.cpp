@@ -6,14 +6,12 @@
 #include "controller_base/teach_controller_base.hpp"
 #include "controller/controller_registry.hpp"
 #include "controller_interface.hpp"
+#include "ipc/ipc_context.hpp"
 #include <algorithm>
 #include <thread>
 #include <rcl_interfaces/msg/parameter_descriptor.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <yaml-cpp/yaml.h>
-
-// #include "controller/move2start/move2start_controller.hpp"
-// #include "controller/move2initial/move2initial_controller.hpp"
 
 ControllerManagerNode::ControllerManagerNode()
     : Node("controller_manager_node")
@@ -41,7 +39,14 @@ void ControllerManagerNode::post_init() {
     load_motion_planning_parameters();
 
     // 为所有 mapping 初始化默认模式状态
-    auto mappings = hardware_manager_->get_all_mappings();
+    std::vector<std::string> mappings;
+    if (hardware_manager_) {
+        mappings = hardware_manager_->get_all_mappings();
+    } else {
+        // 硬件不可用时，使用默认 mappings 以支持 IPC 测试
+        mappings = {"left_arm", "right_arm"};
+        RCLCPP_INFO(this->get_logger(), "Using default mappings for NO-HARDWARE mode");
+    }
 
     init_commons();
     init_action_event_listener();
@@ -53,13 +58,36 @@ void ControllerManagerNode::post_init() {
         auto it = controller_map_.find(key_pair);
         if (it != controller_map_.end()) {
             it->second->start(mapping);
-            mapping_to_mode_[mapping] = "SystemStart";
+            {
+                std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+                mapping_to_mode_[mapping] = "SystemStart";
+            }
+
+            // ✅ 同步 IPC 侧的状态
+            auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+            if (state_mgr) {
+                state_mgr->initializeCurrentMode("SystemStart");
+            }
         }
     }
 
     // 然后切换到 HoldState 保持当前位置（为每个mapping都启动）
     for (const auto& mapping : mappings) {
         start_working_controller("HoldState", mapping);
+
+        // ✅ 同步初始化 IPC 侧的状态，确保 current_mode 被正确设置
+        auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+        if (state_mgr) {
+            state_mgr->initializeCurrentMode("HoldState");
+            RCLCPP_DEBUG(this->get_logger(), "[%s] ✅ IPC state initialized: current_mode=HoldState", mapping.c_str());
+        }
+    }
+
+    // ✅ Initialize state tracking for IPC - SystemStart mode is already set above
+    {
+        std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+        // At this point, all mappings have been set to "HoldState" by start_working_controller
+        // SystemStart was briefly set, then overwritten with HoldState, which is correct
     }
 }
 
@@ -79,19 +107,19 @@ void ControllerManagerNode::init_hardware() {
     // 初始化硬件管理器
     hardware_manager_ = HardwareManager::getInstance();
     if (!hardware_manager_) {
-        RCLCPP_FATAL(this->get_logger(), "Failed to get HardwareManager instance");
-        rclcpp::shutdown();
+        RCLCPP_WARN(this->get_logger(), "⚠️ Failed to get HardwareManager instance - running in NO-HARDWARE mode");
         return;
     }
 
     // 关键：初始化硬件管理器以启用电机通信
     if (!hardware_manager_->initialize(this->shared_from_this())) {
-        RCLCPP_FATAL(this->get_logger(), "Failed to initialize HardwareManager");
-        rclcpp::shutdown();
+        RCLCPP_WARN(this->get_logger(), "⚠️ Failed to initialize HardwareManager - running in NO-HARDWARE mode");
+        // 不调用 rclcpp::shutdown()，允许系统继续运行以支持 IPC 测试
+        hardware_manager_ = nullptr;
         return;
     }
 
-    RCLCPP_INFO(this->get_logger(), "Hardware manager initialized successfully");
+    RCLCPP_INFO(this->get_logger(), "✅ Hardware manager initialized successfully");
 }
 
 void ControllerManagerNode::init_commons() {
@@ -189,15 +217,28 @@ void ControllerManagerNode::init_controllers() {
             if (it != available.end()) {
                 ControllerInterface::instance().register_class(key, it->second);
 
-                // 为每个 mapping 创建一个 controller 实例
+                // ✅ 创建一个共享的 controller 实例，服务所有 mapping
+                // 每个 controller 已经通过 map<string, XXX> 来管理各 mapping 的状态
+                auto shared_controller = it->second(this->shared_from_this());
                 for (const auto& mapping : all_mappings) {
-                    auto controller = it->second(this->shared_from_this());
                     auto key_pair = std::make_pair(key, mapping);
-                    controller_map_[key_pair] = controller;
-                    RCLCPP_DEBUG(this->get_logger(), "[controllers] Created controller: %s for mapping: %s (class: %s)",
-                                key.c_str(), mapping.c_str(), class_name.c_str());
+                    controller_map_[key_pair] = shared_controller;
+                    RCLCPP_DEBUG(this->get_logger(), "[controllers] Registered mapping: %s for controller: %s (class: %s)",
+                                mapping.c_str(), key.c_str(), class_name.c_str());
                 }
-                RCLCPP_INFO(this->get_logger(), "[controllers] Registered controller: %s (class: %s) for %zu mappings",
+
+                // ✅ 为 velocity controllers 注册 hook 请求回调
+                if (key == "JointVelocity" || key == "CartesianVelocity") {
+                    auto velocity_ctrl = std::dynamic_pointer_cast<VelocityControllerBase>(shared_controller);
+                    if (velocity_ctrl) {
+                        velocity_ctrl->set_hook_request_callback(
+                            [this](const std::string& mapping, const std::string& target_mode) {
+                                start_working_controller(target_mode, mapping);
+                            });
+                    }
+                }
+
+                RCLCPP_INFO(this->get_logger(), "[controllers] ✅ Created shared controller: %s (class: %s) for %zu mappings (consumer threads: 1)",
                             key.c_str(), class_name.c_str(), all_mappings.size());
             } else {
                 RCLCPP_WARN(this->get_logger(), "[controllers] Controller class '%s' not found for key '%s'",
@@ -253,39 +294,46 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
     // 对于Disable和EmergencyStop模式，总是强制执行，即使已经在该模式（确保真正失能）
     if (mode_name == "Disable" || mode_name == "EmergencyStop") {
         // 强制停止当前控制器，不管需不需要钩子状态
-        auto current_mode_it = mapping_to_mode_.find(mapping);
-        if (current_mode_it != mapping_to_mode_.end()) {
-            auto current_key_pair = std::make_pair(current_mode_it->second, mapping);
-            auto current_it = controller_map_.find(current_key_pair);
-            if (current_it != controller_map_.end()) {
-                RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: Force stop() for Disable/EmergencyStop mode", mapping.c_str());
-                current_it->second->stop(mapping);
-                RCLCPP_INFO(this->get_logger(), "[%s] Force stopped controller for mode: %s", mapping.c_str(), current_mode_it->second.c_str());
+        {
+            std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+            auto current_mode_it = mapping_to_mode_.find(mapping);
+            if (current_mode_it != mapping_to_mode_.end()) {
+                auto current_key_pair = std::make_pair(current_mode_it->second, mapping);
+                auto current_it = controller_map_.find(current_key_pair);
+                if (current_it != controller_map_.end()) {
+                    RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: Force stop() for Disable/EmergencyStop mode", mapping.c_str());
+                    current_it->second->stop(mapping);
+                    mapping_to_mode_.erase(mapping);
+                    RCLCPP_INFO(this->get_logger(), "[%s] Force stopped controller for mode: %s", mapping.c_str(), current_mode_it->second.c_str());
+                }
             }
         }
         return switch_to_mode(mode_name, mapping);
     }
 
     // 如果已经在目标模式（且不是Disable/EmergencyStop），直接返回成功
-    auto mapping_mode_it = mapping_to_mode_.find(mapping);
-    if (mapping_mode_it != mapping_to_mode_.end() && mapping_mode_it->second == mode_name) {
+    {
+        std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+        auto mapping_mode_it = mapping_to_mode_.find(mapping);
+        if (mapping_mode_it != mapping_to_mode_.end() && mapping_mode_it->second == mode_name) {
+            auto hook_state_it = mapping_in_hook_state_.find(mapping);
+            bool is_in_hook = (hook_state_it != mapping_in_hook_state_.end()) ? hook_state_it->second : false;
+            if (!is_in_hook) {
+                RCLCPP_INFO(this->get_logger(), "[%s] Already in mode %s", mapping.c_str(), mode_name.c_str());
+                return true;
+            }
+        }
+
+        // 如果当前处于钩子状态，记录请求
         auto hook_state_it = mapping_in_hook_state_.find(mapping);
         bool is_in_hook = (hook_state_it != mapping_in_hook_state_.end()) ? hook_state_it->second : false;
-        if (!is_in_hook) {
-            RCLCPP_INFO(this->get_logger(), "[%s] Already in mode %s", mapping.c_str(), mode_name.c_str());
+        if (is_in_hook) {
+            RCLCPP_INFO(this->get_logger(), "[%s] Currently in hook state, updating target mode to %s",
+                        mapping.c_str(), mode_name.c_str());
+            // 轨迹已在上面取消，更新目标模式，让持续检查机制自动处理转换
+            mapping_target_mode_[mapping] = mode_name;
             return true;
         }
-    }
-
-    // 如果当前处于钩子状态，记录请求
-    auto hook_state_it = mapping_in_hook_state_.find(mapping);
-    bool is_in_hook = (hook_state_it != mapping_in_hook_state_.end()) ? hook_state_it->second : false;
-    if (is_in_hook) {
-        RCLCPP_INFO(this->get_logger(), "[%s] Currently in hook state, updating target mode to %s",
-                    mapping.c_str(), mode_name.c_str());
-        // 轨迹已在上面取消，更新目标模式，让持续检查机制自动处理转换
-        mapping_target_mode_[mapping] = mode_name;
-        return true;
     }
 
     // 停止当前控制器
@@ -297,8 +345,9 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
     }
 
     // 如果需要钩子状态，进入钩子状态并开始持续监控
-    if (need_hook) {
-        // RCLCPP_INFO(this->get_logger(), "Need hook state for safe transition to %s", mode_name.c_str());
+    // ⚠️ 例外：如果目标模式是 HoldState，不需要 hook，直接切换
+    // 因为 HoldState 本身就是安全状态，用来作为过渡点
+    if (need_hook && mode_name != "HoldState") {
         enter_hook_state(mode_name, mapping);
         return true;    // 进入等待状态，持续监控会处理实际转换
     }
@@ -310,14 +359,19 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
 bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::string& mapping) {
     need_hook = false;
 
-    auto current_mode_it = mapping_to_mode_.find(mapping);
-    if (current_mode_it == mapping_to_mode_.end()) {
-        RCLCPP_WARN(this->get_logger(), "[%s] No active mode found for mapping", mapping.c_str());
-        return true;  // 没有活跃模式，无需停止
+    std::string current_mode;
+    {
+        std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+        auto current_mode_it = mapping_to_mode_.find(mapping);
+        if (current_mode_it == mapping_to_mode_.end()) {
+            RCLCPP_WARN(this->get_logger(), "[%s] No active mode found for mapping", mapping.c_str());
+            return true;  // 没有活跃模式，无需停止
+        }
+        current_mode = current_mode_it->second;
     }
 
     // 使用 (mode, mapping) 对查找 controller 实例
-    auto key_pair = std::make_pair(current_mode_it->second, mapping);
+    auto key_pair = std::make_pair(current_mode, mapping);
     auto it = controller_map_.find(key_pair);
     if (it != controller_map_.end()) {
         // 获取该 controller 的 per-mapping hook 状态
@@ -326,11 +380,17 @@ bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::
         need_hook = (hook_it != hook_state_map.end()) ? hook_it->second : false;
 
         RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: stop_working_controller() calling stop() for mode: %s",
-                    mapping.c_str(), current_mode_it->second.c_str());
+                    mapping.c_str(), current_mode.c_str());
         it->second->stop(mapping);
 
+        // ✅ 清除 mapping_to_mode_[mapping]，标记该 mapping 已无活跃模式
+        {
+            std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+            mapping_to_mode_.erase(mapping);
+        }
+
         RCLCPP_INFO(this->get_logger(), "[%s] Stopped controller for mode: %s, needs_hook: %s",
-                    mapping.c_str(), current_mode_it->second.c_str(), need_hook ? "true" : "false");
+                    mapping.c_str(), current_mode.c_str(), need_hook ? "true" : "false");
         return true;
     }
     return false;
@@ -338,14 +398,25 @@ bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::
 
 bool ControllerManagerNode::enter_hook_state(const std::string& target_mode, const std::string& mapping) {
     // 设置目标模式（per-mapping）
-    mapping_target_mode_[mapping] = target_mode;
-    mapping_in_hook_state_[mapping] = true;
+    {
+        std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+        mapping_target_mode_[mapping] = target_mode;
+        mapping_in_hook_state_[mapping] = true;
+    }
 
     auto hook_key = std::make_pair("HoldState", mapping);
     auto hook_it = controller_map_.find(hook_key);
     if (hook_it != controller_map_.end()) {
         auto hold_controller = std::dynamic_pointer_cast<HoldStateController>(hook_it->second);
         if (hold_controller) {
+            // ⚠️ 如果 HoldState 已经为该 mapping 激活（比如来自 post_init 或之前的 hook），
+            // 需要先 stop() 再 start() 来重新配置定时器和回调关联
+            // 这样才能让新的回调生效
+            if (hold_controller->is_active(mapping)) {
+                RCLCPP_DEBUG(this->get_logger(), "[%s] Re-entering hook state - restarting HoldState to apply new callback", mapping.c_str());
+                hold_controller->stop(mapping);
+            }
+
             // 设置目标状态（per-mapping）
             hold_controller->set_target_mode(mapping, target_mode);
 
@@ -357,33 +428,61 @@ bool ControllerManagerNode::enter_hook_state(const std::string& target_mode, con
 
             // 启动 HoldState控制器（自动持续检查）
             hold_controller->start(mapping);
-            mapping_to_mode_[mapping] = "HoldState";
+            {
+                std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+                mapping_to_mode_[mapping] = "HoldState";
+            }
+
+            // ✅ 通知 IPC 侧进入 hook 状态
+            auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+            if (state_mgr) {
+                // 通过 transitionToMode 通知 IPC 侧需要 hook
+                state_mgr->transitionToMode(target_mode);
+                RCLCPP_DEBUG(this->get_logger(), "[%s] ✅ IPC notified: entering hook for target mode %s", mapping.c_str(), target_mode.c_str());
+            }
 
             // RCLCPP_INFO(this->get_logger(), "Entered hook state, target mode: %s", target_mode.c_str());
             return true;
         } else {
             RCLCPP_ERROR(this->get_logger(), "Failed to cast HoldState controller");
-            mapping_in_hook_state_[mapping] = false;
+            {
+                std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+                mapping_in_hook_state_[mapping] = false;
+            }
             return false;
         }
     } else {
         RCLCPP_ERROR(this->get_logger(), "HoldState controller not found in controller map");
-        mapping_in_hook_state_[mapping] = false;
+        {
+            std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+            mapping_in_hook_state_[mapping] = false;
+        }
         return false;
     }
 }
 
 void ControllerManagerNode::on_transition_ready(const std::string& mapping) {
-    auto hook_state_it = mapping_in_hook_state_.find(mapping);
-    bool is_in_hook = (hook_state_it != mapping_in_hook_state_.end()) ? hook_state_it->second : false;
-    if (!is_in_hook) {
-        RCLCPP_WARN(this->get_logger(), "[%s] Transition ready callback called but not in hook state", mapping.c_str());
-        return;
+    std::string target;
+    {
+        std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+        auto hook_state_it = mapping_in_hook_state_.find(mapping);
+        bool is_in_hook = (hook_state_it != mapping_in_hook_state_.end()) ? hook_state_it->second : false;
+        if (!is_in_hook) {
+            RCLCPP_WARN(this->get_logger(), "[%s] Transition ready callback called but not in hook state", mapping.c_str());
+            return;
+        }
+
+        // 保存目标模式，因为exit_hook_state会清空它
+        auto target_it = mapping_target_mode_.find(mapping);
+        target = (target_it != mapping_target_mode_.end()) ? target_it->second : "";
     }
 
-    // 保存目标模式，因为exit_hook_state会清空它
-    auto target_it = mapping_target_mode_.find(mapping);
-    std::string target = (target_it != mapping_target_mode_.end()) ? target_it->second : "";
+    // ✅ 先更新 IPC 状态，告知 IPC consumer hook 已完成
+    auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+    if (state_mgr) {
+        state_mgr->initializeCurrentMode(target);  // 清除 in_hook_state，设置当前模式为目标模式
+        RCLCPP_INFO(this->get_logger(), "[%s] ✅ IPC state updated: hook cleared, mode set to %s", mapping.c_str(), target.c_str());
+    }
 
     // 执行实际的状态转换
     if (exit_hook_state(mapping)) {
@@ -395,21 +494,24 @@ void ControllerManagerNode::on_transition_ready(const std::string& mapping) {
 
 
 bool ControllerManagerNode::exit_hook_state(const std::string& mapping) {
-    auto hook_state_it = mapping_in_hook_state_.find(mapping);
-    bool is_in_hook = (hook_state_it != mapping_in_hook_state_.end()) ? hook_state_it->second : false;
-    if (!is_in_hook) {
-        RCLCPP_WARN(this->get_logger(), "[%s] Not in hook state", mapping.c_str());
-        return false;
-    }
+    std::string target_mode;
+    {
+        std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+        auto hook_state_it = mapping_in_hook_state_.find(mapping);
+        bool is_in_hook = (hook_state_it != mapping_in_hook_state_.end()) ? hook_state_it->second : false;
+        if (!is_in_hook) {
+            RCLCPP_WARN(this->get_logger(), "[%s] Not in hook state", mapping.c_str());
+            return false;
+        }
 
-    // 检查目标模式是否有效
-    auto target_it = mapping_target_mode_.find(mapping);
-    if (target_it == mapping_target_mode_.end() || target_it->second.empty()) {
-        RCLCPP_ERROR(this->get_logger(), "[%s] Target mode is empty when exiting hook state", mapping.c_str());
-        return false;
+        // 检查目标模式是否有效
+        auto target_it = mapping_target_mode_.find(mapping);
+        if (target_it == mapping_target_mode_.end() || target_it->second.empty()) {
+            RCLCPP_ERROR(this->get_logger(), "[%s] Target mode is empty when exiting hook state", mapping.c_str());
+            return false;
+        }
+        target_mode = target_it->second;
     }
-
-    const std::string& target_mode = target_it->second;
 
     // 如果目标模式不是HoldState，则停止当前的HoldState控制器
     // 如果目标就是HoldState，则不需要停止（避免竞态条件）
@@ -425,9 +527,12 @@ bool ControllerManagerNode::exit_hook_state(const std::string& mapping) {
     // 切换到目标模式
     bool success = switch_to_mode(target_mode, mapping);
     if (success) {
-        mapping_in_hook_state_[mapping] = false;
+        {
+            std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+            mapping_in_hook_state_[mapping] = false;
+            mapping_target_mode_.erase(mapping);
+        }
         RCLCPP_INFO(this->get_logger(), "[%s] Exited hook state, switched to %s", mapping.c_str(), target_mode.c_str());
-        mapping_target_mode_.erase(mapping);
     } else {
         RCLCPP_ERROR(this->get_logger(), "[%s] Failed to switch to target mode: %s", mapping.c_str(), target_mode.c_str());
     }
@@ -458,7 +563,17 @@ bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const s
     try {
         // 启动新控制器
         it->second->start(mapping);
-        mapping_to_mode_[mapping] = mode_name;
+        {
+            std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+            mapping_to_mode_[mapping] = mode_name;
+        }
+
+        // ✅ 同步 IPC 侧的状态，防止 IPC consumer 的旧命令重新启动已被 stop 的控制器
+        auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+        if (state_mgr) {
+            state_mgr->initializeCurrentMode(mode_name);
+            RCLCPP_DEBUG(this->get_logger(), "[%s] ✅ IPC state synchronized: mode set to %s", mapping.c_str(), mode_name.c_str());
+        }
 
         // 清空缓存的消息（避免切换控制器时执行旧消息导致意外运动）
         // 注意：禁用自动投递缓存消息，因为这会导致切换控制器时机械臂意外运动
@@ -476,6 +591,7 @@ bool ControllerManagerNode::switch_to_mode(const std::string& mode_name, const s
 }
 
 bool ControllerManagerNode::check_work_mode(const std::string& target_mode, const std::string& mapping) const {
+    std::lock_guard<std::mutex> lock(mapping_state_mutex_);
     auto mode_it = mapping_to_mode_.find(mapping);
     if (mode_it != mapping_to_mode_.end()) {
         return mode_it->second == target_mode;
@@ -491,11 +607,14 @@ void ControllerManagerNode::publish_status() {
     std_msgs::msg::String status_msg;
     // 构建包含所有mapping状态的字符串
     std::string status_str;
-    for (const auto& [mapping, mode] : mapping_to_mode_) {
-        if (!status_str.empty()) {
-            status_str += " | ";
+    {
+        std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+        for (const auto& [mapping, mode] : mapping_to_mode_) {
+            if (!status_str.empty()) {
+                status_str += " | ";
+            }
+            status_str += mapping + ":" + mode;
         }
-        status_str += mapping + ":" + mode;
     }
     if (status_str.empty()) {
         status_str = "Uninitialized";
@@ -546,11 +665,14 @@ void ControllerManagerNode::handle_action_event(const std_msgs::msg::String::Sha
     RCLCPP_INFO(this->get_logger(), "Received action event: %s (mapping: %s)", event_type.c_str(), mapping.c_str());
 
     // 如果已经在钩子状态中（用户已主动请求切换到某个模式），不应该被action事件改变
-    auto hook_state_it = mapping_in_hook_state_.find(mapping);
-    bool is_in_hook = (hook_state_it != mapping_in_hook_state_.end()) ? hook_state_it->second : false;
-    if (is_in_hook) {
-        RCLCPP_DEBUG(this->get_logger(), "[%s] Already in hook state, ignoring action event", mapping.c_str());
-        return;
+    {
+        std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+        auto hook_state_it = mapping_in_hook_state_.find(mapping);
+        bool is_in_hook = (hook_state_it != mapping_in_hook_state_.end()) ? hook_state_it->second : false;
+        if (is_in_hook) {
+            RCLCPP_DEBUG(this->get_logger(), "[%s] Already in hook state, ignoring action event", mapping.c_str());
+            return;
+        }
     }
 
     if (event_type == "action_goal_accepted") {

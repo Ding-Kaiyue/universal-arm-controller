@@ -7,6 +7,7 @@ namespace arm_controller::cartesian_velocity {
 bool CartesianVelocityIPCInterface::execute(const std::vector<double>& cartesian_velocities,
                                             const std::string& mapping) {
     if (!ensureInitialized()) {
+        setLastError("IPC not initialized");
         return false;
     }
 
@@ -28,8 +29,8 @@ bool CartesianVelocityIPCInterface::execute(const std::vector<double>& cartesian
         return false;
     }
 
-    // 转移到 CartesianVelocity 模式
-    state_mgr->transitionToMode("CartesianVelocity");
+    // 直接初始化状态（清除 hook_state，设置当前模式）
+    state_mgr->initializeCurrentMode("CartesianVelocity");
     // 设置执行状态为待执行
     state_mgr->setExecutionState(ipc::ExecutionState::PENDING);
 

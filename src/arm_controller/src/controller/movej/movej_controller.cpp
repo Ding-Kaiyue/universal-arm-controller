@@ -40,6 +40,12 @@ MoveJController::MoveJController(const rclcpp::Node::SharedPtr& node)
 }
 
 void MoveJController::start(const std::string& mapping) {
+    // ⚠️ 检查硬件管理器是否可用（NO-HARDWARE mode）
+    if (!hardware_manager_) {
+        RCLCPP_WARN(node_->get_logger(), "[%s] MoveJ: Hardware manager not available - skipping start", mapping.c_str());
+        return;
+    }
+
     // 检查 mapping 是否存在于配置中
     const auto& all_mappings = hardware_manager_->get_all_mappings();
     if (std::find(all_mappings.begin(), all_mappings.end(), mapping) == all_mappings.end()) {
@@ -82,6 +88,12 @@ void MoveJController::trajectory_callback(const std::string& mapping, const sens
 
 void MoveJController::initialize_planning_services() {
     try {
+        // ⚠️ 检查硬件管理器是否可用（NO-HARDWARE mode）
+        if (!hardware_manager_) {
+            RCLCPP_WARN(node_->get_logger(), "MoveJ: Hardware manager not available - skipping planning services initialization");
+            return;
+        }
+
         // 获取所有mapping
         auto all_mappings = hardware_manager_->get_all_mappings();
         if (all_mappings.empty()) {
@@ -227,6 +239,8 @@ bool MoveJController::execute(const std::string& mapping, const std::vector<doub
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ MoveJ: Invalid parameters size for execute()", mapping.c_str());
         return false;
     }
+    RCLCPP_INFO(node_->get_logger(), "[%s] MoveJ: Executing with parameters: %f, %f, %f, %f, %f, %f", mapping.c_str(),
+                 parameters[0], parameters[1], parameters[2], parameters[3], parameters[4], parameters[5]);
 
     // 构造 JointState 消息
     auto joint_state_msg = std::make_shared<sensor_msgs::msg::JointState>();
@@ -307,7 +321,7 @@ void MoveJController::command_queue_consumer_thread() {
     while (consumer_running_) {
         // 使用带过滤的 pop，只获取 MoveJ 命令
         // popWithFilter 会阻塞直到有匹配的命令（顺序执行）
-        if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "MoveJ")) {
+        if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "MoveJ", 10)) {
             continue;  // 只在异常时继续
         }
 
@@ -320,21 +334,23 @@ void MoveJController::command_queue_consumer_thread() {
 
         auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
 
-        // 如果控制器还未激活，先启动该 mapping 的控制器
-        if (!is_active(mapping)) {
-            RCLCPP_INFO(node_->get_logger(), "[%s] Controller not active, starting MoveJ controller", mapping.c_str());
-            try {
-                start(mapping);
-            } catch (const std::exception& e) {
-                RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to start MoveJ controller: %s", mapping.c_str(), e.what());
-                if (state_mgr) {
-                    state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::FAILED);
-                }
-                continue;
-            }
-        }
-
         try {
+            // ✅ 检查和处理 IPC 侧的模式过渡（包括 hook 检测）
+            if (state_mgr) {
+                bool transition_ok = state_mgr->transitionToMode("MoveJ");
+                if (!transition_ok) {
+                    // 需要进入 hook 状态来安全切换
+                    if (state_mgr->isInHookState()) {
+                        RCLCPP_DEBUG(node_->get_logger(), "[%s] 🛑 MoveJ in hook state - requesting HoldState transition",
+                                     mapping.c_str());
+                        // 暂停这条命令的处理，让 hook 完成
+                        // 通知其他 consumers 继续处理
+                        arm_controller::CommandQueueIPC::getInstance().notifyConsumers();
+                        continue;
+                    }
+                }
+            }
+
             // 获取状态管理器并更新为执行中
             if (state_mgr) {
                 state_mgr->setExecutionState(arm_controller::ipc::ExecutionState::EXECUTING);
