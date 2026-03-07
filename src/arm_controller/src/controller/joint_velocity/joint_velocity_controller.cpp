@@ -35,7 +35,7 @@ JointVelocityController::~JointVelocityController() {
 }
 
 void JointVelocityController::start(const std::string& mapping) {
-    // ✅ 检查是否已初始化（仅用于防止重复创建线程）
+    // 检查是否已初始化（仅用于防止重复创建线程）
     if (rt_threads_.count(mapping) > 0) {
         return;
     }
@@ -71,7 +71,7 @@ void JointVelocityController::start(const std::string& mapping) {
     // create buffer
     rt_buffers_[mapping] = std::make_unique<SPSCQueue<RtCommand, 128>>();
 
-    // ✅ 创建per-mapping的RT线程运行标志（避免stop()关闭所有线程）
+    // 创建per-mapping的RT线程运行标志（避免stop()关闭所有线程）
     auto rt_running = std::make_shared<std::atomic<bool>>(true);
     rt_running_per_mapping_[mapping] = rt_running;
 
@@ -92,7 +92,7 @@ void JointVelocityController::start(const std::string& mapping) {
 bool JointVelocityController::stop(const std::string& mapping) {
     VelocityControllerImpl::stop(mapping);
 
-    // ✅ 只关闭这个mapping的RT线程（使用per-mapping标志）
+    // 只关闭这个mapping的RT线程（使用per-mapping标志）
     auto it_running = rt_running_per_mapping_.find(mapping);
     if (it_running != rt_running_per_mapping_.end()) {
         it_running->second->store(false, std::memory_order_release);
@@ -110,7 +110,7 @@ bool JointVelocityController::stop(const std::string& mapping) {
     // 清理该 mapping 的话题订阅
     cleanup_subscriptions(mapping);
 
-    // ✅ 清除RT状态和缓冲区（需要加锁保护，因为velocity_callback可能并发访问）
+    // 清除RT状态和缓冲区（需要加锁保护，因为velocity_callback可能并发访问）
     {
         std::lock_guard<std::mutex> lock(rt_buffers_mutex_);
         rt_buffers_.erase(mapping);
@@ -124,7 +124,7 @@ void JointVelocityController::velocity_callback(
     const std::string& mapping,
     const sensor_msgs::msg::JointState::SharedPtr msg) {
 
-    std::lock_guard<std::mutex> lock(rt_buffers_mutex_);  // ✅ 保护 rt_buffers_ map 的并发访问
+    std::lock_guard<std::mutex> lock(rt_buffers_mutex_);  // 保护 rt_buffers_ map 的并发访问
 
     auto it = rt_buffers_.find(mapping);
     if (it == rt_buffers_.end()) return;
@@ -133,7 +133,7 @@ void JointVelocityController::velocity_callback(
     c.velocity = msg->velocity;
     c.stamp = steady_clock_.now();
 
-    it->second->push(c);  // ✅ 队列的 push 本身是 lock-free 的
+    it->second->push(c);  // 队列的 push 本身是 lock-free 的
 }
 
 void JointVelocityController::command_queue_consumer_thread() {
@@ -143,7 +143,7 @@ void JointVelocityController::command_queue_consumer_thread() {
 
     while (consumer_running_) {
         if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(cmd, "JointVelocity", 10)) {
-            // ✅ 超时未获得新命令，检查是否已超过批处理超时时间
+            // 超时未获得新命令，检查是否已超过批处理超时时间
             auto now = steady_clock_.now();
             if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_command_time) >= BATCH_TIMEOUT) {
                 arm_controller::CommandQueueIPC::getInstance().notifyConsumers();
@@ -154,7 +154,7 @@ void JointVelocityController::command_queue_consumer_thread() {
 
         std::string mapping = cmd.get_mapping();
 
-        // ✅ 第一步：检查当前mode，如果不是JointVelocity则请求完整的mode转换
+        // 第一步：检查当前mode，如果不是JointVelocity则请求完整的mode转换
         auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
 
         if (state_mgr) {
@@ -175,7 +175,7 @@ void JointVelocityController::command_queue_consumer_thread() {
                 continue;
             }
 
-            // ✅ 如果仍在 hook 状态，请求启动 HoldState
+            // 如果仍在 hook 状态，请求启动 HoldState
             if (state_mgr->isInHookState()) {
                 std::string target_mode = state_mgr->getTargetMode();
                 if (hook_request_callback_) {
@@ -187,15 +187,15 @@ void JointVelocityController::command_queue_consumer_thread() {
             }
         }
 
-        // ✅ 第二步：检查是否已经初始化（仅用于启动 RT 线程）
+        // 第二步：检查是否已经初始化（仅用于启动 RT 线程）
         bool need_init = (rt_threads_.count(mapping) == 0);
 
-        // ✅ 第三步：启动控制器（仅在第一次）
+        // 第三步：启动控制器（仅在第一次）
         if (need_init) {
             start(mapping);
         }
 
-        // ✅ 第四步：在锁内执行命令
+        // 第四步：在锁内执行命令
         {
             std::lock_guard<std::mutex> lock(rt_buffers_mutex_);
 
@@ -209,7 +209,7 @@ void JointVelocityController::command_queue_consumer_thread() {
             }
         }
 
-        // ✅ 更新最后处理时间戳，用于判断批处理是否结束
+        // 更新最后处理时间戳，用于判断批处理是否结束
         last_command_time = steady_clock_.now();
     }
 }
