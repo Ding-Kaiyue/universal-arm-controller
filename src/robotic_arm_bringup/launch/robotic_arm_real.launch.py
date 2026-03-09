@@ -42,6 +42,8 @@ def create_arm_controller_node(context, *args, **kwargs):
         config_pkg = 'arm380_config'
     elif robot_model_name == 'dual_arm620':
         config_pkg = 'dual_arm620_config'
+    elif robot_model_name == 'dual_arm_with_pgc':
+        config_pkg = 'dual_arm_with_pgc_config'
     else:
         raise ValueError(f'Unsupported robot model name: {robot_model_name}')
 
@@ -82,8 +84,8 @@ def generate_launch_description():
     # 声明参数
     robot_model_arg = DeclareLaunchArgument(
         'robot_model_name',
-        default_value='dual_arm620',
-        description='Robot model name (e.g., arm620, arm380, dual_arm620)'
+        default_value='dual_arm_with_pgc',
+        description='Robot model name (e.g., arm620, arm380, dual_arm620, dual_arm_with_pgc)'
     )
 
     # Get package directories
