@@ -24,17 +24,25 @@ bool HardwareManager::initialize(rclcpp::Node::SharedPtr node) {
     try {
         // 创建CANFD电机驱动
         std::vector<std::string> interface_names;
+        RCLCPP_INFO(node_->get_logger(), "DEBUG: mapping_to_interface_ contains %zu entries", mapping_to_interface_.size());
         for (const auto& [mapping, interface] : mapping_to_interface_) {
+            RCLCPP_INFO(node_->get_logger(), "  - mapping='%s', interface='%s'", mapping.c_str(), interface.c_str());
+            if (interface.empty()) {
+                RCLCPP_WARN(node_->get_logger(), "    ⚠️  WARNING: Empty interface for mapping '%s'!", mapping.c_str());
+            }
             interface_names.push_back(interface);
         }
 
         auto motor_driver = hardware_driver::createCanFdMotorDriver(interface_names);
 
         // 将mapping->motor_id转换为interface->motor_id
+        // 仅为有电机的映射创建配置（跳过纯软件映射如夹爪）
         std::map<std::string, std::vector<uint32_t>> interface_motor_config;
         for (const auto& [mapping, motor_ids] : motor_config_) {
-            std::string interface = get_interface(mapping);
-            interface_motor_config[interface] = motor_ids;
+            if (!motor_ids.empty()) {  // 仅处理有电机的映射
+                std::string interface = get_interface(mapping);
+                interface_motor_config[interface] = motor_ids;
+            }
         }
 
         // 创建RobotHardware实例，使用观察者模式
@@ -385,14 +393,6 @@ bool HardwareManager::send_hold_state_command(const std::string& mapping,
         return false;
     }
 
-    // 检查关节数量，最多支持6个关节
-    if (positions.size() > 6) {
-        RCLCPP_ERROR(node_->get_logger(),
-                    "[%s] ❎ Too many joints (%zu), maximum is 6",
-                    mapping.c_str(), positions.size());
-        return false;
-    }
-
     // 使用MIT模式发送位置保持命令
     // 位置模式参数: kp=0.05, kd=0.005, effort=0
     std::array<double, 6> positions_deg = {};
@@ -404,7 +404,7 @@ bool HardwareManager::send_hold_state_command(const std::string& mapping,
     for (size_t i = 0; i < positions.size(); ++i) {
         positions_deg[i] = positions[i] * 180.0 / M_PI;
         velocities_deg[i] = 0.0;
-        efforts[i] = 0.0;
+        efforts[i] = compute_gravity_torques(mapping)[i]; // 计算重力补偿力矩
         kps[i] = 0.05;
         kds[i] = 0.005;
     }
@@ -663,7 +663,9 @@ bool HardwareManager::load_hardware_config() {
         }
 
         for (const auto& [mapping_name, mapping_node] : mapping_configs) {
-            if (mapping_node["joint_names"]) {
+            // 仅为有电机的 mapping 注册重力补偿
+            const auto& motors = motor_config_[mapping_name];
+            if (!motors.empty() && mapping_node["joint_names"]) {
                 std::vector<std::string> joint_names = mapping_node["joint_names"].as<std::vector<std::string>>();
                 if (gravity_compensator_ && !gravity_compensator_->registerMapping(mapping_name, joint_names)) {
                     RCLCPP_WARN(node_->get_logger(), "[%s] Failed to register gravity mapping", mapping_name.c_str());
@@ -671,6 +673,8 @@ bool HardwareManager::load_hardware_config() {
                     RCLCPP_INFO(node_->get_logger(), "[%s] Gravity mapping registered with %zu joints",
                         mapping_name.c_str(), joint_names.size());
                 }
+            } else if (motors.empty()) {
+                RCLCPP_INFO(node_->get_logger(), "[%s] Skipping gravity mapping for software-only mapping (gripper mass included in parent arm)", mapping_name.c_str());
             }
             initialize_joint_state(mapping_name);
         }
@@ -716,15 +720,24 @@ bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML:
     robot_type_config_[mapping_name] =
         mapping_node["robot_type"] ? mapping_node["robot_type"].as<std::string>() : "unknown_robot";
 
-    // ===== 接口映射 =====
-    std::string interface =
-        mapping_node["interface"] ? mapping_node["interface"].as<std::string>() : "unknown_interface";
-    mapping_to_interface_[mapping_name] = interface;
-    interface_to_mapping_[interface] = mapping_name;
-
     // ===== 电机ID列表 =====
     motor_config_[mapping_name] =
         mapping_node["motors"] ? mapping_node["motors"].as<std::vector<uint32_t>>() : std::vector<uint32_t>{};
+
+    // ===== 接口映射 (仅当有电机时) =====
+    // 如果 motors 列表为空，说明这是一个纯软件 mapping（如无反馈的夹爪），不需要硬件初始化
+    std::string interface =
+        mapping_node["interface"] ? mapping_node["interface"].as<std::string>() : "unknown_interface";
+
+    if (!motor_config_[mapping_name].empty()) {
+        // 有电机，添加到硬件映射
+        mapping_to_interface_[mapping_name] = interface;
+        interface_to_mapping_[interface] = mapping_name;
+    } else {
+        // 无电机，仅用于软件层面（如发布 joint_state）
+        RCLCPP_INFO(node_->get_logger(), "[%s] No motors configured - pure software mapping (no hardware initialization)",
+                    mapping_name.c_str());
+    }
 
     // ===== 关节名称列表 =====
     joint_names_config_[mapping_name] =
@@ -750,9 +763,14 @@ bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML:
     start_position_config_[mapping_name] =
         mapping_node["start_position"] ? mapping_node["start_position"].as<std::vector<double>>() : std::vector<double>{};
 
+    // 获取接口名称（如果不在mapping_to_interface_中则使用配置中的值）
+    // 对于纯软件映射（无电机），interface会被配置但不会添加到mapping_to_interface_
+    auto interface_it = mapping_to_interface_.find(mapping_name);
+    std::string interface_display = (interface_it != mapping_to_interface_.end()) ? interface_it->second : interface;
+
     RCLCPP_INFO(node_->get_logger(), "✅ Loaded mapping [%s]: interface=%s, controller=%s, group=%s, frame_id=%s, joints=%zu",
         mapping_name.c_str(),
-        mapping_to_interface_[mapping_name].c_str(),
+        interface_display.c_str(),
         controller_name_config_[mapping_name].c_str(),
         planning_group_config_[mapping_name].c_str(),
         frame_id_config_[mapping_name].c_str(),

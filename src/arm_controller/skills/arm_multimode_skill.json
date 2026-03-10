@@ -1,0 +1,379 @@
+{
+  "name": "arm_multimode_controller",
+  "display_name": "机械臂多模式控制器",
+  "description": "通过 HTTP 接口控制机械臂执行多种运动模式：MoveJ、MoveL、MoveC、JointVelocity、CartesianVelocity",
+  "version": "2.0.0",
+  "author": "Arm Controller Team",
+  "category": "robotics",
+
+  "endpoints": {
+    "server": "http://127.0.0.1:8080"
+  },
+
+  "skills": [
+    {
+      "name": "movej",
+      "display_name": "MoveJ 运动",
+      "description": "关节空间中的点到点运动（Joint-space Point-to-Point Motion）",
+      "method": "POST",
+      "path": "/movej",
+      "request_schema": {
+        "type": "object",
+        "properties": {
+          "positions": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "6个关节位置数组（弧度）。例如：[1.57, 0, 1.57, 0, 1.57, 0]",
+            "minItems": 6,
+            "maxItems": 6
+          },
+          "mapping": {
+            "type": "string",
+            "description": "机械臂映射",
+            "default": "left_arm",
+            "enum": ["left_arm", "right_arm", "single_arm"]
+          }
+        },
+        "required": ["positions"]
+      },
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"type": "string", "enum": ["success", "error"]},
+          "message": {"type": "string"},
+          "mode": {"type": "string"},
+          "execution_state": {"type": "integer"},
+          "error": {"type": "string"}
+        }
+      },
+      "examples": [
+        {
+          "name": "回家位置",
+          "request": {
+            "positions": [-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0],
+            "mapping": "left_arm"
+          }
+        },
+        {
+          "name": "零位置",
+          "request": {
+            "positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "mapping": "left_arm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "movel",
+      "display_name": "MoveL 运动",
+      "description": "笛卡尔空间中的直线运动（Cartesian Linear Motion）",
+      "method": "POST",
+      "path": "/movel",
+      "request_schema": {
+        "type": "object",
+        "properties": {
+          "x": {"type": "number", "description": "X 坐标（米）"},
+          "y": {"type": "number", "description": "Y 坐标（米）"},
+          "z": {"type": "number", "description": "Z 坐标（米）"},
+          "qx": {"type": "number", "description": "四元数 X 分量", "default": 0.0},
+          "qy": {"type": "number", "description": "四元数 Y 分量", "default": 0.0},
+          "qz": {"type": "number", "description": "四元数 Z 分量", "default": 0.0},
+          "qw": {"type": "number", "description": "四元数 W 分量", "default": 1.0},
+          "mapping": {
+            "type": "string",
+            "description": "机械臂映射",
+            "default": "left_arm",
+            "enum": ["left_arm", "right_arm", "single_arm"]
+          }
+        },
+        "required": ["x", "y", "z"]
+      },
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"type": "string", "enum": ["success", "error"]},
+          "message": {"type": "string"},
+          "mode": {"type": "string"},
+          "execution_state": {"type": "integer"},
+          "error": {"type": "string"}
+        }
+      },
+      "examples": [
+        {
+          "name": "直线运动到位置",
+          "request": {
+            "x": 0.5,
+            "y": 0.3,
+            "z": 0.4,
+            "qx": 0.0,
+            "qy": 0.0,
+            "qz": 0.0,
+            "qw": 1.0,
+            "mapping": "left_arm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "movec",
+      "display_name": "MoveC 运动",
+      "description": "笛卡尔空间中的圆形运动（Cartesian Circular Motion）",
+      "method": "POST",
+      "path": "/movec",
+      "request_schema": {
+        "type": "object",
+        "properties": {
+          "waypoints": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "路径点列表（扁平化）：[x1,y1,z1,qx1,qy1,qz1,qw1, x2,y2,z2,qx2,qy2,qz2,qw2, ...]",
+            "minItems": 14
+          },
+          "mapping": {
+            "type": "string",
+            "description": "机械臂映射",
+            "default": "left_arm",
+            "enum": ["left_arm", "right_arm", "single_arm"]
+          }
+        },
+        "required": ["waypoints"]
+      },
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"type": "string", "enum": ["success", "error"]},
+          "message": {"type": "string"},
+          "mode": {"type": "string"},
+          "execution_state": {"type": "integer"},
+          "error": {"type": "string"}
+        }
+      },
+      "examples": [
+        {
+          "name": "圆形运动",
+          "request": {
+            "waypoints": [
+              0.5, 0.3, 0.4, 0.0, 0.0, 0.0, 1.0,
+              0.5, 0.4, 0.4, 0.0, 0.0, 0.0, 1.0,
+              0.6, 0.3, 0.4, 0.0, 0.0, 0.0, 1.0
+            ],
+            "mapping": "left_arm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "joint_velocity",
+      "display_name": "JointVelocity 控制",
+      "description": "关节速度控制模式（Joint Velocity Control）",
+      "method": "POST",
+      "path": "/joint_velocity",
+      "request_schema": {
+        "type": "object",
+        "properties": {
+          "joint_velocities": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "6个关节速度数组（弧度/秒）。例如：[0.5, 0.3, -0.2, 0, 0.1, 0]",
+            "minItems": 6,
+            "maxItems": 6
+          },
+          "mapping": {
+            "type": "string",
+            "description": "机械臂映射",
+            "default": "left_arm",
+            "enum": ["left_arm", "right_arm", "single_arm"]
+          }
+        },
+        "required": ["joint_velocities"]
+      },
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"type": "string", "enum": ["success", "error"]},
+          "message": {"type": "string"},
+          "mode": {"type": "string"},
+          "execution_state": {"type": "integer"},
+          "error": {"type": "string"}
+        }
+      },
+      "examples": [
+        {
+          "name": "关节速度运动",
+          "request": {
+            "joint_velocities": [0.5, 0.3, -0.2, 0.0, 0.1, 0.0],
+            "mapping": "left_arm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cartesian_velocity",
+      "display_name": "CartesianVelocity 控制",
+      "description": "笛卡尔速度控制模式（Cartesian Velocity Control）",
+      "method": "POST",
+      "path": "/cartesian_velocity",
+      "request_schema": {
+        "type": "object",
+        "properties": {
+          "cartesian_velocities": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "6维速度数组：[vx, vy, vz, wx, wy, wz]（米/秒 和 弧度/秒）",
+            "minItems": 6,
+            "maxItems": 6
+          },
+          "mapping": {
+            "type": "string",
+            "description": "机械臂映射",
+            "default": "left_arm",
+            "enum": ["left_arm", "right_arm", "single_arm"]
+          }
+        },
+        "required": ["cartesian_velocities"]
+      },
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"type": "string", "enum": ["success", "error"]},
+          "message": {"type": "string"},
+          "mode": {"type": "string"},
+          "execution_state": {"type": "integer"},
+          "error": {"type": "string"}
+        }
+      },
+      "examples": [
+        {
+          "name": "笛卡尔速度运动",
+          "request": {
+            "cartesian_velocities": [0.1, 0.0, 0.0, 0.0, 0.0, 0.5],
+            "mapping": "left_arm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "health_check",
+      "display_name": "服务器健康检查",
+      "description": "检查 HTTP 服务器状态",
+      "method": "GET",
+      "path": "/health",
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"type": "string", "enum": ["ok"]}
+        }
+      }
+    }
+  ],
+
+  "nlp_mappings": [
+    {
+      "keywords": ["移动到", "运动到", "关节位置"],
+      "skill": "movej",
+      "examples": [
+        "把左臂移动到关节位置 1.57, 0, 1.57, 0, 1.57, 0",
+        "让右臂运动到 0, 0, 0, 0, 0, 0"
+      ]
+    },
+    {
+      "keywords": ["直线运动", "笛卡尔运动", "运动到坐标"],
+      "skill": "movel",
+      "examples": [
+        "左臂直线运动到坐标 0.5, 0.3, 0.4",
+        "笛卡尔运动到位置 (0.5, 0.3, 0.4)"
+      ]
+    },
+    {
+      "keywords": ["圆形运动", "圆弧运动"],
+      "skill": "movec",
+      "examples": [
+        "让机械臂沿着圆弧运动"
+      ]
+    },
+    {
+      "keywords": ["关节速度", "以速度运动", "速度控制"],
+      "skill": "joint_velocity",
+      "examples": [
+        "以关节速度 0.5, 0.3, -0.2, 0, 0.1, 0 运动",
+        "关节速度控制"
+      ]
+    },
+    {
+      "keywords": ["笛卡尔速度", "沿轴运动", "轴向速度"],
+      "skill": "cartesian_velocity",
+      "examples": [
+        "沿 X 轴以 0.1 米/秒的速度运动",
+        "笛卡尔速度控制"
+      ]
+    },
+    {
+      "keywords": ["健康", "状态", "检查"],
+      "skill": "health_check",
+      "examples": [
+        "检查机械臂服务器状态",
+        "机械臂服务器健康吗"
+      ]
+    }
+  ],
+
+  "setup_instructions": {
+    "prerequisites": [
+      "机械臂控制系统已启动",
+      "IPC 共享内存已初始化",
+      "HTTP 服务器在 127.0.0.1:8080 运行"
+    ],
+    "steps": [
+      {
+        "step": 1,
+        "instruction": "启动 HTTP 服务器",
+        "command": "source ~/robotic_arm_ws/install/setup.bash && ros2 run arm_controller arm_controller_http_server",
+        "expected_output": "Server running on http://127.0.0.1:8080"
+      },
+      {
+        "step": 2,
+        "instruction": "测试连接",
+        "command": "curl http://127.0.0.1:8080/health",
+        "expected_output": "{\"status\":\"ok\"}"
+      }
+    ]
+  },
+
+  "mode_descriptions": {
+    "movej": {
+      "description": "关节空间点到点运动",
+      "use_case": "需要快速从一个姿态运动到另一个姿态，不关心运动路径",
+      "parameters": "6个关节位置（弧度）",
+      "advantages": ["速度快", "避免奇点", "能量高效"],
+      "disadvantages": ["路径不可预测", "可能碰撞"]
+    },
+    "movel": {
+      "description": "笛卡尔空间直线运动",
+      "use_case": "需要从当前位置沿直线运动到目标位置，保持末端执行器方向",
+      "parameters": "目标位置(x,y,z) + 方向(四元数)",
+      "advantages": ["路径可预测", "可控运动"],
+      "disadvantages": ["速度较慢", "可能遇到奇点"]
+    },
+    "movec": {
+      "description": "笛卡尔空间圆形运动",
+      "use_case": "需要末端执行器沿着圆形或曲线路径运动，如绘画、焊接",
+      "parameters": "多个路径点（每个包含位置和方向）",
+      "advantages": ["光滑运动", "精确控制轨迹"],
+      "disadvantages": ["计算复杂", "需要更多参数"]
+    },
+    "joint_velocity": {
+      "description": "关节速度控制",
+      "use_case": "实时速度控制，如遥控操作、手动引导",
+      "parameters": "6个关节速度值（弧度/秒）",
+      "advantages": ["实时响应", "灵活控制"],
+      "disadvantages": ["需要持续输入", "难以精确定位"]
+    },
+    "cartesian_velocity": {
+      "description": "笛卡尔速度控制",
+      "use_case": "沿特定方向运动，如装配、精细操作",
+      "parameters": "线速度(vx,vy,vz) + 角速度(wx,wy,wz)",
+      "advantages": ["直观操作", "坐标系友好"],
+      "disadvantages": ["计算复杂", "需要逆运动学"]
+    }
+  }
+}
