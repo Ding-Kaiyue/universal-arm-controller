@@ -21,11 +21,15 @@ struct CommandIPC {
     static constexpr size_t MAX_MODE_LEN = 64;
     static constexpr size_t MAX_MAPPING_LEN = 64;
     static constexpr size_t MAX_COMMAND_ID_LEN = 128;
+    static constexpr size_t MAX_FILENAME_LEN = 256;  // 示教模式的文件名字段
+    static constexpr size_t MAX_ACTION_LEN = 64;    // 示教模式的动作字段（start、pause、resume、cancel、complete）
     static constexpr size_t MAX_PARAMS = 100;
 
     char mode[MAX_MODE_LEN];
     char mapping[MAX_MAPPING_LEN];
     char command_id[MAX_COMMAND_ID_LEN];
+    char filename[MAX_FILENAME_LEN];  // ✅ 示教模式专用字段，存储文件名
+    char action[MAX_ACTION_LEN];      // ✅ 示教模式专用字段，存储动作
     double parameters[MAX_PARAMS];
     size_t param_count;
     uint64_t timestamp;
@@ -34,9 +38,12 @@ struct CommandIPC {
         std::memset(mode, 0, MAX_MODE_LEN);
         std::memset(mapping, 0, MAX_MAPPING_LEN);
         std::memset(command_id, 0, MAX_COMMAND_ID_LEN);
+        std::memset(filename, 0, MAX_FILENAME_LEN);
+        std::memset(action, 0, MAX_ACTION_LEN);
         std::memset(parameters, 0, MAX_PARAMS * sizeof(double));
     }
 
+    // ============ 基础 setter/getter ============
     void set_mode(const std::string& m) {
         std::strncpy(mode, m.c_str(), MAX_MODE_LEN - 1);
         mode[MAX_MODE_LEN - 1] = '\0';
@@ -52,6 +59,18 @@ struct CommandIPC {
         command_id[MAX_COMMAND_ID_LEN - 1] = '\0';
     }
 
+    // 示教模式专用：设置文件名
+    void set_filename(const std::string& fname) {
+        std::strncpy(filename, fname.c_str(), MAX_FILENAME_LEN - 1);
+        filename[MAX_FILENAME_LEN - 1] = '\0';
+    }
+
+    // 示教模式专用：设置动作
+    void set_action(const std::string& act) {
+        std::strncpy(action, act.c_str(), MAX_ACTION_LEN - 1);
+        action[MAX_ACTION_LEN - 1] = '\0';
+    }
+
     void set_parameters(const std::vector<double>& params) {
         param_count = std::min(params.size(), size_t(MAX_PARAMS));
         for (size_t i = 0; i < param_count; ++i) {
@@ -62,6 +81,11 @@ struct CommandIPC {
     std::string get_mode() const { return std::string(mode); }
     std::string get_mapping() const { return std::string(mapping); }
     std::string get_command_id() const { return std::string(command_id); }
+
+    // 示教模式专用：获取文件名
+    std::string get_filename() const { return std::string(filename); }
+    // 示教模式专用：获取动作
+    std::string get_action() const { return std::string(action); }
 
     std::vector<double> get_parameters() const {
         return std::vector<double>(parameters, parameters + param_count);
@@ -144,6 +168,8 @@ public:
             new_cmd.set_mode(cmd.get_mode());
             new_cmd.set_mapping(cmd.get_mapping());
             new_cmd.set_command_id(cmd.get_command_id());
+            new_cmd.set_filename(cmd.get_filename());      // ✅ 设置 filename
+            new_cmd.set_action(cmd.get_action());          // ✅ 设置 action
             new_cmd.set_parameters(cmd.get_parameters());
 
             boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
@@ -229,6 +255,8 @@ public:
                     cmd.set_mode(ipc_cmd.get_mode());
                     cmd.set_mapping(ipc_cmd.get_mapping());
                     cmd.set_command_id(ipc_cmd.get_command_id());
+                    cmd.set_filename(ipc_cmd.get_filename());    // ✅ 读取 filename
+                    cmd.set_action(ipc_cmd.get_action());        // ✅ 读取 action
                     cmd.set_parameters(ipc_cmd.get_parameters());
                     final_queue->pop_front();
                     return true;
@@ -293,6 +321,8 @@ public:
                                 cmd.set_mode(valid_queue->front().get_mode());
                                 cmd.set_mapping(valid_queue->front().get_mapping());
                                 cmd.set_command_id(valid_queue->front().get_command_id());
+                                cmd.set_filename(valid_queue->front().get_filename());      // ✅ 读取 filename
+                                cmd.set_action(valid_queue->front().get_action());         // ✅ 读取 action
                                 cmd.set_parameters(valid_queue->front().get_parameters());
                                 valid_queue->pop_front();
                                 return true;

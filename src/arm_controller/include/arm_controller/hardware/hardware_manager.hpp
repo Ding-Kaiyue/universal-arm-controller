@@ -51,6 +51,7 @@ public:
     // ============= 配置信息 =============
     const std::string& get_robot_type(const std::string& mapping) const;
     const std::string& get_interface(const std::string& mapping) const;
+    std::string get_mapping_by_interface(const std::string& interface) const;  // 根据 interface 获取 mapping
     std::vector<std::string> get_all_mappings() const;
     const std::vector<uint32_t>& get_motors_id(const std::string& mapping) const;
     const std::vector<std::string>& get_joint_names(const std::string& mapping) const;

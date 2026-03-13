@@ -238,6 +238,17 @@ void ControllerManagerNode::init_controllers() {
                     }
                 }
 
+                // ✅ 为 TrajectoryRecord / TrajectoryReplay 注册模式切换请求回调
+                if (key == "TrajectoryRecord" || key == "TrajectoryReplay") {
+                    auto teach_ctrl = std::dynamic_pointer_cast<TeachControllerBase>(shared_controller);
+                    if (teach_ctrl) {
+                        teach_ctrl->set_hook_request_callback(
+                            [this](const std::string& mapping, const std::string& target_mode) {
+                                start_working_controller(target_mode, mapping);
+                            });
+                    }
+                }
+
                 RCLCPP_INFO(this->get_logger(), "[controllers] ✅ Created shared controller: %s (class: %s) for %zu mappings (consumer threads: 1)",
                             key.c_str(), class_name.c_str(), all_mappings.size());
             } else {
@@ -276,8 +287,6 @@ void ControllerManagerNode::handle_work_mode(
 }
 
 bool ControllerManagerNode::start_working_controller(const std::string& mode_name, const std::string& mapping) {
-    RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: start_working_controller(%s) called", mapping.c_str(), mode_name.c_str());
-
     // 立即取消任何正在执行的轨迹（所有模式切换都需要这样做）
     if (hardware_manager_) {
         hardware_manager_->cancel_trajectory(mapping);
@@ -301,10 +310,8 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
                 auto current_key_pair = std::make_pair(current_mode_it->second, mapping);
                 auto current_it = controller_map_.find(current_key_pair);
                 if (current_it != controller_map_.end()) {
-                    RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: Force stop() for Disable/EmergencyStop mode", mapping.c_str());
                     current_it->second->stop(mapping);
                     mapping_to_mode_.erase(mapping);
-                    RCLCPP_INFO(this->get_logger(), "[%s] Force stopped controller for mode: %s", mapping.c_str(), current_mode_it->second.c_str());
                 }
             }
         }
@@ -338,7 +345,6 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
 
     // 停止当前控制器
     bool need_hook = false;
-    RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: About to call stop_working_controller()", mapping.c_str());
     if (!stop_working_controller(need_hook, mapping)) {
         RCLCPP_WARN(this->get_logger(), "Failed to stop current controller");
         return false;
@@ -378,9 +384,6 @@ bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::
         std::unordered_map<std::string, bool> hook_state_map = it->second->needs_hook_state();
         auto hook_it = hook_state_map.find(mapping);
         need_hook = (hook_it != hook_state_map.end()) ? hook_it->second : false;
-
-        RCLCPP_INFO(this->get_logger(), "[%s] DEBUG: stop_working_controller() calling stop() for mode: %s",
-                    mapping.c_str(), current_mode.c_str());
         it->second->stop(mapping);
 
         // ✅ 清除 mapping_to_mode_[mapping]，标记该 mapping 已无活跃模式
@@ -389,8 +392,6 @@ bool ControllerManagerNode::stop_working_controller(bool& need_hook, const std::
             mapping_to_mode_.erase(mapping);
         }
 
-        RCLCPP_INFO(this->get_logger(), "[%s] Stopped controller for mode: %s, needs_hook: %s",
-                    mapping.c_str(), current_mode.c_str(), need_hook ? "true" : "false");
         return true;
     }
     return false;

@@ -2,6 +2,7 @@
 #define __TRAJECTORY_REPLAY_CONTROLLER_HPP__
 
 #include "controller_base/teach_controller_base.hpp"
+#include "controller_interfaces/msg/teaching_control.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "arm_controller/hardware/hardware_manager.hpp"
 #include "arm_controller/hardware/motor_data_reloader.hpp"
@@ -23,16 +24,20 @@ public:
     void start(const std::string& mapping = "") override;
     bool stop(const std::string& mapping = "") override;
 
-    void pause(const std::string& mapping = "") override;
-    void resume(const std::string& mapping = "") override;
-    void cancel(const std::string& mapping = "") override;
-    void complete(const std::string& mapping = "") override;
+    void pause() override;
+    void resume() override;
+    void cancel() override;
+    void complete() override;
+
+    // IPC execute 方法 - 处理 start/pause/resume/cancel/complete 动作
+    bool execute(const std::string& mapping, const std::string& command, const std::string& filename) override;
 
 private:
+    // IPC 命令队列消费线程
+    void command_queue_consumer_thread();
     // 初始化轨迹规划服务
     void initialize_planning_services();
-    void teach_callback(const std_msgs::msg::String::SharedPtr msg) override;
-    void on_teaching_control(const std_msgs::msg::String::SharedPtr msg) override;
+    void teach_callback(const controller_interfaces::msg::TeachingControl::SharedPtr msg) override;
 
     // 后台回放线程
     void replay_thread_func(const std::string& file_path);
@@ -53,14 +58,26 @@ private:
 
     std::string replay_dir_;
     std::shared_ptr<HardwareManager> hardware_manager_;
-    std::string active_mapping_;
 
     std::atomic<bool> replaying_{false};
     std::atomic<bool> paused_{false};
     std::unique_ptr<std::thread> replay_thread_;
 
     // 当前执行的轨迹ID
-    std::string current_execution_id_;
+    std::map<std::string, std::string> execution_ids_;
+    std::mutex execution_mutex_;
+
+    // ✅ 当前正在回放的映射（支持per-mapping状态）
+    std::map<std::string, bool> replaying_mappings_;
+    std::mutex state_mutex_;
+
+    // IPC 命令的临时存储（用于 consumer_thread 传递参数）
+    std::string ipc_command_filename_;
+    std::mutex ipc_command_mutex_;
+
+    // IPC 命令队列消费线程相关
+    std::unique_ptr<std::thread> queue_consumer_;
+    std::atomic<bool> consumer_running_{false};
 
     // 轨迹规划相关 - 支持多臂mapping
     std::map<std::string, std::shared_ptr<trajectory_planning::application::services::MotionPlanningService>> motion_planning_services_;

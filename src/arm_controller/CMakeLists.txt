@@ -103,6 +103,7 @@ add_library(arm_controller_lib
   src/trajectory_controller_section.cpp
   src/hardware/hardware_manager.cpp
   src/hardware/motor_data_recorder.cpp
+  src/hardware/recorder_manager.cpp
   src/hardware/motor_data_reloader.cpp
   src/dynamics/gravity_compensator.cpp
   src/controller/controller_registry.cpp
@@ -143,12 +144,15 @@ add_library(arm_controller_lib
   # src/controller/point_record/point_record_interface.cpp
   # src/controller/point_replay/point_replay_controller.cpp
   # src/controller/point_replay/point_replay_interface.cpp
-  # src/controller/trajectory_record/trajectory_record_controller.cpp
-  # src/controller/trajectory_record/trajectory_record_interface.cpp
-  # src/controller/trajectory_record/trajectory_smoother.cpp
-  # src/controller/trajectory_replay/trajectory_replay_controller.cpp
-  # src/controller/trajectory_replay/trajectory_replay_interface.cpp
-  # src/controller/trajectory_replay/trajectory_segmenter.cpp
+  src/controller/trajectory_record/trajectory_record_controller.cpp
+  src/controller/trajectory_record/trajectory_record_interface.cpp
+  src/controller/trajectory_record/trajectory_smoother.cpp
+  src/controller/trajectory_record/trajectory_record_ipc_interface.cpp
+  src/controller/trajectory_replay/trajectory_replay_controller.cpp
+  src/controller/trajectory_replay/trajectory_replay_command_section.cpp
+  src/controller/trajectory_replay/trajectory_replay_interface.cpp
+  src/controller/trajectory_replay/trajectory_segmenter.cpp
+  src/controller/trajectory_replay/trajectory_replay_ipc_interface.cpp
 )
 
 ament_target_dependencies(arm_controller_lib

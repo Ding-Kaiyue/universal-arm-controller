@@ -45,6 +45,8 @@ struct alignas(16) TrajectoryCommand {
     static constexpr size_t MAX_MODE_LEN = 32;
     static constexpr size_t MAX_MAPPING_LEN = 32;
     static constexpr size_t MAX_COMMAND_ID_LEN = 128;
+    static constexpr size_t MAX_FILENAME_LEN = 256;   // 示教模式的文件名字段
+    static constexpr size_t MAX_ACTION_LEN = 64;      // 示教模式的动作字段
 
     // 控制字段
     uint64_t seq;                              // 序号，用于检测丢包
@@ -52,9 +54,11 @@ struct alignas(16) TrajectoryCommand {
     uint32_t producer_id;                      // 生产者ID（安全检查）
 
     // 命令内容
-    char mode[MAX_MODE_LEN];                   // "MoveJ", "MoveL", "MoveC"
+    char mode[MAX_MODE_LEN];                   // "MoveJ", "MoveL", "MoveC", "TrajectoryRecord"
     char mapping[MAX_MAPPING_LEN];             // 目标映射（"left_arm", "right_arm"）
     char command_id[MAX_COMMAND_ID_LEN];       // 唯一命令ID（用于追踪）
+    char filename[MAX_FILENAME_LEN];           // ✅ 示教模式专用字段，存储文件名
+    char action[MAX_ACTION_LEN];               // ✅ 示教模式专用字段，存储动作
 
     // 参数（根据 mode 解释不同含义）
     int32_t param_count;                       // 参数数量（MoveJ: 关节数; MoveL: x,y,z,qx,qy,qz,qw; MoveC: 轨迹点数*7）
@@ -72,6 +76,8 @@ struct alignas(16) TrajectoryCommand {
         std::memset(mode, 0, MAX_MODE_LEN);
         std::memset(mapping, 0, MAX_MAPPING_LEN);
         std::memset(command_id, 0, MAX_COMMAND_ID_LEN);
+        std::memset(filename, 0, MAX_FILENAME_LEN);
+        std::memset(action, 0, MAX_ACTION_LEN);
         std::memset(parameters, 0, MAX_JOINTS * sizeof(double));
     }
 
@@ -105,6 +111,18 @@ struct alignas(16) TrajectoryCommand {
         command_id[MAX_COMMAND_ID_LEN - 1] = '\0';
     }
 
+    // ✅ 示教模式专用：设置文件名
+    void set_filename(const std::string& fname) {
+        std::strncpy(filename, fname.c_str(), MAX_FILENAME_LEN - 1);
+        filename[MAX_FILENAME_LEN - 1] = '\0';
+    }
+
+    // ✅ 示教模式专用：设置动作
+    void set_action(const std::string& act) {
+        std::strncpy(action, act.c_str(), MAX_ACTION_LEN - 1);
+        action[MAX_ACTION_LEN - 1] = '\0';
+    }
+
     void set_parameters(const std::vector<double>& params) {
         param_count = std::min(params.size(), size_t(MAX_JOINTS));
         for (int32_t i = 0; i < param_count; ++i) {
@@ -115,6 +133,11 @@ struct alignas(16) TrajectoryCommand {
     std::string get_mode() const { return std::string(mode); }
     std::string get_mapping() const { return std::string(mapping); }
     std::string get_command_id() const { return std::string(command_id); }
+
+    // ✅ 示教模式专用：获取文件名
+    std::string get_filename() const { return std::string(filename); }
+    // ✅ 示教模式专用：获取动作
+    std::string get_action() const { return std::string(action); }
 
     std::vector<double> get_parameters() const {
         return std::vector<double>(parameters, parameters + param_count);

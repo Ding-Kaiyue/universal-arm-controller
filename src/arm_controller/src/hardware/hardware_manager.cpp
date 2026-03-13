@@ -128,8 +128,6 @@ bool HardwareManager::is_robot_stopped(const std::string& mapping) const {
         }
     }
 
-    RCLCPP_INFO(node_->get_logger(), "[%s] is_robot_stopped returning TRUE (velocity.size=%zu)",
-                mapping.c_str(), joint_state.velocity.size());
     return true;
 }
 
@@ -224,6 +222,15 @@ const T& get_config_value(const std::map<std::string, T>& config_map,
 // ============ 配置信息访问 ============
 const std::string& HardwareManager::get_interface(const std::string& mapping) const {
     return get_config_value(mapping_to_interface_, mapping, "interface", node_->get_logger());
+}
+
+std::string HardwareManager::get_mapping_by_interface(const std::string& interface) const {
+    auto it = interface_to_mapping_.find(interface);
+    if (it != interface_to_mapping_.end()) {
+        return it->second;
+    }
+    RCLCPP_WARN(node_->get_logger(), "❎ Interface '%s' not found in configuration", interface.c_str());
+    return "";
 }
 
 std::vector<std::string> HardwareManager::get_all_mappings() const {

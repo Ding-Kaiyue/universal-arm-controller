@@ -21,20 +21,18 @@ public:
      * @param times 时间戳数组（输出）
      * @param positions 位置数据数组（输出）
      * @param velocities 速度数据数组（输出）
-     * @param efforts 力矩数据数组（输出）
      * @return 加载成功返回true，失败返回false
      */
     bool load_trajectory_from_csv(
         const std::string& file_path,
-        std::vector<double>& times,
-        std::vector<std::vector<double>>& positions,
-        std::vector<std::vector<double>>& velocities,
-        std::vector<std::vector<double>>& efforts);
+        std::map<std::string, std::vector<double>>& times,
+        std::map<std::string, std::vector<std::vector<double>>>& positions,
+        std::map<std::string, std::vector<std::vector<double>>>& velocities);
 
     /**
      * @brief 获取加载的数据点总数
      */
-    size_t get_total_points() const { return total_points_; }
+    size_t get_total_points(std::string& interface) const { return total_points_.at(interface); }
 
     /**
      * @brief 获取加载的文件路径
@@ -43,15 +41,16 @@ public:
 
 private:
     rclcpp::Node::SharedPtr node_;
-    size_t total_points_ = 0;
+    std::map<std::string, size_t> total_points_;
     std::string loaded_file_;
 
     // 辅助函数：解析CSV行
-    bool parse_csv_line(const std::string& line, int line_count,
+    bool parse_csv_line(const std::string& line, 
+                       int line_count,
+                       std::string& interface,
                        double& timestamp,
                        std::vector<double>& positions,
-                       std::vector<double>& velocities,
-                       std::vector<double>& efforts);
+                       std::vector<double>& velocities);
 };
 
 #endif // __MOTOR_DATA_RELOADER_HPP__

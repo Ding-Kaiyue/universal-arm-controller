@@ -76,21 +76,17 @@ controllers:
   #     - name: /controller_api/point_replay_control/{mapping}
   #       type: std_msgs/msg/String
 
-  # - key: TrajectoryRecord
-  #   class: TrajectoryRecordController
-  #   input_topics:
-  #     - name: /controller_api/trajectory_record_action/{mapping}
-  #       type: std_msgs/msg/String
-  #     - name: /controller_api/trajectory_record_control/{mapping}
-  #       type: std_msgs/msg/String
+  - key: TrajectoryRecord
+    class: TrajectoryRecordController
+    input_topic:
+      name: /controller_api/trajectory_record_action/{mapping}
+      type: controller_interfaces/msg/TeachingControl
 
-  # - key: TrajectoryReplay
-  #   class: TrajectoryReplayController
-  #   input_topics:
-  #     - name: /controller_api/trajectory_replay_action/{mapping}
-  #       type: std_msgs/msg/String
-  #     - name: /controller_api/trajectory_replay_control/{mapping}
-  #       type: std_msgs/msg/String
+  - key: TrajectoryReplay
+    class: TrajectoryReplayController
+    input_topic:
+      name: /controller_api/trajectory_replay_action/{mapping}
+      type: controller_interfaces/msg/TeachingControl
 
 # MoveIt 速度缩放参数
 # 全局默认值（0.0~1.0）

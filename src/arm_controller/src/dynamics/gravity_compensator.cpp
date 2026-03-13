@@ -135,32 +135,10 @@ std::vector<double> GravityCompensator::computeGravity(
     std::vector<double> result;
     result.reserve(joint_positions.size());
 
-    // ========== 调试输出：打印关节位置和计算的力矩 ==========
-    static int debug_counter = 0;
-    if (debug_counter % 100 == 0) {  // 每100次打印一次（100Hz下约1秒打印一次）
-        std::cout << "\n[GravityCompensator] " << mapping << " - Gravity Torques Computed:" << std::endl;
-        std::cout << "  Joint Positions (rad): ";
-        for (size_t i = 0; i < joint_positions.size(); ++i) {
-            std::cout << joint_positions[i];
-            if (i < joint_positions.size() - 1) std::cout << ", ";
-        }
-        std::cout << std::endl;
-    }
-
     for (size_t i = 0; i < indices.size(); ++i) {
         double torque = tau(indices[i]);
         result.push_back(torque);
-
-        if (debug_counter % 100 == 0) {
-            std::cout << "    Joint " << i << ": " << torque << " N·m" << std::endl;
-        }
     }
-
-    if (debug_counter % 100 == 0) {
-        std::cout << std::flush;
-    }
-    debug_counter++;
-    // ======================================================
 
     return result;
 }
