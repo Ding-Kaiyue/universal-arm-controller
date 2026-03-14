@@ -26,56 +26,56 @@ int main() {
     std::string filename = "trajectory_demo";
 
     // ============ 1️⃣ 开始记录 ============
-    // std::cout << "========== 开始轨迹录制 (所有 active mappings) ==========\n";
-    // std::cout << "发送 startRecording 命令...\n";
+    std::cout << "========== 开始轨迹录制 (所有 active mappings) ==========\n";
+    std::cout << "发送 startRecording 命令...\n";
 
-    // if (!trajectory_record.startRecording(filename, "*")) {
-    //     std::cerr << "❌ 失败: " << trajectory_record.getLastError() << "\n";
-    // } else {
-    //     std::cout << "✅ 已开始录制所有 mappings\n";
-    // }
-    // std::cout << "\n";
+    if (!trajectory_record.startRecording(filename, "*")) {
+        std::cerr << "❌ 失败: " << trajectory_record.getLastError() << "\n";
+    } else {
+        std::cout << "✅ 已开始录制所有 mappings\n";
+    }
+    std::cout << "\n";
 
-    // // ============ 2️⃣ 等待 10 秒进行录制 ============
-    // std::cout << "⏱️  开始记录 (10秒)...\n";
-    // auto start_time = std::chrono::steady_clock::now();
+    // ============ 2️⃣ 等待 10 秒进行录制 ============
+    std::cout << "⏱️  开始记录 (10秒)...\n";
+    auto start_time = std::chrono::steady_clock::now();
 
-    // while (true) {
-    //     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-    //         std::chrono::steady_clock::now() - start_time).count();
+    while (true) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_time).count();
 
-    //     if (elapsed >= duration_ms) {
-    //         break;
-    //     }
+        if (elapsed >= duration_ms) {
+            break;
+        }
 
-    //     // 每秒输出进度
-    //     int remaining = (duration_ms - elapsed) / 1000;
-    //     if (elapsed % 1000 < 50) {  // 每秒输出一次
-    //         std::cout << "\r   剩余时间: " << remaining << "s   " << std::flush;
-    //     }
+        // 每秒输出进度
+        int remaining = (duration_ms - elapsed) / 1000;
+        if (elapsed % 1000 < 50) {  // 每秒输出一次
+            std::cout << "\r   剩余时间: " << remaining << "s   " << std::flush;
+        }
 
-    //     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    // }
-    // std::cout << "\n✅ 录制完成\n\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    std::cout << "\n✅ 录制完成\n\n";
 
-    // // ============ 3️⃣ 停止记录 ============
-    // std::cout << "========== 完成轨迹录制 ==========\n";
-    // std::cout << "发送 stopRecording 命令 -> left_arm 和 right_arm ...\n";
+    // ============ 3️⃣ 停止记录 ============
+    std::cout << "========== 完成轨迹录制 ==========\n";
+    std::cout << "发送 stopRecording 命令 -> left_arm 和 right_arm ...\n";
 
-    // if (!trajectory_record.stopRecording("*")) {
-    //     std::cerr << "❌ 失败: " << trajectory_record.getLastError() << "\n";
-    // } else {
-    //     std::cout << "✅ 已保存\n";
-    // }
+    if (!trajectory_record.stopRecording("*")) {
+        std::cerr << "❌ 失败: " << trajectory_record.getLastError() << "\n";
+    } else {
+        std::cout << "✅ 已保存\n";
+    }
 
-    // // ============ 4️⃣ 等待处理完成 ============
-    // std::cout << "⏳ 等待轨迹平滑处理...\n";
-    // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    // std::cout << "✅ 处理完成\n\n";
+    // ============ 4️⃣ 等待处理完成 ============
+    std::cout << "⏳ 等待轨迹平滑处理...\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    std::cout << "✅ 处理完成\n\n";
 
-    // // ============ 5️⃣ 等待 1 秒后开始复现 ============
-    // std::cout << "⏱️  等待 1 秒后开始轨迹复现...\n";
-    // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    // ============ 5️⃣ 等待 1 秒后开始复现 ============
+    std::cout << "⏱️  等待 1 秒后开始轨迹复现...\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
     // 创建回放接口实例
     trajectory_replay::TrajectoryReplayIPCInterface trajectory_replay;
