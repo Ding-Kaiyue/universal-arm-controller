@@ -16,13 +16,13 @@ Universal Arm Controller 的架构设计目标是：
 - **不提供硬实时保证**：系统运行在标准 Linux + ROS 2，无法保证 < 1 μs 抖动
 - **轨迹规划职责分工**：MoveJ 依赖 MoveIt2 规划，MoveL/MoveC 使用自有轨迹生成算法
 - **不包含硬件安全回路**：提供软件级急停逻辑，但不包含硬件抱闸或功能安全（SIL 2/3）认证
-- **支持多臂控制**：主分支支持单臂，`feature/ipc-dual-arm` 分支支持双臂协同控制
+- **支持多 mapping 并发控制**：支持 `single_arm`、`left_arm`、`right_arm`，并可扩展夹爪 mapping（如 `left_gripper`）
 
 ### 关键设计原则
 
 1. **分层解耦**：应用层、控制层、硬件层职责清晰分离
 2. **观察者模式**：硬件状态变化通过事件回调通知上层，而非轮询
-3. **模式切换安全**：同一时刻只有一个控制器活跃，切换时进行状态验证
+3. **模式切换安全**：每个 mapping 在同一时刻只有一个活跃控制器，切换时进行状态验证
 4. **自定义注册机制**：不依赖 pluginlib，通过 YAML 配置驱动控制器注册
 5. **接口稳定性**：ROS 2 接口（`/controller_api/*`）向后兼容，硬件接口仅供内部使用
 
@@ -139,9 +139,9 @@ ControllerManager 是系统的**全局调度中心**，负责控制器生命周�
 
 **职责**：
 - 管理所有控制器的生命周期（创建、初始化、激活、停用、销毁）
-- 处理模式切换请求，确保同一时刻只有一个控制器活跃
+- 处理模式切换请求，确保每个 mapping 同一时刻只有一个控制器活跃
 - 维护模式切换状态机（normal → hook_state → normal）
-- 管理多臂配置（支持 single_arm/left_arm/right_arm）
+- 管理多 mapping 配置（支持 single_arm/left_arm/right_arm/left_gripper）
 - 初始化和管理 HardwareManager 单例
 
 ### 3.1 各类 Controller（具体控制器）
@@ -165,7 +165,9 @@ ControllerManager 是系统的**全局调度中心**，负责控制器生命周�
 
 **实现位置**：`src/arm_controller/src/controller/`
 
-系统提供 5 个基类和 14 个具体控制器实现。新的控制模式可通过继承相应基类并在 `controller_registry.cpp` 中注册来添加。
+系统采用 5 个基类 + 多个具体控制器实现。  
+> [!NOTE]
+> 文档中的控制器表描述的是架构能力全集；实际启用的控制器以 `controller_registry.cpp` 当前注册项为准。
 
 **5 个基类**：
 1. **ModeControllerBase** - 所有控制器的基类
@@ -268,7 +270,8 @@ ControllerManager 是系统的**全局调度中心**，负责控制器生命周�
 2. **停用阶段**：调用当前活跃控制器的停止方法，等待其完成清理
 3. **钩子状态处理**：如果当前控制器的停止需要钩子状态，则切换到HoldState
 4. **激活阶段**：调用目标控制器的启动方法，初始化新模式的订阅
-5. **原子性**：模式切换过程中，不允许新的命令进入
+5. **Teach 模式两阶段启动**：TrajectoryRecord/TrajectoryReplay 的 `start` 命令先触发模式切换，再在模式就绪后执行动作
+6. **原子性**：模式切换过程中，不允许新的命令进入
 
 ### 实时调度路径
 
@@ -289,7 +292,65 @@ main()
 - 异步执行不阻塞 ROS 2 事件循环
 - 每个硬件命令调用必须在 10ms 内完成（100Hz 控制周期）
 - 状态反馈通过观察者回调异步处理
-- 同一时刻最多只有一个轨迹在执行
+- 单个 mapping 同一时刻最多执行一条轨迹；不同 mapping 可并行执行
+
+### 三类命令驱动模式的执行机制（对比）
+
+系统在基类层面有 4 类控制器：`TrajectoryControllerBase`、`VelocityControllerBase`、`TeachControllerBase`、`UtilityControllerBase`。  
+本节只对比其中“命令驱动执行”的 3 类：轨迹（MoveJ/L/C）、速度（Joint/Cartesian Velocity）、示教（TrajectoryRecord/Replay）。
+
+`UtilityControllerBase`（如 HoldState/SystemStart/ROS2ActionControl）主要承担系统状态与辅助职责，不属于这张“命令执行语义”对比表。
+
+| 维度 | MoveJ/L/C（离散轨迹） | 速度控制（Joint/Cartesian Velocity） | 示教（TrajectoryRecord/Replay） |
+|---|---|---|---|
+| 命令形态 | 单次命令触发一次完整执行 | 连续命令流，在线刷新目标 | 会话型命令（start/pause/resume/complete/cancel） |
+| 启动方式 | mode 就绪后直接执行命令 | mode 就绪后进入持续 RT 控制循环 | `start` 两阶段：先切模式，再落地执行 |
+| 模式切换 | 不就绪时请求 hook，重试当前命令 | 不就绪时请求 hook，等待循环继续 | start 不就绪时置为 pending，重试到 mode 就绪 |
+| 运行时状态 | `EXECUTING -> SUCCESS/FAILED -> IDLE` | 持续 EXECUTING，命令超时后自动归零 | 除执行状态外，还要维护录制/回放会话状态 |
+| 数据通路 | 在线规划/插补后执行 | RT buffer 取最新速度命令 | Replay 读取 CSV，按 interface->mapping 分流并分段执行 |
+
+### MoveJ / MoveL / MoveC 模式（补充）
+
+MoveJ/L/C 是“一条命令对应一次执行事务”的模式：
+
+1. IPC 推送一次性命令（mode + mapping + params）
+2. consumer `popWithFilter("MoveJ"/"MoveL"/"MoveC")` 取命令
+3. `transitionToMode(target_mode)` 检查模式就绪
+4. 未就绪则请求 hook 切换，后续重试
+5. 就绪后执行规划/轨迹生成并提交 `HardwareManager`
+6. 执行结束写回 `SUCCESS/FAILED -> IDLE`
+
+![MoveJ/L/C Sequence](../diagrams/movej_l_c_sequence.png)
+
+### 速度控制模式（JointVelocity/CartesianVelocity）
+
+速度模式是“持续流式控制”：
+
+1. consumer 持续消费速度命令并写入 RT buffer
+2. 若 mode 不匹配，先请求 ControllerManager 完成切换
+3. RT 循环每周期取最新命令作为目标
+4. 100ms 无新命令自动发送零速度（失联保护）
+5. 同一 mapping 通过 execution mutex 串行，避免并发冲突
+
+![Velocity Sequence](../diagrams/velocity_control_sequence.png)
+
+### TrajectoryRecord/Replay 命令路径（补充）
+
+示教模式采用“命令队列消费者 + 两阶段 start”：
+
+1. IPC 收到 `start` 先检查目标 mapping 的当前 mode
+2. 未处于目标 mode 时，通过 hook 回调触发 ControllerManager 切换
+3. 安全检查通过后，ControllerManager 从 HoldState 自动切到目标 mode
+4. consumer 重试并在 mode 就绪后真正执行 `start`
+
+这个机制的核心价值是：外部只发一次 `start`，也能完成“安全切换 + 会话启动”。
+
+> [!NOTE]
+> TrajectoryReplay 解析 CSV 时按 `interface`（如 `can0/can1`）读取每行，再通过
+`hardware_manager->get_mapping_by_interface(interface)` 映射到 mapping。  
+> 因此回放数据按 mapping 分桶，不会把不同 interface 的点混发到同一 mapping。
+
+![Teach Sequence](../diagrams/teach_mode_sequence.png)
 
 ---
 
@@ -317,6 +378,7 @@ main()
 - `single_arm` - 单臂配置
 - `left_arm` - 双臂左臂
 - `right_arm` - 双臂右臂
+- `left_gripper` - 左夹爪（软件 mapping，可独立参与模式切换）
 
 **配置文件位置**：`config/hardware_config.yaml`
 
@@ -339,7 +401,7 @@ main()
 
 **第 4 步**：编译和测试
 - 编译：`colcon build --packages-select arm_controller`
-- 启动系统：`ros2 launch arm_controller bringup.launch.py`
+- 启动系统：`ros2 launch robotic_arm_bringup robotic_arm_real.launch.py`
 - 切换模式：`ros2 service call /controller_api/controller_mode ...`
 
 ### 新硬件驱动的扩展步骤
@@ -657,8 +719,8 @@ Algorithm 层提供的是：
 
 **架构支持**：系统设计支持多臂场景的控制。
 
-- **主分支**：单臂控制（`single_arm`）
-- **feature/ipc-dual-arm 分支**：双臂协同控制（`left_arm` / `right_arm`）
+- 支持单臂和双臂（`single_arm` / `left_arm` / `right_arm`）
+- 支持扩展工具 mapping（如 `left_gripper`）
 - 多于两臂的复杂协调逻辑应在应用层实现
 
 **集成者责任**：三臂及以上场景需在应用层实现协调控制策略。
