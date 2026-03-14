@@ -91,8 +91,6 @@ bool ControllerStateManager::transitionToMode(const std::string& target_mode) {
     // 如果在 hook 状态，只更新目标模式
     if (in_hook_state_) {
         target_mode_ = target_mode;
-        std::cout << "ℹ️  [" << mapping_ << "] In hook state, updated target mode to: "
-                  << target_mode << std::endl;
         return true;
     }
 
@@ -102,16 +100,16 @@ bool ControllerStateManager::transitionToMode(const std::string& target_mode) {
         in_hook_state_ = true;
         target_mode_ = target_mode;
         execution_state_ = ExecutionState::IDLE;
-        std::cout << "⏹️  [" << mapping_ << "] Transitioning to hook before: "
-                  << target_mode << std::endl;
         return true;
     }
 
-    // 可以直接转移
+    // 可以直接转移（仅记录“目标模式请求”）
+    // 注意：current_mode_ 只由执行侧反馈（initializeCurrentMode/updateFromExecutor）更新，
+    // 避免 IPC 侧出现“已切换”假象，与 ControllerManager 实际模式保持一致。
     target_mode_ = target_mode;
-    current_mode_ = target_mode;
     execution_state_ = ExecutionState::IDLE;
-    std::cout << "✅ [" << mapping_ << "] Transitioning to mode: " << target_mode << std::endl;
+    std::cout << "➡️ [" << mapping_ << "] Requested target mode: " << target_mode
+              << " (current: " << current_mode_ << ")" << std::endl;
     return true;
 }
 

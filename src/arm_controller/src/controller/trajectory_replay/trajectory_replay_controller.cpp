@@ -712,14 +712,16 @@ bool TrajectoryReplayController::execute(const std::string& mapping, const std::
             replaying_mappings_[mapping] = true;
         }
 
-        replaying_ = true;
-        paused_ = false;
-
         // 启动后台回放线程
         if (replay_thread_ && replay_thread_->joinable()) {
+            // 先停止并回收旧线程，避免旧线程状态影响新会话
             replaying_ = false;
             replay_thread_->join();
         }
+
+        // 新会话开始前重置运行状态
+        replaying_ = true;
+        paused_ = false;
 
         replay_thread_ = std::make_unique<std::thread>([this, file_path, mapping]() {
             this->replay_thread_func(file_path);

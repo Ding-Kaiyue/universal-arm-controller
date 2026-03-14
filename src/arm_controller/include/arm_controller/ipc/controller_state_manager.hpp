@@ -63,8 +63,9 @@ public:
     ExecutionState getExecutionState() const; // 当前执行状态
     bool isInHookState() const;              // 是否在 hook 状态
 
-    // 非阻塞式模式转移
+    // 非阻塞式模式转移请求
     // 立即返回，不等待执行进程反馈
+    // 语义：只记录目标模式（target_mode）；current_mode 由执行侧反馈更新
     bool transitionToMode(const std::string& target_mode);
 
     // 设置执行状态

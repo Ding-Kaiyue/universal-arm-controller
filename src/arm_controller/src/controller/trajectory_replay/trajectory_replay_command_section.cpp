@@ -41,7 +41,8 @@ std::vector<std::string> resolve_target_mappings(
 bool ensure_mode_ready_for_start(
     const std::vector<std::string>& target_mappings,
     const rclcpp::Logger& logger,
-    const std::function<void(const std::string&, const std::string&)>& hook_request_callback) {
+    const std::function<void(const std::string&, const std::string&)>& hook_request_callback,
+    const std::function<bool(const std::string&)>& is_mapping_active) {
     bool has_hook = false;
 
     for (const auto& target_mapping : target_mappings) {
@@ -49,20 +50,26 @@ bool ensure_mode_ready_for_start(
             arm_controller::CommandQueueIPC::getMappingExecutionMutex(target_mapping));
         auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(target_mapping);
 
-        if (!state_mgr) {
-            continue;
+        // 关键修复：仅依赖 IPC 状态会出现“状态已切换但真实控制器仍是 HoldState”。
+        // 必须同时校验控制器在 ControllerManager 侧是否真的 active。
+        bool need_transition_request = !is_mapping_active(target_mapping);
+        if (state_mgr) {
+            // 先判断再更新状态，避免 transitionToMode 直接把 current_mode 改成目标模式后误判。
+            if (state_mgr->getCurrentMode() != "TrajectoryReplay" || state_mgr->isInHookState()) {
+                need_transition_request = true;
+            }
+            // 仍然保留“表达目标模式需求”的语义，便于 IPC 侧状态可视化。
+            state_mgr->transitionToMode("TrajectoryReplay");
         }
 
-        state_mgr->transitionToMode("TrajectoryReplay");
-        if (state_mgr->isInHookState()) {
+        if (need_transition_request) {
             RCLCPP_DEBUG(logger,
-                         "[%s] 🛑 TrajectoryReplay in hook state - waiting for transition",
+                         "[%s] 🛑 TrajectoryReplay mode not ready, requesting transition",
                          target_mapping.c_str());
             if (hook_request_callback) {
                 hook_request_callback(target_mapping, "TrajectoryReplay");
             }
             has_hook = true;
-            break;
         }
     }
 
@@ -124,11 +131,17 @@ void finalize_command_states(
 
 void TrajectoryReplayController::command_queue_consumer_thread() {
     arm_controller::CommandIPC cmd;
+    bool has_pending_cmd = false;
+    arm_controller::CommandIPC pending_cmd;
 
     while (consumer_running_) {
-        if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(
-                cmd, "TrajectoryReplay", trajectory_replay_command_section::kQueuePopTimeoutMs)) {
-            continue;
+        if (has_pending_cmd) {
+            cmd = pending_cmd;
+        } else {
+            if (!arm_controller::CommandQueueIPC::getInstance().popWithFilter(
+                    cmd, "TrajectoryReplay", trajectory_replay_command_section::kQueuePopTimeoutMs)) {
+                continue;
+            }
         }
 
         std::string mapping = cmd.get_mapping();
@@ -149,12 +162,19 @@ void TrajectoryReplayController::command_queue_consumer_thread() {
         try {
             if (action == "start" &&
                 !trajectory_replay_command_section::ensure_mode_ready_for_start(
-                    target_mappings, node_->get_logger(), hook_request_callback_)) {
+                    target_mappings, node_->get_logger(), hook_request_callback_,
+                    [this](const std::string& m) { return this->is_active(m); })) {
+                // 模式尚未就绪：保留当前命令，等待 Hook -> 目标模式切换后重试。
+                // 不能直接丢弃该命令，否则“只发一次 start”会失效。
+                pending_cmd = cmd;
+                has_pending_cmd = true;
                 std::this_thread::sleep_for(
                     std::chrono::milliseconds(trajectory_replay_command_section::kPendingRetrySleepMs));
                 continue;
             }
 
+            // 命令进入实际执行阶段后清除 pending 标记
+            has_pending_cmd = false;
             trajectory_replay_command_section::set_execution_state_for_mappings(
                 target_mappings, arm_controller::ipc::ExecutionState::EXECUTING);
 
@@ -176,13 +196,15 @@ void TrajectoryReplayController::command_queue_consumer_thread() {
                         }
                     }
 
-                    replaying_ = true;
-                    paused_ = false;
-
                     if (replay_thread_ && replay_thread_->joinable()) {
+                        // 先停止并回收旧线程，避免旧线程状态影响新会话
                         replaying_ = false;
                         replay_thread_->join();
                     }
+
+                    // 新会话开始前重置运行状态
+                    replaying_ = true;
+                    paused_ = false;
 
                     replay_thread_ = std::make_unique<std::thread>([this, file_path]() {
                         this->replay_thread_func(file_path);

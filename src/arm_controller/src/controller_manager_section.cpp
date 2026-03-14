@@ -335,8 +335,6 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
         auto hook_state_it = mapping_in_hook_state_.find(mapping);
         bool is_in_hook = (hook_state_it != mapping_in_hook_state_.end()) ? hook_state_it->second : false;
         if (is_in_hook) {
-            RCLCPP_INFO(this->get_logger(), "[%s] Currently in hook state, updating target mode to %s",
-                        mapping.c_str(), mode_name.c_str());
             // 轨迹已在上面取消，更新目标模式，让持续检查机制自动处理转换
             mapping_target_mode_[mapping] = mode_name;
             return true;
@@ -482,7 +480,6 @@ void ControllerManagerNode::on_transition_ready(const std::string& mapping) {
     auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
     if (state_mgr) {
         state_mgr->initializeCurrentMode(target);  // 清除 in_hook_state，设置当前模式为目标模式
-        RCLCPP_INFO(this->get_logger(), "[%s] ✅ IPC state updated: hook cleared, mode set to %s", mapping.c_str(), target.c_str());
     }
 
     // 执行实际的状态转换
