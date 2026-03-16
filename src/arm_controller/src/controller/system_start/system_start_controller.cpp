@@ -34,6 +34,15 @@ void SystemStartController::start(const std::string& mapping) {
         const std::string& interface = hardware_manager_->get_interface(mapping);
         const std::vector<uint32_t>& motor_ids = hardware_manager_->get_motors_id(mapping);
 
+        // 纯软件 mapping（例如无反馈夹爪）不执行电机使能/保持
+        if (motor_ids.empty()) {
+            RCLCPP_INFO(node_->get_logger(),
+                        "[%s] ✅ SystemStart: software mapping detected, skip motor enable/hold",
+                        mapping.c_str());
+            ModeControllerBase::start(mapping);
+            return;
+        }
+
         // 使能所有电机的MIT模式
         hardware_driver->enable_motors(interface, motor_ids, static_cast<uint8_t>(MotorControlMode::MIT_MODE));
         RCLCPP_INFO(node_->get_logger(), "[%s] ✅ Enabled %zu motors in MIT mode",

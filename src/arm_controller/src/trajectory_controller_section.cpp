@@ -4,6 +4,8 @@
 #include <rcl_interfaces/msg/parameter_descriptor.hpp>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
+#include <cmath>
 
 TrajectoryControllerNode::TrajectoryControllerNode()
     : Node("trajectory_controller_node")
@@ -178,6 +180,26 @@ void TrajectoryControllerNode::execute_trajectory(const std::shared_ptr<GoalHand
     auto result = std::make_shared<FollowJointTrajectory::Result>();
 
     try {
+        // 纯软件映射（如无反馈夹爪）：直接调用 gripper 控制接口
+        if (hardware_manager_->get_motors_id(mapping).empty()) {
+            bool success = execute_gripper_command(*goal, mapping);
+            if (!success) {
+                result->error_code = FollowJointTrajectory::Result::GOAL_TOLERANCE_VIOLATED;
+                result->error_string = "Gripper command execution failed";
+                goal_handle->abort(result);
+                publish_action_event("action_failed", mapping);
+                current_goal_handle_.reset();
+                return;
+            }
+
+            result->error_code = FollowJointTrajectory::Result::SUCCESSFUL;
+            result->error_string = "Software trajectory executed successfully";
+            goal_handle->succeed(result);
+            on_trajectory_completed(mapping);
+            current_goal_handle_.reset();
+            return;
+        }
+
         // 将ROS轨迹转换为插值器格式
         auto interpolator_trajectory = arm_controller::utils::TrajectoryConverter::convertRosToInterpolator(goal->trajectory);
 
@@ -255,3 +277,105 @@ void TrajectoryControllerNode::execute_trajectory(const std::shared_ptr<GoalHand
     current_goal_handle_.reset();
 }
 
+bool TrajectoryControllerNode::execute_gripper_command(
+    const FollowJointTrajectory::Goal& goal,
+    const std::string& mapping) {
+    RCLCPP_INFO(this->get_logger(),
+                "[%s] Executing software gripper trajectory with %zu points",
+                mapping.c_str(), goal.trajectory.points.size());
+
+    const auto hardware_driver = hardware_manager_->get_hardware_driver();
+    if (!hardware_driver) {
+        RCLCPP_ERROR(this->get_logger(), "[%s] Gripper command failed: hardware driver not initialized", mapping.c_str());
+        return false;
+    }
+
+    const std::string interface = hardware_manager_->get_interface_for_mapping(mapping);
+    if (interface.empty()) {
+        RCLCPP_ERROR(this->get_logger(), "[%s] Gripper command failed: interface not configured", mapping.c_str());
+        return false;
+    }
+
+    const auto& trajectory = goal.trajectory;
+    if (trajectory.points.empty()) {
+        RCLCPP_ERROR(this->get_logger(), "[%s] Gripper command failed: empty trajectory points", mapping.c_str());
+        return false;
+    }
+
+    // 使用最后一个轨迹点作为 slider 目标值
+    const auto& point = trajectory.points.back();
+    if (point.positions.empty()) {
+        RCLCPP_ERROR(this->get_logger(), "[%s] Gripper command failed: empty positions", mapping.c_str());
+        return false;
+    }
+
+    int finger_idx = -1;
+    if (!trajectory.joint_names.empty()) {
+        auto it = std::find(trajectory.joint_names.begin(), trajectory.joint_names.end(), "left_gripper_finger1_joint");
+        if (it != trajectory.joint_names.end()) {
+            finger_idx = static_cast<int>(std::distance(trajectory.joint_names.begin(), it));
+        }
+    }
+    if (finger_idx < 0 || finger_idx >= static_cast<int>(point.positions.size())) {
+        finger_idx = 0;
+    }
+
+    const std::string finger_name = "left_gripper_finger1_joint";
+    JointLimits limits;
+    hardware_manager_->get_joint_limits(finger_name, limits);
+    double min_pos = limits.has_position_limits ? limits.min_position : 0.0;
+    double max_pos = limits.has_position_limits ? limits.max_position : 0.025;
+    double target_pos = point.positions[static_cast<size_t>(finger_idx)];
+
+    double ratio = 0.0;
+    if (max_pos > min_pos + 1e-9) {
+        ratio = (target_pos - min_pos) / (max_pos - min_pos);
+    }
+    ratio = std::clamp(ratio, 0.0, 1.0);
+    // PGC 实际方向与 RViz 关节值相反：关节越小越夹紧
+    // 因此将关节归一化值做反向映射到协议百分比
+    uint8_t position_percent = static_cast<uint8_t>(std::lround((1.0 - ratio) * 100.0));
+
+    // 协议约束：velocity [1,100], effort [20,100]
+    uint8_t velocity_percent = 50;
+    if (finger_idx >= 0 && finger_idx < static_cast<int>(point.velocities.size())) {
+        double vel = std::abs(point.velocities[static_cast<size_t>(finger_idx)]);
+        double max_vel = (limits.has_velocity_limits && limits.max_velocity > 1e-6) ? limits.max_velocity : 1.0;
+        velocity_percent = static_cast<uint8_t>(std::lround(std::clamp(vel / max_vel, 0.0, 1.0) * 100.0));
+    }
+    velocity_percent = std::clamp<uint8_t>(velocity_percent, 1, 100);
+
+    uint8_t effort_percent = 50;
+    if (finger_idx >= 0 && finger_idx < static_cast<int>(point.effort.size())) {
+        double effort = std::abs(point.effort[static_cast<size_t>(finger_idx)]);
+        effort_percent = static_cast<uint8_t>(std::lround(std::clamp(effort, 0.0, 100.0)));
+    }
+    effort_percent = std::clamp<uint8_t>(effort_percent, 20, 100);
+
+    // 1 = PGC_Gripper
+    hardware_driver->control_gripper(interface, 1, position_percent, velocity_percent, effort_percent);
+
+    // 为 RViz/MoveIt 同步软件状态：finger2 与 finger1 同步（与 URDF mimic 一致）
+    const auto& mapping_joint_names = hardware_manager_->get_joint_names(mapping);
+    if (!mapping_joint_names.empty()) {
+        std::vector<double> positions(mapping_joint_names.size(), 0.0);
+        std::vector<double> velocities(mapping_joint_names.size(), 0.0);
+        for (size_t i = 0; i < mapping_joint_names.size(); ++i) {
+            if (mapping_joint_names[i] == "left_gripper_finger1_joint" ||
+                mapping_joint_names[i] == "left_gripper_finger2_joint") {
+                positions[i] = target_pos;
+                if (finger_idx >= 0 && finger_idx < static_cast<int>(point.velocities.size())) {
+                    velocities[i] = point.velocities[static_cast<size_t>(finger_idx)];
+                }
+            }
+        }
+        hardware_manager_->update_software_joint_state(mapping, positions, velocities);
+    }
+
+    RCLCPP_INFO(this->get_logger(),
+                "[%s] Sent gripper command via %s: pos=%u vel=%u effort=%u",
+                mapping.c_str(), interface.c_str(),
+                position_percent, velocity_percent, effort_percent);
+
+    return true;
+}

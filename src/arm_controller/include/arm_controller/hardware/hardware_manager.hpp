@@ -51,6 +51,7 @@ public:
     // ============= 配置信息 =============
     const std::string& get_robot_type(const std::string& mapping) const;
     const std::string& get_interface(const std::string& mapping) const;
+    std::string get_interface_for_mapping(const std::string& mapping) const; // 包含软件映射
     std::string get_mapping_by_interface(const std::string& interface) const;  // 根据 interface 获取 mapping
     std::vector<std::string> get_all_mappings() const;
     const std::vector<uint32_t>& get_motors_id(const std::string& mapping) const;
@@ -75,6 +76,12 @@ public:
     std::vector<double> get_current_joint_positions(const std::string& mapping) const;
     std::vector<double> get_current_joint_velocities(const std::string& mapping) const;
     std::vector<double> get_current_joint_efforts(const std::string& mapping) const;
+    // 软件映射（无电机反馈）用：直接更新并发布 joint_state
+    bool update_software_joint_state(
+        const std::string& mapping,
+        const std::vector<double>& positions,
+        const std::vector<double>& velocities = {},
+        const std::vector<double>& efforts = {});
 
     // ✅ Lock-free 版本：用于实时计算线程，避免竞争 joint_state_mutex_
     std::vector<double> get_current_joint_positions_lockfree(const std::string& mapping) const;
@@ -155,6 +162,7 @@ private:
 
     // ============= 配置信息 (按mapping) =============
     std::map<std::string, std::string> mapping_to_interface_;               // mapping -> interface
+    std::map<std::string, std::string> software_mapping_to_interface_;      // software mapping -> interface
     std::unordered_map<std::string, std::string> interface_to_mapping_;     // interface -> mapping
     std::unordered_map<std::string, sensor_msgs::msg::JointState> mapping_joint_states_;    // mapping -> joint state
     std::map<std::string, std::vector<uint32_t>> motor_config_;             // mapping -> motor IDs

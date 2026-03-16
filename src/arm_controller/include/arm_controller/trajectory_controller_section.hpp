@@ -46,6 +46,7 @@ private:
 
     // 轨迹执行
     void execute_trajectory(const std::shared_ptr<GoalHandle> goal_handle, const std::string& mapping);
+    bool execute_gripper_command(const FollowJointTrajectory::Goal& goal, const std::string& mapping);
     // bool check_permissions(const std::shared_ptr<const FollowJointTrajectory::Goal> goal);
 
     // 事件发布

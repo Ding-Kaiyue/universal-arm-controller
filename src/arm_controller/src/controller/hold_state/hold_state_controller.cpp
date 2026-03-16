@@ -28,29 +28,32 @@ void HoldStateController::start(const std::string& mapping) {
 
     // ========== 关键：检查速度，如果不为0则发送保持命令 ==========
     if (hardware_manager_) {
-        // 获取当前关节位置和速度
-        ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
-        auto current_velocities = hardware_manager_->get_current_joint_velocities(normalized_mapping);
+        const auto& motor_ids = hardware_manager_->get_motors_id(normalized_mapping);
+        if (!motor_ids.empty()) {
+            // 获取当前关节位置和速度
+            ctx.hold_positions = hardware_manager_->get_current_joint_positions(normalized_mapping);
+            auto current_velocities = hardware_manager_->get_current_joint_velocities(normalized_mapping);
 
-        if (!ctx.hold_positions.empty()) {
-            // 检查是否所有关节速度都接近0（阈值：0.01 rad/s）
-            bool all_velocities_zero = true;
-            const double VELOCITY_THRESHOLD = 0.01;
-            for (const auto& vel : current_velocities) {
-                if (std::abs(vel) > VELOCITY_THRESHOLD) {
-                    all_velocities_zero = false;
-                    break;
+            if (!ctx.hold_positions.empty()) {
+                // 检查是否所有关节速度都接近0（阈值：0.01 rad/s）
+                bool all_velocities_zero = true;
+                const double VELOCITY_THRESHOLD = 0.01;
+                for (const auto& vel : current_velocities) {
+                    if (std::abs(vel) > VELOCITY_THRESHOLD) {
+                        all_velocities_zero = false;
+                        break;
+                    }
                 }
-            }
 
-            // 如果速度不为0，发送保持命令来停止电机；否则不需要做任何处理
-            if (!all_velocities_zero) {
-                hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
+                // 如果速度不为0，发送保持命令来停止电机；否则不需要做任何处理
+                if (!all_velocities_zero) {
+                    hardware_manager_->send_hold_state_command(normalized_mapping, ctx.hold_positions);
+                }
+            } else {
+                RCLCPP_WARN(node_->get_logger(),
+                           "[%s] Failed to get current joint positions for hold state",
+                           normalized_mapping.c_str());
             }
-        } else {
-            RCLCPP_WARN(node_->get_logger(),
-                       "[%s] Failed to get current joint positions for hold state",
-                       normalized_mapping.c_str());
         }
     }
     // =======================================================

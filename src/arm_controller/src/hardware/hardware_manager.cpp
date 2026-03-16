@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <set>
 
 std::shared_ptr<HardwareManager> HardwareManager::getInstance() {
     std::lock_guard<std::mutex> lock(instance_mutex_);
@@ -24,13 +25,26 @@ bool HardwareManager::initialize(rclcpp::Node::SharedPtr node) {
     try {
         // 创建CANFD电机驱动
         std::vector<std::string> interface_names;
+        std::set<std::string> unique_interfaces;
         RCLCPP_INFO(node_->get_logger(), "DEBUG: mapping_to_interface_ contains %zu entries", mapping_to_interface_.size());
         for (const auto& [mapping, interface] : mapping_to_interface_) {
             RCLCPP_INFO(node_->get_logger(), "  - mapping='%s', interface='%s'", mapping.c_str(), interface.c_str());
             if (interface.empty()) {
                 RCLCPP_WARN(node_->get_logger(), "    ⚠️  WARNING: Empty interface for mapping '%s'!", mapping.c_str());
             }
-            interface_names.push_back(interface);
+            if (!interface.empty()) {
+                unique_interfaces.insert(interface);
+            }
+        }
+        // 软件映射（如夹爪）也可能需要总线接口
+        for (const auto& [mapping, interface] : software_mapping_to_interface_) {
+            if (!interface.empty()) {
+                unique_interfaces.insert(interface);
+            }
+        }
+        interface_names.assign(unique_interfaces.begin(), unique_interfaces.end());
+        if (interface_names.empty()) {
+            RCLCPP_WARN(node_->get_logger(), "No valid CAN interfaces configured");
         }
 
         auto motor_driver = hardware_driver::createCanFdMotorDriver(interface_names);
@@ -52,6 +66,15 @@ bool HardwareManager::initialize(rclcpp::Node::SharedPtr node) {
         // 初始化按键驱动 (不需要独立的总线，通过button_driver转发数据包)
         auto button_driver = hardware_driver::createCanFdButtonDriver(nullptr);
         hardware_driver_->set_button_driver(button_driver);
+
+        // 初始化夹爪驱动（用于 PGC 等夹爪控制）
+        auto gripper_driver = hardware_driver::createCanFdGripperDriver(interface_names);
+        if (gripper_driver) {
+            hardware_driver_->set_gripper_driver(gripper_driver);
+            RCLCPP_INFO(node_->get_logger(), "✅ Gripper driver initialized");
+        } else {
+            RCLCPP_WARN(node_->get_logger(), "⚠️ Failed to initialize gripper driver");
+        }
 
         // 创建关节状态发布器
         joint_state_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(
@@ -224,6 +247,18 @@ const std::string& HardwareManager::get_interface(const std::string& mapping) co
     return get_config_value(mapping_to_interface_, mapping, "interface", node_->get_logger());
 }
 
+std::string HardwareManager::get_interface_for_mapping(const std::string& mapping) const {
+    auto hw_it = mapping_to_interface_.find(mapping);
+    if (hw_it != mapping_to_interface_.end()) {
+        return hw_it->second;
+    }
+    auto sw_it = software_mapping_to_interface_.find(mapping);
+    if (sw_it != software_mapping_to_interface_.end()) {
+        return sw_it->second;
+    }
+    return "";
+}
+
 std::string HardwareManager::get_mapping_by_interface(const std::string& interface) const {
     auto it = interface_to_mapping_.find(interface);
     if (it != interface_to_mapping_.end()) {
@@ -235,7 +270,14 @@ std::string HardwareManager::get_mapping_by_interface(const std::string& interfa
 
 std::vector<std::string> HardwareManager::get_all_mappings() const {
     std::vector<std::string> mappings;
+    std::set<std::string> mapping_set;
     for (const auto& [mapping, interface] : mapping_to_interface_) {
+        mapping_set.insert(mapping);
+    }
+    for (const auto& [mapping, interface] : software_mapping_to_interface_) {
+        mapping_set.insert(mapping);
+    }
+    for (const auto& mapping : mapping_set) {
         mappings.push_back(mapping);
     }
     return mappings;
@@ -365,6 +407,73 @@ std::vector<double> HardwareManager::get_current_joint_efforts(const std::string
     return std::vector<double>{};
 }
 
+bool HardwareManager::update_software_joint_state(
+    const std::string& mapping,
+    const std::vector<double>& positions,
+    const std::vector<double>& velocities,
+    const std::vector<double>& efforts) {
+    {
+        std::lock_guard<std::mutex> lock(joint_state_mutex_);
+
+        auto it = mapping_joint_states_.find(mapping);
+        if (it == mapping_joint_states_.end()) {
+            RCLCPP_WARN(node_->get_logger(),
+                        "[%s] Software joint state update failed: mapping not found",
+                        mapping.c_str());
+            return false;
+        }
+
+        auto& joint_state = it->second;
+        if (positions.size() != joint_state.name.size()) {
+            RCLCPP_WARN(node_->get_logger(),
+                        "[%s] Software joint state update failed: position size mismatch (%zu != %zu)",
+                        mapping.c_str(), positions.size(), joint_state.name.size());
+            return false;
+        }
+
+        joint_state.header.stamp = node_->now();
+        joint_state.position = positions;
+
+        if (!velocities.empty()) {
+            if (velocities.size() != joint_state.name.size()) {
+                RCLCPP_WARN(node_->get_logger(),
+                            "[%s] Software joint state update failed: velocity size mismatch (%zu != %zu)",
+                            mapping.c_str(), velocities.size(), joint_state.name.size());
+                return false;
+            }
+            joint_state.velocity = velocities;
+        } else {
+            joint_state.velocity.assign(joint_state.name.size(), 0.0);
+        }
+
+        if (!efforts.empty()) {
+            if (efforts.size() != joint_state.name.size()) {
+                RCLCPP_WARN(node_->get_logger(),
+                            "[%s] Software joint state update failed: effort size mismatch (%zu != %zu)",
+                            mapping.c_str(), efforts.size(), joint_state.name.size());
+                return false;
+            }
+            joint_state.effort = efforts;
+        } else {
+            joint_state.effort.assign(joint_state.name.size(), 0.0);
+        }
+
+        // 同步 lock-free 缓存
+        auto cache_it = joint_positions_cache_.find(mapping);
+        if (cache_it != joint_positions_cache_.end() && cache_it->second.size() == joint_state.position.size()) {
+            for (size_t i = 0; i < joint_state.position.size(); ++i) {
+                if (cache_it->second[i]) {
+                    cache_it->second[i]->store(joint_state.position[i], std::memory_order_release);
+                }
+            }
+        }
+    }
+
+    // 在锁外发布，避免阻塞热路径
+    publish_joint_state();
+    return true;
+}
+
 // ✅ Lock-free 版本：用于实时计算线程，避免竞争 joint_state_mutex_
 std::vector<double> HardwareManager::get_current_joint_positions_lockfree(const std::string& mapping) const {
     auto it = joint_positions_cache_.find(mapping);
@@ -392,7 +501,15 @@ bool HardwareManager::send_hold_state_command(const std::string& mapping,
         return false;
     }
 
-    const std::string& interface = get_interface(mapping);
+    // 软件映射（如夹爪）没有电机反馈，不应发送 MIT hold 命令
+    if (get_motors_id(mapping).empty()) {
+        RCLCPP_DEBUG(node_->get_logger(),
+                    "[%s] Skip hold-state MIT command for software-only mapping",
+                    mapping.c_str());
+        return true;
+    }
+
+    const std::string interface = get_interface_for_mapping(mapping);
     if (interface.empty() || interface == "unknown_interface") {
         RCLCPP_ERROR(node_->get_logger(),
                     "[%s] ❎ Invalid interface for sending hold position command",
@@ -697,6 +814,7 @@ bool HardwareManager::load_hardware_config() {
 
 void HardwareManager::clear_mappings() {
     mapping_to_interface_.clear();
+    software_mapping_to_interface_.clear();
     interface_to_mapping_.clear();
     mapping_joint_states_.clear();
 
@@ -742,6 +860,7 @@ bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML:
         interface_to_mapping_[interface] = mapping_name;
     } else {
         // 无电机，仅用于软件层面（如发布 joint_state）
+        software_mapping_to_interface_[mapping_name] = interface;
         RCLCPP_INFO(node_->get_logger(), "[%s] No motors configured - pure software mapping (no hardware initialization)",
                     mapping_name.c_str());
     }

@@ -110,8 +110,8 @@ joint_limits:
   # Gripper joints (PGC) - add explicit accel limits to avoid TOTG fallback warning
   left_gripper_finger1_joint:
     has_position_limits: true
-    min_position: -0.05
-    max_position: 0.05
+    min_position: 0.0
+    max_position: 0.025
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true
@@ -119,8 +119,8 @@ joint_limits:
 
   left_gripper_finger2_joint:
     has_position_limits: true
-    min_position: -0.05
-    max_position: 0.05
+    min_position: 0.0
+    max_position: 0.025
     has_velocity_limits: true
     max_velocity: 1.0
     has_acceleration_limits: true

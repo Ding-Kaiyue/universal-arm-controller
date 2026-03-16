@@ -27,9 +27,10 @@ hardware:
       robot_type: "dual_arm_with_pgc"
       interface: can1
       motors: []    # 无电机反馈
-      joint_names: ["left_gripper_finger1_joint", "left_gripper_finger2_joint"]
+      # 仅维护主动关节，finger2 由 URDF mimic 自动联动
+      joint_names: ["left_gripper_finger1_joint"]
       frame_id: "left_gripper_base"
       controller_name: "left_gripper_controller"  # 对应的控制器名称
       planning_group: "left_gripper"         # MoveIt规划组名称
-      initial_position: [0.0, 0.0]  # 2个手指关节，初始闭合状态
-      start_position: [0.0, 0.0]  # 启动位置
+      initial_position: [0.0]  # 主动关节初始位置
+      start_position: [0.0]  # 启动位置
