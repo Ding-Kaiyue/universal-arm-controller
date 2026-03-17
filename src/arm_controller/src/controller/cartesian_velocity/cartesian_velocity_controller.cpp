@@ -205,6 +205,10 @@ bool CartesianVelocityController::stop(const std::string& mapping) {
 
 void CartesianVelocityController::initialize_moveit_adapter(const std::string& mapping) {
     try {
+        if (hardware_manager_->get_motors_id(mapping).empty()) {
+            return;
+        }
+
         if (moveit_adapters_.find(mapping) != moveit_adapters_.end()) {
             RCLCPP_INFO(node_->get_logger(), "[%s] MoveIt adapter already initialized", mapping.c_str());
             return;

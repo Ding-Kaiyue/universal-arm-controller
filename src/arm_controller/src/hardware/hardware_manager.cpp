@@ -67,8 +67,16 @@ bool HardwareManager::initialize(rclcpp::Node::SharedPtr node) {
         auto button_driver = hardware_driver::createCanFdButtonDriver(nullptr);
         hardware_driver_->set_button_driver(button_driver);
 
-        // 初始化夹爪驱动（用于 PGC 等夹爪控制）
-        auto gripper_driver = hardware_driver::createCanFdGripperDriver(interface_names);
+        // 初始化夹爪驱动（按配置选择型号：omnipicker/pgc/auto）
+        std::string gripper_model = "auto";
+        for (const auto& [mapping, model_cfg] : gripper_model_config_) {
+            if (mapping.find("gripper") == std::string::npos || model_cfg.empty()) {
+                continue;
+            }
+            gripper_model = model_cfg;
+            break;
+        }
+        auto gripper_driver = hardware_driver::createCanFdGripperDriver(interface_names, gripper_model);
         if (gripper_driver) {
             hardware_driver_->set_gripper_driver(gripper_driver);
             RCLCPP_INFO(node_->get_logger(), "✅ Gripper driver initialized");
@@ -306,6 +314,10 @@ const std::string& HardwareManager::get_controller_name(const std::string& mappi
 
 const std::string& HardwareManager::get_planning_group(const std::string& mapping) const {
     return get_config_value(planning_group_config_, mapping, "planning_group", node_->get_logger());
+}
+
+const std::string& HardwareManager::get_gripper_model(const std::string& mapping) const {
+    return get_config_value(gripper_model_config_, mapping, "gripper_model", node_->get_logger());
 }
 
 const std::vector<double>& HardwareManager::get_initial_position(const std::string& mapping) const {
@@ -822,6 +834,7 @@ void HardwareManager::clear_mappings() {
     joint_names_config_.clear();
     controller_name_config_.clear();
     planning_group_config_.clear();
+    gripper_model_config_.clear();
     frame_id_config_.clear();
     initial_position_config_.clear();
     start_position_config_.clear();
@@ -871,11 +884,26 @@ bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML:
 
     // ===== 控制器名称 =====
     controller_name_config_[mapping_name] =
-        mapping_node["controller_name"] ? mapping_node["controller_name"].as<std::string>() : "unknown_controller";
+        mapping_node["controller_name"] ? mapping_node["controller_name"].as<std::string>() : "";
 
     // ===== 规划组名称 =====
     planning_group_config_[mapping_name] =
-        mapping_node["planning_group"] ? mapping_node["planning_group"].as<std::string>() : "unknown_group";
+        mapping_node["planning_group"] ? mapping_node["planning_group"].as<std::string>() : "";
+
+    // ===== 夹爪型号 =====
+    // 优先读取显式 gripper_model；未配置时从 robot_type 进行推断
+    if (mapping_node["gripper_model"]) {
+        gripper_model_config_[mapping_name] = mapping_node["gripper_model"].as<std::string>();
+    } else {
+        std::string inferred_model = "auto";
+        const std::string robot_type = robot_type_config_[mapping_name];
+        if (robot_type.find("pgc") != std::string::npos || robot_type.find("PGC") != std::string::npos) {
+            inferred_model = "pgc";
+        } else if (robot_type.find("omnipicker") != std::string::npos || robot_type.find("OmniPicker") != std::string::npos) {
+            inferred_model = "omnipicker";
+        }
+        gripper_model_config_[mapping_name] = inferred_model;
+    }
 
     // ===== 坐标系 =====
     frame_id_config_[mapping_name] =

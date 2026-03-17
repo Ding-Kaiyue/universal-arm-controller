@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 
 TrajectoryControllerNode::TrajectoryControllerNode()
     : Node("trajectory_controller_node")
@@ -88,7 +89,24 @@ void TrajectoryControllerNode::init_action_servers() {
     }
     
     for (const std::string& mapping : mappings) {
+        // 纯软件 mapping（如 gripper）的 action server 策略：
+        // - PGC gripper: 允许创建 action server
+        // - OmniPicker gripper: 不创建 action server（仅走 IPC）
+        if (hardware_manager_->get_motors_id(mapping).empty()) {
+            std::string model = hardware_manager_->get_gripper_model(mapping);
+            std::transform(model.begin(), model.end(), model.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            const bool is_gripper_mapping = (mapping.find("gripper") != std::string::npos);
+            const bool allow_software_action_server = is_gripper_mapping && (model == "pgc");
+            if (!allow_software_action_server) {
+                continue;
+            }
+        }
+
         std::string controller_name = hardware_manager_->get_controller_name(mapping);
+        if (controller_name.empty()) {
+            continue;
+        }
         std::string action_server_name = "/" + controller_name + "/follow_joint_trajectory";
 
         RCLCPP_INFO(this->get_logger(), "Creating action server: %s for mapping: %s", 

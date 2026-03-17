@@ -312,6 +312,46 @@ class ArmControllerClient:
             logger.error(f"TrajectoryReplay command failed: {e}")
             return False, {"error": str(e)}
 
+    def execute_gripper_control(
+        self,
+        position: float,
+        mapping: str = "left_gripper",
+        velocity_percent: int = 50,
+        effort_percent: int = 50
+    ) -> Tuple[bool, Dict]:
+        """
+        执行 GripperControl 命令
+
+        Args:
+            position: 夹爪目标开口（米），范围 [0.0, 0.025]
+            mapping: 夹爪映射，默认 left_gripper
+            velocity_percent: 速度百分比 [1,100]
+            effort_percent: 力度百分比 [20,100]
+
+        Returns:
+            (success: bool, response: dict)
+        """
+        payload = {
+            "position": position,
+            "mapping": mapping,
+            "velocity_percent": velocity_percent,
+            "effort_percent": effort_percent
+        }
+
+        try:
+            response = requests.post(
+                f"{self.server_url}/gripper_control",
+                json=payload,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            success = data.get("status") == "success"
+            return success, data
+        except requests.RequestException as e:
+            logger.error(f"GripperControl command failed: {e}")
+            return False, {"error": str(e)}
+
 
 class OpenClawSkillHandler:
     """OpenClaw Skill 处理器 - 这是在 OpenClaw 中应该如何集成的示例"""

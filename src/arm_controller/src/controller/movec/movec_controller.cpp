@@ -102,6 +102,10 @@ void MoveCController::initialize_planning_services() {
 
         // 为每个mapping初始化规划服务
         for (const auto& mapping : all_mappings) {
+            // 仅 arm mapping 参与规划服务初始化；纯软件 mapping（如 gripper）跳过
+            if (hardware_manager_->get_motors_id(mapping).empty()) {
+                continue;
+            }
             std::string planning_group = hardware_manager_->get_planning_group(mapping);
 
             if (planning_group.empty()) {

@@ -6,6 +6,7 @@
 #include "controller/cartesian_velocity/cartesian_velocity_ipc_interface.hpp"
 #include "controller/trajectory_record/trajectory_record_ipc_interface.hpp"
 #include "controller/trajectory_replay/trajectory_replay_ipc_interface.hpp"
+#include "controller/basic_ops/basic_ops_ipc_interface.hpp"
 #include <iostream>
 #include <thread>
 #include <memory>
@@ -77,6 +78,19 @@ public:
         int duration_ms = 0;   // 0 = single-shot
         int interval_ms = 5;   // used when duration_ms > 0
         bool auto_stop = true; // send zero velocity when stream ends
+    };
+
+    struct GripperRequest {
+        std::string mapping;
+        int position = 0;        // raw [0,255], 0=夹紧,255=张开
+        int velocity = 128;      // raw [0,255]
+        int effort = 128;        // raw [0,255]
+        int gripper_type = -1;   // 0=OmniPicker,1=PGC,-1=auto by mapping
+    };
+
+    struct MotorSwitchRequest {
+        std::string mapping;
+        int mode = 1;
     };
 
     struct TeachRequest {
@@ -325,6 +339,23 @@ public:
         return req;
     }
 
+    static GripperRequest parseGripper(const std::string& body) {
+        GripperRequest req;
+        req.mapping = parseStringFieldOptional(body, "mapping", "left_gripper");
+        req.position = parseIntFieldOptional(body, "position", 0);
+        req.velocity = parseIntFieldOptional(body, "velocity", 128);
+        req.effort = parseIntFieldOptional(body, "effort", 128);
+        req.gripper_type = parseIntFieldOptional(body, "gripper_type", -1);
+        return req;
+    }
+
+    static MotorSwitchRequest parseMotorSwitch(const std::string& body) {
+        MotorSwitchRequest req;
+        req.mapping = parseStringField(body, "mapping");
+        req.mode = parseIntFieldOptional(body, "mode", 1);
+        return req;
+    }
+
 private:
     static double parseDoubleField(const std::string& body, const std::string& field_name) {
         size_t field_pos = body.find("\"" + field_name + "\"");
@@ -469,6 +500,7 @@ private:
     arm_controller::cartesian_velocity::CartesianVelocityIPCInterface cartesian_velocity_;
     arm_controller::trajectory_record::TrajectoryRecordIPCInterface trajectory_record_;
     arm_controller::trajectory_replay::TrajectoryReplayIPCInterface trajectory_replay_;
+    arm_controller::basic_ops::BasicOpsIPCInterface basic_ops_;
 
 public:
     SimpleHTTPServer(int port) : port_(port) {}
@@ -672,6 +704,15 @@ private:
                 http_status = "HTTP/1.1 200 OK";
             } else if (method == "POST" && path == "/trajectory_replay") {
                 response_body = handleTrajectoryReplay(body);
+                http_status = "HTTP/1.1 200 OK";
+            } else if (method == "POST" && path == "/gripper_control") {
+                response_body = handleGripperControl(body);
+                http_status = "HTTP/1.1 200 OK";
+            } else if (method == "POST" && path == "/motor_enable") {
+                response_body = handleMotorEnable(body);
+                http_status = "HTTP/1.1 200 OK";
+            } else if (method == "POST" && path == "/motor_disable") {
+                response_body = handleMotorDisable(body);
                 http_status = "HTTP/1.1 200 OK";
             } else if (method == "GET" && path == "/health") {
                 response_body = SimpleJSON::ok();
@@ -1009,6 +1050,57 @@ private:
             return SimpleJSON::error(e.what());
         }
     }
+
+    std::string handleGripperControl(const std::string& body) {
+        try {
+            auto req = RequestParser::parseGripper(body);
+
+            if (!basic_ops_.gripper_control(
+                    req.position, req.mapping, req.velocity, req.effort, req.gripper_type)) {
+                return SimpleJSON::error(basic_ops_.getLastError());
+            }
+
+            return SimpleJSON::success(
+                "GripperControl command queued",
+                basic_ops_.getCurrentMode(req.mapping),
+                static_cast<int>(basic_ops_.getExecutionState(req.mapping))
+            );
+        } catch (const std::exception& e) {
+            return SimpleJSON::error(e.what());
+        }
+    }
+
+    std::string handleMotorEnable(const std::string& body) {
+        try {
+            auto req = RequestParser::parseMotorSwitch(body);
+            if (!basic_ops_.enable_motors(req.mapping, req.mode)) {
+                return SimpleJSON::error(basic_ops_.getLastError());
+            }
+            return SimpleJSON::success(
+                "MotorEnable command queued",
+                basic_ops_.getCurrentMode(req.mapping),
+                static_cast<int>(basic_ops_.getExecutionState(req.mapping))
+            );
+        } catch (const std::exception& e) {
+            return SimpleJSON::error(e.what());
+        }
+    }
+
+    std::string handleMotorDisable(const std::string& body) {
+        try {
+            auto req = RequestParser::parseMotorSwitch(body);
+            if (!basic_ops_.disable_motors(req.mapping, req.mode)) {
+                return SimpleJSON::error(basic_ops_.getLastError());
+            }
+            return SimpleJSON::success(
+                "MotorDisable command queued",
+                basic_ops_.getCurrentMode(req.mapping),
+                static_cast<int>(basic_ops_.getExecutionState(req.mapping))
+            );
+        } catch (const std::exception& e) {
+            return SimpleJSON::error(e.what());
+        }
+    }
 };
 
 // 全局服务器实例
@@ -1057,6 +1149,9 @@ int main(int /*argc*/, char** /*argv*/) {
     std::cout << "   POST /cartesian_velocity    - Cartesian velocity control\n";
     std::cout << "   POST /trajectory_record     - Trajectory record control\n";
     std::cout << "   POST /trajectory_replay     - Trajectory replay control\n";
+    std::cout << "   POST /gripper_control       - Gripper open/close (IPC basic op)\n";
+    std::cout << "   POST /motor_enable          - Motor enable (IPC basic op)\n";
+    std::cout << "   POST /motor_disable         - Motor disable (IPC basic op)\n";
     std::cout << "   GET  /health                - Health check\n\n";
     std::cout << "Example requests:\n";
     std::cout << "  MoveJ:\n";

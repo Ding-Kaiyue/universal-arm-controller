@@ -59,6 +59,7 @@ public:
     const std::string& get_frame_id(const std::string& mapping) const;  // 根据mapping获取frame_id
     const std::string& get_controller_name(const std::string& mapping) const;
     const std::string& get_planning_group(const std::string& mapping) const;
+    const std::string& get_gripper_model(const std::string& mapping) const;
     uint8_t get_joint_count(const std::string& mapping) const;
     const std::vector<double>& get_initial_position(const std::string& mapping) const;
     const std::vector<double>& get_start_position(const std::string& mapping) const;
@@ -169,6 +170,7 @@ private:
     std::map<std::string, std::vector<std::string>> joint_names_config_;    // mapping -> joint names
     std::map<std::string, std::string> controller_name_config_;             // mapping -> controller name
     std::map<std::string, std::string> planning_group_config_;              // mapping -> MoveIt planning group
+    std::map<std::string, std::string> gripper_model_config_;               // mapping -> gripper model (omnipicker/pgc/auto)
     std::map<std::string, std::string> frame_id_config_;                    // mapping -> frame_id
     std::map<std::string, std::vector<double>> initial_position_config_;    // mapping -> initial position
     std::map<std::string, std::vector<double>> start_position_config_;      // mapping -> start position

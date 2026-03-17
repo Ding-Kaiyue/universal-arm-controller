@@ -14,6 +14,7 @@
 #include <std_msgs/msg/string.hpp>
 #include "arm_controller/controller_base/mode_controller_base.hpp"
 #include "arm_controller/hardware/hardware_manager.hpp"
+#include "controller/basic_ops/basic_ops_ipc_service.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <yaml-cpp/yaml.h>
 
@@ -21,7 +22,7 @@
 class ControllerManagerNode : public rclcpp::Node {
 public:
     ControllerManagerNode();
-    ~ControllerManagerNode() = default;
+    ~ControllerManagerNode() override;
 
     // 延迟初始化 - 在构造函数外调用
     void post_init();
@@ -30,6 +31,7 @@ private:
     // 配置加载和初始化
     void init_hardware();
     void init_controllers();
+    void init_basic_ops_ipc();
 
     // 控制器管理
     bool start_working_controller(const std::string& mode_name, const std::string& mapping = "");
@@ -102,6 +104,7 @@ private:
 
     // 硬件管理
     std::shared_ptr<HardwareManager> hardware_manager_;
+    std::unique_ptr<arm_controller::basic_ops::BasicOpsIPCService> basic_ops_ipc_service_;
 };
 
 #endif // __CONTROLLER_MANAGER_SECTION_HPP__

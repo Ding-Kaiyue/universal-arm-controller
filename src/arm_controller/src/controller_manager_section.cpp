@@ -8,6 +8,7 @@
 #include "controller_interface.hpp"
 #include "ipc/ipc_context.hpp"
 #include <algorithm>
+#include <unordered_set>
 #include <thread>
 #include <rcl_interfaces/msg/parameter_descriptor.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
@@ -33,6 +34,13 @@ ControllerManagerNode::ControllerManagerNode()
     load_config();
 }
 
+ControllerManagerNode::~ControllerManagerNode() {
+    if (basic_ops_ipc_service_) {
+        basic_ops_ipc_service_->stop();
+        basic_ops_ipc_service_.reset();
+    }
+}
+
 void ControllerManagerNode::post_init() {
     // 现在可以安全使用shared_from_this()
     init_hardware();
@@ -51,6 +59,7 @@ void ControllerManagerNode::post_init() {
     init_commons();
     init_action_event_listener();
     init_controllers();
+    init_basic_ops_ipc();
 
     // 启动默认控制器 - 初始化 MIT 模式
     for (const auto& mapping : mappings) {
@@ -89,6 +98,15 @@ void ControllerManagerNode::post_init() {
         // At this point, all mappings have been set to "HoldState" by start_working_controller
         // SystemStart was briefly set, then overwritten with HoldState, which is correct
     }
+}
+
+void ControllerManagerNode::init_basic_ops_ipc() {
+    if (basic_ops_ipc_service_) {
+        return;
+    }
+    basic_ops_ipc_service_ = std::make_unique<arm_controller::basic_ops::BasicOpsIPCService>(
+        this->shared_from_this(), hardware_manager_);
+    basic_ops_ipc_service_->start();
 }
 
 void ControllerManagerNode::load_config() {
@@ -178,6 +196,15 @@ void ControllerManagerNode::init_controllers() {
 
         // 获取所有 mapping
         auto all_mappings = hardware_manager_->get_all_mappings();
+        const std::unordered_set<std::string> arm_only_controllers = {
+            "JointVelocity",
+            "CartesianVelocity",
+            "MoveJ",
+            "MoveL",
+            "MoveC",
+            "TrajectoryRecord",
+            "TrajectoryReplay"
+        };
 
         for (const auto& entry : yaml_config_["controllers"]) {
             std::string key = entry["key"].as<std::string>();
@@ -217,10 +244,24 @@ void ControllerManagerNode::init_controllers() {
             if (it != available.end()) {
                 ControllerInterface::instance().register_class(key, it->second);
 
-                // ✅ 创建一个共享的 controller 实例，服务所有 mapping
+                // ✅ 创建一个共享的 controller 实例，服务对应映射集合
                 // 每个 controller 已经通过 map<string, XXX> 来管理各 mapping 的状态
                 auto shared_controller = it->second(this->shared_from_this());
-                for (const auto& mapping : all_mappings) {
+
+                std::vector<std::string> target_mappings;
+                target_mappings.reserve(all_mappings.size());
+                if (arm_only_controllers.count(key) > 0) {
+                    for (const auto& mapping : all_mappings) {
+                        // 有电机才视为 arm mapping；纯软件 mapping（如 gripper）跳过
+                        if (!hardware_manager_->get_motors_id(mapping).empty()) {
+                            target_mappings.push_back(mapping);
+                        }
+                    }
+                } else {
+                    target_mappings = all_mappings;
+                }
+
+                for (const auto& mapping : target_mappings) {
                     auto key_pair = std::make_pair(key, mapping);
                     controller_map_[key_pair] = shared_controller;
                     RCLCPP_DEBUG(this->get_logger(), "[controllers] Registered mapping: %s for controller: %s (class: %s)",
@@ -250,7 +291,7 @@ void ControllerManagerNode::init_controllers() {
                 }
 
                 RCLCPP_INFO(this->get_logger(), "[controllers] ✅ Created shared controller: %s (class: %s) for %zu mappings (consumer threads: 1)",
-                            key.c_str(), class_name.c_str(), all_mappings.size());
+                            key.c_str(), class_name.c_str(), target_mappings.size());
             } else {
                 RCLCPP_WARN(this->get_logger(), "[controllers] Controller class '%s' not found for key '%s'",
                             class_name.c_str(), key.c_str());

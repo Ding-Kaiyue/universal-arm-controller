@@ -417,6 +417,16 @@
       ]
     },
     {
+      "keywords": ["打开夹爪", "张开夹爪", "松开夹爪", "合拢夹爪", "夹紧", "抓住", "打开左夹爪", "打开右夹爪", "合上左夹爪", "合上右夹爪"],
+      "skill": "gripper_control",
+      "examples": [
+        "打开左夹爪",
+        "打开右夹爪",
+        "夹爪合拢",
+        "把夹爪开到 0.012 米"
+      ]
+    },
+    {
       "keywords": ["健康", "状态", "检查"],
       "skill": "health_check",
       "examples": [
@@ -483,6 +493,13 @@
       "parameters": "线速度(vx,vy,vz) + 角速度(wx,wy,wz)",
       "advantages": ["直观操作", "坐标系友好"],
       "disadvantages": ["计算复杂", "需要逆运动学"]
+    },
+    "gripper_control": {
+      "description": "夹爪开合控制（无需模式切换）",
+      "use_case": "抓取前后开合、调整夹爪开口",
+      "parameters": "position(0.0~0.025m), 可选 velocity_percent/effort_percent",
+      "advantages": ["调用简单", "可口语化映射"],
+      "disadvantages": ["仅支持单夹爪映射 left_gripper"]
     }
   }
 }

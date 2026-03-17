@@ -215,6 +215,44 @@
       }
     },
     {
+      "name": "gripper_control",
+      "description": "夹爪控制（口语映射：打开夹爪=position 0.0，合拢夹爪=position 0.025）",
+      "type": "http",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/gripper_control",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 0.025
+          },
+          "mapping": {
+            "type": "string",
+            "enum": ["left_gripper", "right_gripper"],
+            "default": "left_gripper"
+          },
+          "velocity_percent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "effort_percent": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 100,
+            "default": 50
+          }
+        },
+        "required": ["position"]
+      }
+    },
+    {
       "name": "check_arm_server",
       "description": "检查机械臂 HTTP 服务器是否在线",
       "type": "http",

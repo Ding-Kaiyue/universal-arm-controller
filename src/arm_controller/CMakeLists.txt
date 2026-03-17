@@ -153,6 +153,8 @@ add_library(arm_controller_lib
   src/controller/trajectory_replay/trajectory_replay_interface.cpp
   src/controller/trajectory_replay/trajectory_segmenter.cpp
   src/controller/trajectory_replay/trajectory_replay_ipc_interface.cpp
+  src/controller/basic_ops/basic_ops_ipc_interface.cpp
+  src/controller/basic_ops/basic_ops_ipc_service.cpp
 )
 
 ament_target_dependencies(arm_controller_lib
