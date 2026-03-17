@@ -118,7 +118,6 @@ gazebo_log/
 
 # === Docs ===
 *.puml
-SIGSEGV_FIX_GUIDE.md
 
 # === Blog Posts (个人博客) ===
 blog_series_plan.md
