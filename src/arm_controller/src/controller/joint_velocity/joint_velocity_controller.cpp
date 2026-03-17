@@ -80,7 +80,7 @@ void JointVelocityController::start(const std::string& mapping) {
         auto next = std::chrono::steady_clock::now();
 
         while (rt_running->load(std::memory_order_acquire)) {
-            next += std::chrono::microseconds(1000); // 1kHz
+            next += std::chrono::milliseconds(5); // 200Hz
 
             control_loop_rt(mapping);
 
@@ -299,5 +299,4 @@ bool JointVelocityController::send_joint_velocities(const std::string& mapping, 
 bool JointVelocityController::send_velocity(const std::string& mapping, const std::vector<double>& velocity) {
     return send_joint_velocities(mapping, velocity);
 }
-
 

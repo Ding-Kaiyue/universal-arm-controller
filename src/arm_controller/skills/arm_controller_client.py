@@ -236,6 +236,82 @@ class ArmControllerClient:
             logger.error(f"CartesianVelocity command failed: {e}")
             return False, {"error": str(e)}
 
+    def execute_trajectory_record(
+        self,
+        action: str,
+        filename: str = "trajectory_demo",
+        mapping: str = "*"
+    ) -> Tuple[bool, Dict]:
+        """
+        执行 TrajectoryRecord 命令
+
+        Args:
+            action: start/pause/resume/complete/cancel/stop
+            filename: 轨迹文件名（仅 start 需要）
+            mapping: 目标映射，支持 left_arm/right_arm/single_arm/*
+
+        Returns:
+            (success: bool, response: dict)
+        """
+        payload = {
+            "action": action,
+            "mapping": mapping
+        }
+        if action == "start":
+            payload["filename"] = filename
+
+        try:
+            response = requests.post(
+                f"{self.server_url}/trajectory_record",
+                json=payload,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            success = data.get("status") == "success"
+            return success, data
+        except requests.RequestException as e:
+            logger.error(f"TrajectoryRecord command failed: {e}")
+            return False, {"error": str(e)}
+
+    def execute_trajectory_replay(
+        self,
+        action: str,
+        filename: str = "trajectory_demo_smooth",
+        mapping: str = "*"
+    ) -> Tuple[bool, Dict]:
+        """
+        执行 TrajectoryReplay 命令
+
+        Args:
+            action: start/pause/resume/complete/cancel/stop
+            filename: 轨迹文件名（仅 start 需要）
+            mapping: 目标映射，支持 left_arm/right_arm/single_arm/*
+
+        Returns:
+            (success: bool, response: dict)
+        """
+        payload = {
+            "action": action,
+            "mapping": mapping
+        }
+        if action == "start":
+            payload["filename"] = filename
+
+        try:
+            response = requests.post(
+                f"{self.server_url}/trajectory_replay",
+                json=payload,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+            success = data.get("status") == "success"
+            return success, data
+        except requests.RequestException as e:
+            logger.error(f"TrajectoryReplay command failed: {e}")
+            return False, {"error": str(e)}
+
 
 class OpenClawSkillHandler:
     """OpenClaw Skill 处理器 - 这是在 OpenClaw 中应该如何集成的示例"""
@@ -363,6 +439,54 @@ class OpenClawSkillHandler:
                 "error": response.get("error", "Unknown error")
             }
 
+    def handle_trajectory_record_command(
+        self,
+        action: str,
+        filename: str = "trajectory_demo",
+        mapping: str = "*"
+    ) -> Dict:
+        """处理 TrajectoryRecord 命令"""
+        success, response = self.client.execute_trajectory_record(action, filename, mapping)
+
+        if success:
+            logger.info(f"TrajectoryRecord executed successfully: {response}")
+            return {
+                "status": "success",
+                "message": "TrajectoryRecord command executed",
+                "data": response
+            }
+        else:
+            logger.error(f"TrajectoryRecord execution failed: {response}")
+            return {
+                "status": "error",
+                "message": "TrajectoryRecord command failed",
+                "error": response.get("error", "Unknown error")
+            }
+
+    def handle_trajectory_replay_command(
+        self,
+        action: str,
+        filename: str = "trajectory_demo_smooth",
+        mapping: str = "*"
+    ) -> Dict:
+        """处理 TrajectoryReplay 命令"""
+        success, response = self.client.execute_trajectory_replay(action, filename, mapping)
+
+        if success:
+            logger.info(f"TrajectoryReplay executed successfully: {response}")
+            return {
+                "status": "success",
+                "message": "TrajectoryReplay command executed",
+                "data": response
+            }
+        else:
+            logger.error(f"TrajectoryReplay execution failed: {response}")
+            return {
+                "status": "error",
+                "message": "TrajectoryReplay command failed",
+                "error": response.get("error", "Unknown error")
+            }
+
     def handle_nlp_intent(self, intent: str, entities: Dict) -> Dict:
         """
         处理从自然语言识别出的意图
@@ -433,6 +557,26 @@ class OpenClawSkillHandler:
                     "message": "No cartesian velocities provided"
                 }
             return self.handle_cartesian_velocity_command(cartesian_velocities, mapping)
+
+        elif intent == "trajectory_record":
+            action = entities.get("action")
+            filename = entities.get("filename", "trajectory_demo")
+            if not action:
+                return {
+                    "status": "error",
+                    "message": "No action provided for trajectory_record"
+                }
+            return self.handle_trajectory_record_command(action, filename, mapping)
+
+        elif intent == "trajectory_replay":
+            action = entities.get("action")
+            filename = entities.get("filename", "trajectory_demo_smooth")
+            if not action:
+                return {
+                    "status": "error",
+                    "message": "No action provided for trajectory_replay"
+                }
+            return self.handle_trajectory_replay_command(action, filename, mapping)
 
         elif intent == "move_to_home":
             success, response = self.client.movej_home(mapping)
@@ -593,20 +737,20 @@ def example_openclaw_integration():
     instructions = """
 在 OpenClaw 中集成机械臂多模式控制 Skill 的步骤：
 
-1. 将 arm_movej_skill.json 复制到 OpenClaw skills 目录
+1. 将 arm_multimode_skill.json 复制到 OpenClaw skills 目录
 
 2. 在 OpenClaw 配置中注册 Skill：
    {
      "skills": [
        {
          "name": "arm_controller",
-         "config": "arm_movej_skill.json",
+         "config": "arm_multimode_skill.json",
          "handler": "arm_controller_client:OpenClawSkillHandler"
        }
      ]
    }
 
-3. 在 OpenClaw 的 NLP 处理器中添加关键词识别：
+3. 在 OpenClaw 的 NLP 处理器中添加关键词识别（示例）：
 
    【关节空间运动 (MoveJ)】
    - "移动到 [关节位置值]" → move_to_position
@@ -633,12 +777,29 @@ def example_openclaw_integration():
    - "速度控制，沿 X 轴 [速度]" → cartesian_velocity
    - 参数: cartesian_velocities=[vx, vy, vz, wx, wy, wz] (m/s, rad/s), mapping
 
+   【轨迹录制 (TrajectoryRecord)】
+   - "开始轨迹录制" → trajectory_record
+   - "暂停轨迹录制" → trajectory_record
+   - "结束轨迹录制" → trajectory_record
+   - 参数: action, filename(start时), mapping
+
+   【轨迹回放 (TrajectoryReplay)】
+   - "开始轨迹回放" → trajectory_replay
+   - "暂停轨迹回放" → trajectory_replay
+   - "继续轨迹回放" → trajectory_replay
+   - 参数: action, filename(start时), mapping
+
    【预定义位置】
    - "运动到回家位置" → move_to_home
    - "运动到零位置" → move_to_zero
    - 参数: mapping=arm
 
 4. OpenClaw 在识别用户意图后，会调用相应的 Skill handler
+
+5. 重要执行语义（必须在上层处理）：
+   - HTTP success 仅表示命令已入队，不表示动作已完成
+   - 控制器可能先进入 Hook/HoldState 安全检查，再切换目标模式执行
+   - 建议上层做状态轮询、超时和重试策略
 
 示例用户对话：
 
@@ -662,12 +823,22 @@ def example_openclaw_integration():
   用户: "沿 X 轴以 0.1 米/秒的速度运动"
   流程: intent="cartesian_velocity" → handle_cartesian_velocity_command() → /cartesian_velocity API
 
+【场景 6：轨迹录制】
+  用户: "开始录制轨迹，文件名 trajectory_demo"
+  流程: intent="trajectory_record" → handle_trajectory_record_command() → /trajectory_record API
+
+【场景 7：轨迹回放】
+  用户: "回放 trajectory_demo_smooth"
+  流程: intent="trajectory_replay" → handle_trajectory_replay_command() → /trajectory_replay API
+
 【HTTP API 端点】
 - POST /movej           - 关节空间点到点运动
 - POST /movel           - 笛卡尔空间直线运动
 - POST /movec           - 圆形运动
 - POST /joint_velocity  - 关节速度控制
 - POST /cartesian_velocity - 笛卡尔速度控制
+- POST /trajectory_record  - 轨迹录制控制
+- POST /trajectory_replay  - 轨迹回放控制
 - GET  /health         - 服务器健康检查
 
 【请求格式示例】
@@ -697,6 +868,20 @@ CartesianVelocity:
     "mapping": "left_arm"
   }
 
+TrajectoryRecord(start):
+  {
+    "action": "start",
+    "filename": "trajectory_demo",
+    "mapping": "*"
+  }
+
+TrajectoryReplay(start):
+  {
+    "action": "start",
+    "filename": "trajectory_demo_smooth",
+    "mapping": "*"
+  }
+
     """
     print(instructions)
 
@@ -704,7 +889,7 @@ CartesianVelocity:
 if __name__ == "__main__":
     print("=" * 80)
     print("OpenClaw 与机械臂多模式控制器集成示例")
-    print("支持模式: MoveJ, MoveL, MoveC, JointVelocity, CartesianVelocity")
+    print("支持模式: MoveJ, MoveL, MoveC, JointVelocity, CartesianVelocity, TrajectoryRecord, TrajectoryReplay")
     print("=" * 80)
 
     # 运行示例
@@ -719,4 +904,6 @@ if __name__ == "__main__":
     print("  • MoveC (圆形运动) - 多个路径点")
     print("  • JointVelocity (关节速度) - 6个关节速度值")
     print("  • CartesianVelocity (笛卡尔速度) - 线速度(vx,vy,vz) + 角速度(wx,wy,wz)")
+    print("  • TrajectoryRecord (轨迹录制) - start/pause/resume/complete/cancel")
+    print("  • TrajectoryReplay (轨迹回放) - start/pause/resume/complete/cancel")
     print("=" * 80)

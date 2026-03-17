@@ -31,9 +31,27 @@ echo "左臂 MoveJ 响应:"
 echo "$result" | python3 -m json.tool
 
 echo ""
+echo "3️⃣  测试 TrajectoryRecord/Replay 端点连通性..."
+
+# 仅做端点连通性测试，不触发 start 动作
+record_result=$(curl -s -X POST http://127.0.0.1:8080/trajectory_record \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"pause","mapping":"*"}')
+
+replay_result=$(curl -s -X POST http://127.0.0.1:8080/trajectory_replay \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"pause","mapping":"*"}')
+
+echo "TrajectoryRecord 响应:"
+echo "$record_result" | python3 -m json.tool
+echo "TrajectoryReplay 响应:"
+echo "$replay_result" | python3 -m json.tool
+
+echo ""
 echo "✅ 所有测试完成！"
 echo ""
 echo "OpenClaw 可以通过以下方式调用:"
 echo "  1. HTTP API: curl -X POST http://127.0.0.1:8080/movej ..."
 echo "  2. Python:   python3 arm_movej.py '[...positions...]' mapping"
-echo "  3. 配置文件: openclaw_tools.json 或 arm_movej_skill.json"
+echo "  3. Python:   python3 arm_controller_client.py"
+echo "  4. 配置文件: openclaw_tools.json 或 arm_multimode_skill.json"

@@ -4,6 +4,8 @@
 #include "controller/movec/movec_ipc_interface.hpp"
 #include "controller/joint_velocity/joint_velocity_ipc_interface.hpp"
 #include "controller/cartesian_velocity/cartesian_velocity_ipc_interface.hpp"
+#include "controller/trajectory_record/trajectory_record_ipc_interface.hpp"
+#include "controller/trajectory_replay/trajectory_replay_ipc_interface.hpp"
 #include <iostream>
 #include <thread>
 #include <memory>
@@ -15,6 +17,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <signal.h>
+#include <cctype>
 
 // 简单的 JSON 构造器（不使用外部库）
 class SimpleJSON {
@@ -49,21 +52,36 @@ public:
     struct MoveJRequest {
         std::vector<double> positions;
         std::string mapping;
+        bool wait_for_result = false;
+        int timeout_ms = 15000;
     };
 
     struct MoveLRequest {
         double x, y, z;
         double qx, qy, qz, qw;
         std::string mapping;
+        bool wait_for_result = false;
+        int timeout_ms = 15000;
     };
 
     struct MoveCRequest {
         std::vector<double> waypoints;
         std::string mapping;
+        bool wait_for_result = false;
+        int timeout_ms = 15000;
     };
 
     struct VelocityRequest {
         std::vector<double> values;
+        std::string mapping;
+        int duration_ms = 0;   // 0 = single-shot
+        int interval_ms = 5;   // used when duration_ms > 0
+        bool auto_stop = true; // send zero velocity when stream ends
+    };
+
+    struct TeachRequest {
+        std::string action;
+        std::string filename;
         std::string mapping;
     };
 
@@ -116,6 +134,12 @@ public:
             throw std::runtime_error("No valid positions found");
         }
 
+        req.wait_for_result = parseBoolFieldOptional(body, "wait_for_result", false);
+        req.timeout_ms = parseIntFieldOptional(body, "timeout_ms", 15000);
+        if (req.timeout_ms <= 0) {
+            req.timeout_ms = 15000;
+        }
+
         return req;
     }
 
@@ -147,6 +171,12 @@ public:
             if (quote_start != std::string::npos && quote_end != std::string::npos) {
                 req.mapping = body.substr(quote_start + 1, quote_end - quote_start - 1);
             }
+        }
+
+        req.wait_for_result = parseBoolFieldOptional(body, "wait_for_result", false);
+        req.timeout_ms = parseIntFieldOptional(body, "timeout_ms", 15000);
+        if (req.timeout_ms <= 0) {
+            req.timeout_ms = 15000;
         }
 
         return req;
@@ -198,6 +228,12 @@ public:
             throw std::runtime_error("No valid waypoints found");
         }
 
+        req.wait_for_result = parseBoolFieldOptional(body, "wait_for_result", false);
+        req.timeout_ms = parseIntFieldOptional(body, "timeout_ms", 15000);
+        if (req.timeout_ms <= 0) {
+            req.timeout_ms = 15000;
+        }
+
         return req;
     }
 
@@ -226,6 +262,16 @@ public:
 
         if (req.values.empty()) {
             throw std::runtime_error("No valid joint velocities found");
+        }
+
+        req.duration_ms = parseIntFieldOptional(body, "duration_ms", 0);
+        req.interval_ms = parseIntFieldOptional(body, "interval_ms", 5);
+        req.auto_stop = parseBoolFieldOptional(body, "auto_stop", true);
+        if (req.interval_ms <= 0) {
+            req.interval_ms = 5;
+        }
+        if (req.duration_ms < 0) {
+            req.duration_ms = 0;
         }
 
         return req;
@@ -258,6 +304,24 @@ public:
             throw std::runtime_error("No valid cartesian velocities found");
         }
 
+        req.duration_ms = parseIntFieldOptional(body, "duration_ms", 0);
+        req.interval_ms = parseIntFieldOptional(body, "interval_ms", 5);
+        req.auto_stop = parseBoolFieldOptional(body, "auto_stop", true);
+        if (req.interval_ms <= 0) {
+            req.interval_ms = 5;
+        }
+        if (req.duration_ms < 0) {
+            req.duration_ms = 0;
+        }
+
+        return req;
+    }
+
+    static TeachRequest parseTeach(const std::string& body) {
+        TeachRequest req;
+        req.action = parseStringField(body, "action");
+        req.mapping = parseStringFieldOptional(body, "mapping", "*");
+        req.filename = parseStringFieldOptional(body, "filename", "trajectory_demo");
         return req;
     }
 
@@ -306,6 +370,91 @@ private:
 
         return values;
     }
+
+    static std::string parseStringField(const std::string& body, const std::string& field_name) {
+        size_t field_pos = body.find("\"" + field_name + "\"");
+        if (field_pos == std::string::npos) {
+            throw std::runtime_error("Missing field: " + field_name);
+        }
+        size_t colon_pos = body.find(':', field_pos);
+        size_t quote_start = body.find('"', colon_pos + 1);
+        size_t quote_end = body.find('"', quote_start + 1);
+        if (quote_start == std::string::npos || quote_end == std::string::npos) {
+            throw std::runtime_error("Invalid string field: " + field_name);
+        }
+        return body.substr(quote_start + 1, quote_end - quote_start - 1);
+    }
+
+    static std::string parseStringFieldOptional(
+        const std::string& body, const std::string& field_name, const std::string& default_value) {
+        size_t field_pos = body.find("\"" + field_name + "\"");
+        if (field_pos == std::string::npos) {
+            return default_value;
+        }
+        size_t colon_pos = body.find(':', field_pos);
+        size_t quote_start = body.find('"', colon_pos + 1);
+        size_t quote_end = body.find('"', quote_start + 1);
+        if (quote_start == std::string::npos || quote_end == std::string::npos) {
+            return default_value;
+        }
+        return body.substr(quote_start + 1, quote_end - quote_start - 1);
+    }
+
+    static int parseIntFieldOptional(
+        const std::string& body, const std::string& field_name, int default_value) {
+        size_t field_pos = body.find("\"" + field_name + "\"");
+        if (field_pos == std::string::npos) {
+            return default_value;
+        }
+
+        size_t colon_pos = body.find(':', field_pos);
+        if (colon_pos == std::string::npos) {
+            return default_value;
+        }
+
+        size_t value_start = body.find_first_not_of(" \t\r\n", colon_pos + 1);
+        if (value_start == std::string::npos) {
+            return default_value;
+        }
+
+        size_t value_end = value_start;
+        while (value_end < body.length() &&
+               (std::isdigit(body[value_end]) || body[value_end] == '-')) {
+            value_end++;
+        }
+
+        try {
+            return std::stoi(body.substr(value_start, value_end - value_start));
+        } catch (...) {
+            return default_value;
+        }
+    }
+
+    static bool parseBoolFieldOptional(
+        const std::string& body, const std::string& field_name, bool default_value) {
+        size_t field_pos = body.find("\"" + field_name + "\"");
+        if (field_pos == std::string::npos) {
+            return default_value;
+        }
+
+        size_t colon_pos = body.find(':', field_pos);
+        if (colon_pos == std::string::npos) {
+            return default_value;
+        }
+
+        size_t value_start = body.find_first_not_of(" \t\r\n", colon_pos + 1);
+        if (value_start == std::string::npos) {
+            return default_value;
+        }
+
+        if (body.compare(value_start, 4, "true") == 0) {
+            return true;
+        }
+        if (body.compare(value_start, 5, "false") == 0) {
+            return false;
+        }
+        return default_value;
+    }
 };
 
 class SimpleHTTPServer {
@@ -318,6 +467,8 @@ private:
     arm_controller::movec::MoveCIPCInterface movec_;
     arm_controller::joint_velocity::JointVelocityIPCInterface joint_velocity_;
     arm_controller::cartesian_velocity::CartesianVelocityIPCInterface cartesian_velocity_;
+    arm_controller::trajectory_record::TrajectoryRecordIPCInterface trajectory_record_;
+    arm_controller::trajectory_replay::TrajectoryReplayIPCInterface trajectory_replay_;
 
 public:
     SimpleHTTPServer(int port) : port_(port) {}
@@ -378,6 +529,51 @@ public:
     }
 
 private:
+    static size_t parseContentLength(const std::string& headers) {
+        size_t pos = headers.find("Content-Length:");
+        if (pos == std::string::npos) {
+            pos = headers.find("content-length:");
+        }
+        if (pos == std::string::npos) {
+            return 0;
+        }
+
+        size_t colon = headers.find(':', pos);
+        if (colon == std::string::npos) {
+            return 0;
+        }
+        size_t start = headers.find_first_not_of(" \t", colon + 1);
+        if (start == std::string::npos) {
+            return 0;
+        }
+        size_t end = start;
+        while (end < headers.size() && std::isdigit(static_cast<unsigned char>(headers[end]))) {
+            ++end;
+        }
+        try {
+            return static_cast<size_t>(std::stoul(headers.substr(start, end - start)));
+        } catch (...) {
+            return 0;
+        }
+    }
+
+    template <typename GetStateFn>
+    bool wait_until_terminal(const std::string& mapping, int timeout_ms, GetStateFn get_state,
+                             arm_controller::ipc::ExecutionState& final_state) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+        while (std::chrono::steady_clock::now() < deadline) {
+            final_state = get_state(mapping);
+            if (final_state == arm_controller::ipc::ExecutionState::SUCCESS ||
+                final_state == arm_controller::ipc::ExecutionState::FAILED) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        final_state = get_state(mapping);
+        return (final_state == arm_controller::ipc::ExecutionState::SUCCESS ||
+                final_state == arm_controller::ipc::ExecutionState::FAILED);
+    }
+
     void acceptLoop() {
         while (running_) {
             struct sockaddr_in client_addr{};
@@ -397,16 +593,39 @@ private:
     }
 
     void handleClient(int client_socket) {
-        char buffer[8192] = {0};
-        ssize_t received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+        std::string request;
+        request.reserve(8192);
 
-        if (received < 0) {
+        char buffer[4096];
+        ssize_t received = 0;
+        size_t header_end = std::string::npos;
+        size_t content_length = 0;
+        size_t total_needed = 0;
+
+        while (true) {
+            received = recv(client_socket, buffer, sizeof(buffer), 0);
+            if (received <= 0) {
+                break;
+            }
+            request.append(buffer, static_cast<size_t>(received));
+
+            if (header_end == std::string::npos) {
+                header_end = request.find("\r\n\r\n");
+                if (header_end != std::string::npos) {
+                    content_length = parseContentLength(request.substr(0, header_end + 4));
+                    total_needed = (header_end + 4) + content_length;
+                }
+            }
+
+            if (header_end != std::string::npos && request.size() >= total_needed) {
+                break;
+            }
+        }
+
+        if (request.empty()) {
             close(client_socket);
             return;
         }
-
-        buffer[received] = '\0';
-        std::string request(buffer);
 
         // 解析请求
         std::string response = handleRequest(request);
@@ -448,6 +667,12 @@ private:
             } else if (method == "POST" && path == "/cartesian_velocity") {
                 response_body = handleCartesianVelocity(body);
                 http_status = "HTTP/1.1 200 OK";
+            } else if (method == "POST" && path == "/trajectory_record") {
+                response_body = handleTrajectoryRecord(body);
+                http_status = "HTTP/1.1 200 OK";
+            } else if (method == "POST" && path == "/trajectory_replay") {
+                response_body = handleTrajectoryReplay(body);
+                http_status = "HTTP/1.1 200 OK";
             } else if (method == "GET" && path == "/health") {
                 response_body = SimpleJSON::ok();
                 http_status = "HTTP/1.1 200 OK";
@@ -478,6 +703,26 @@ private:
 
             // 执行 MoveJ 命令
             if (movej_.execute(req.positions, req.mapping)) {
+                if (req.wait_for_result) {
+                    arm_controller::ipc::ExecutionState final_state = arm_controller::ipc::ExecutionState::PENDING;
+                    const bool done = wait_until_terminal(
+                        req.mapping, req.timeout_ms,
+                        [this](const std::string& m) { return movej_.getExecutionState(m); },
+                        final_state);
+                    if (!done) {
+                        return SimpleJSON::success(
+                            "Command queued (timeout waiting final result)",
+                            movej_.getCurrentMode(req.mapping),
+                            static_cast<int>(movej_.getExecutionState(req.mapping)));
+                    }
+                    if (final_state == arm_controller::ipc::ExecutionState::FAILED) {
+                        return SimpleJSON::error("MoveJ execution failed");
+                    }
+                    return SimpleJSON::success(
+                        "Command executed successfully",
+                        movej_.getCurrentMode(req.mapping),
+                        static_cast<int>(movej_.getExecutionState(req.mapping)));
+                }
                 return SimpleJSON::success(
                     "Command queued",
                     movej_.getCurrentMode(req.mapping),
@@ -497,6 +742,26 @@ private:
 
             // 执行 MoveL 命令
             if (movel_.execute(req.x, req.y, req.z, req.qx, req.qy, req.qz, req.qw, req.mapping)) {
+                if (req.wait_for_result) {
+                    arm_controller::ipc::ExecutionState final_state = arm_controller::ipc::ExecutionState::PENDING;
+                    const bool done = wait_until_terminal(
+                        req.mapping, req.timeout_ms,
+                        [this](const std::string& m) { return movel_.getExecutionState(m); },
+                        final_state);
+                    if (!done) {
+                        return SimpleJSON::success(
+                            "Command queued (timeout waiting final result)",
+                            movel_.getCurrentMode(req.mapping),
+                            static_cast<int>(movel_.getExecutionState(req.mapping)));
+                    }
+                    if (final_state == arm_controller::ipc::ExecutionState::FAILED) {
+                        return SimpleJSON::error("MoveL execution failed");
+                    }
+                    return SimpleJSON::success(
+                        "Command executed successfully",
+                        movel_.getCurrentMode(req.mapping),
+                        static_cast<int>(movel_.getExecutionState(req.mapping)));
+                }
                 return SimpleJSON::success(
                     "Command queued",
                     movel_.getCurrentMode(req.mapping),
@@ -516,6 +781,26 @@ private:
 
             // 执行 MoveC 命令
             if (movec_.execute(req.waypoints, req.mapping)) {
+                if (req.wait_for_result) {
+                    arm_controller::ipc::ExecutionState final_state = arm_controller::ipc::ExecutionState::PENDING;
+                    const bool done = wait_until_terminal(
+                        req.mapping, req.timeout_ms,
+                        [this](const std::string& m) { return movec_.getExecutionState(m); },
+                        final_state);
+                    if (!done) {
+                        return SimpleJSON::success(
+                            "Command queued (timeout waiting final result)",
+                            movec_.getCurrentMode(req.mapping),
+                            static_cast<int>(movec_.getExecutionState(req.mapping)));
+                    }
+                    if (final_state == arm_controller::ipc::ExecutionState::FAILED) {
+                        return SimpleJSON::error("MoveC execution failed");
+                    }
+                    return SimpleJSON::success(
+                        "Command executed successfully",
+                        movec_.getCurrentMode(req.mapping),
+                        static_cast<int>(movec_.getExecutionState(req.mapping)));
+                }
                 return SimpleJSON::success(
                     "Command queued",
                     movec_.getCurrentMode(req.mapping),
@@ -533,16 +818,60 @@ private:
         try {
             auto req = RequestParser::parseJointVelocity(body);
 
-            // 执行 JointVelocity 命令
-            if (joint_velocity_.execute(req.values, req.mapping)) {
+            // 单次发送（兼容旧行为）
+            if (req.duration_ms <= 0) {
+                if (!joint_velocity_.execute(req.values, req.mapping)) {
+                    return SimpleJSON::error("JointVelocity execution failed");
+                }
                 return SimpleJSON::success(
                     "Command queued",
                     joint_velocity_.getCurrentMode(req.mapping),
                     static_cast<int>(joint_velocity_.getExecutionState(req.mapping))
                 );
-            } else {
-                return SimpleJSON::error("JointVelocity execution failed");
             }
+
+            // 先进行模式预热：在切模窗口内重试，直到真实进入 JointVelocity
+            {
+                const auto warmup_deadline =
+                    std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+                bool mode_ready = false;
+                while (std::chrono::steady_clock::now() < warmup_deadline) {
+                    if (!joint_velocity_.execute(req.values, req.mapping)) {
+                        return SimpleJSON::error("JointVelocity warmup execution failed");
+                    }
+                    if (joint_velocity_.getCurrentMode(req.mapping) == "JointVelocity") {
+                        mode_ready = true;
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
+                if (!mode_ready) {
+                    return SimpleJSON::error("JointVelocity mode not ready within warmup timeout");
+                }
+            }
+
+            // 流式发送（与 example_velocity_control 相同思路）
+            auto start = std::chrono::steady_clock::now();
+            int sends = 0;
+            while (std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - start).count() < req.duration_ms) {
+                if (!joint_velocity_.execute(req.values, req.mapping)) {
+                    return SimpleJSON::error("JointVelocity stream execution failed");
+                }
+                sends++;
+                std::this_thread::sleep_for(std::chrono::milliseconds(req.interval_ms));
+            }
+
+            if (req.auto_stop) {
+                std::vector<double> zero(req.values.size(), 0.0);
+                joint_velocity_.execute(zero, req.mapping);
+            }
+
+            return SimpleJSON::success(
+                "JointVelocity stream completed: " + std::to_string(sends) + " sends",
+                joint_velocity_.getCurrentMode(req.mapping),
+                static_cast<int>(joint_velocity_.getExecutionState(req.mapping))
+            );
         } catch (const std::exception& e) {
             return SimpleJSON::error(e.what());
         }
@@ -552,16 +881,130 @@ private:
         try {
             auto req = RequestParser::parseCartesianVelocity(body);
 
-            // 执行 CartesianVelocity 命令
-            if (cartesian_velocity_.execute(req.values, req.mapping)) {
+            // 单次发送（兼容旧行为）
+            if (req.duration_ms <= 0) {
+                if (!cartesian_velocity_.execute(req.values, req.mapping)) {
+                    return SimpleJSON::error("CartesianVelocity execution failed");
+                }
                 return SimpleJSON::success(
                     "Command queued",
                     cartesian_velocity_.getCurrentMode(req.mapping),
                     static_cast<int>(cartesian_velocity_.getExecutionState(req.mapping))
                 );
-            } else {
-                return SimpleJSON::error("CartesianVelocity execution failed");
             }
+
+            // 先进行模式预热：在切模窗口内重试，直到真实进入 CartesianVelocity
+            {
+                const auto warmup_deadline =
+                    std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+                bool mode_ready = false;
+                while (std::chrono::steady_clock::now() < warmup_deadline) {
+                    if (!cartesian_velocity_.execute(req.values, req.mapping)) {
+                        return SimpleJSON::error("CartesianVelocity warmup execution failed");
+                    }
+                    if (cartesian_velocity_.getCurrentMode(req.mapping) == "CartesianVelocity") {
+                        mode_ready = true;
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
+                if (!mode_ready) {
+                    return SimpleJSON::error("CartesianVelocity mode not ready within warmup timeout");
+                }
+            }
+
+            // 流式发送（与 example_velocity_control 相同思路）
+            auto start = std::chrono::steady_clock::now();
+            int sends = 0;
+            while (std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - start).count() < req.duration_ms) {
+                if (!cartesian_velocity_.execute(req.values, req.mapping)) {
+                    return SimpleJSON::error("CartesianVelocity stream execution failed");
+                }
+                sends++;
+                std::this_thread::sleep_for(std::chrono::milliseconds(req.interval_ms));
+            }
+
+            if (req.auto_stop) {
+                std::vector<double> zero(req.values.size(), 0.0);
+                cartesian_velocity_.execute(zero, req.mapping);
+            }
+
+            return SimpleJSON::success(
+                "CartesianVelocity stream completed: " + std::to_string(sends) + " sends",
+                cartesian_velocity_.getCurrentMode(req.mapping),
+                static_cast<int>(cartesian_velocity_.getExecutionState(req.mapping))
+            );
+        } catch (const std::exception& e) {
+            return SimpleJSON::error(e.what());
+        }
+    }
+
+    std::string handleTrajectoryRecord(const std::string& body) {
+        try {
+            auto req = RequestParser::parseTeach(body);
+            const std::string mapping = (req.mapping == "*" ? "" : req.mapping);
+            bool ok = false;
+
+            if (req.action == "start") {
+                ok = trajectory_record_.startRecording(req.filename, mapping);
+            } else if (req.action == "pause") {
+                ok = trajectory_record_.pauseRecording(mapping);
+            } else if (req.action == "resume") {
+                ok = trajectory_record_.resumeRecording(mapping);
+            } else if (req.action == "complete" || req.action == "stop") {
+                ok = trajectory_record_.stopRecording(mapping);
+            } else if (req.action == "cancel") {
+                ok = trajectory_record_.cancelRecording(mapping);
+            } else {
+                return SimpleJSON::error("Unsupported action for trajectory_record");
+            }
+
+            if (!ok) {
+                return SimpleJSON::error(trajectory_record_.getLastError());
+            }
+
+            const std::string mode_mapping = req.mapping.empty() || req.mapping == "*" ? "left_arm" : req.mapping;
+            return SimpleJSON::success(
+                "Command queued",
+                trajectory_record_.getCurrentMode(mode_mapping),
+                static_cast<int>(trajectory_record_.getExecutionState())
+            );
+        } catch (const std::exception& e) {
+            return SimpleJSON::error(e.what());
+        }
+    }
+
+    std::string handleTrajectoryReplay(const std::string& body) {
+        try {
+            auto req = RequestParser::parseTeach(body);
+            const std::string mapping = (req.mapping == "*" ? "" : req.mapping);
+            bool ok = false;
+
+            if (req.action == "start") {
+                ok = trajectory_replay_.startReplay(req.filename, mapping);
+            } else if (req.action == "pause") {
+                ok = trajectory_replay_.pauseReplay(mapping);
+            } else if (req.action == "resume") {
+                ok = trajectory_replay_.resumeReplay(mapping);
+            } else if (req.action == "complete" || req.action == "stop") {
+                ok = trajectory_replay_.stopReplay(mapping);
+            } else if (req.action == "cancel") {
+                ok = trajectory_replay_.cancelReplay(mapping);
+            } else {
+                return SimpleJSON::error("Unsupported action for trajectory_replay");
+            }
+
+            if (!ok) {
+                return SimpleJSON::error(trajectory_replay_.getLastError());
+            }
+
+            const std::string mode_mapping = req.mapping.empty() || req.mapping == "*" ? "left_arm" : req.mapping;
+            return SimpleJSON::success(
+                "Command queued",
+                trajectory_replay_.getCurrentMode(mode_mapping),
+                static_cast<int>(trajectory_replay_.getExecutionState(mode_mapping))
+            );
         } catch (const std::exception& e) {
             return SimpleJSON::error(e.what());
         }
@@ -612,6 +1055,8 @@ int main(int /*argc*/, char** /*argv*/) {
     std::cout << "   POST /movec                 - Cartesian circular motion\n";
     std::cout << "   POST /joint_velocity        - Joint velocity control\n";
     std::cout << "   POST /cartesian_velocity    - Cartesian velocity control\n";
+    std::cout << "   POST /trajectory_record     - Trajectory record control\n";
+    std::cout << "   POST /trajectory_replay     - Trajectory replay control\n";
     std::cout << "   GET  /health                - Health check\n\n";
     std::cout << "Example requests:\n";
     std::cout << "  MoveJ:\n";

@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "movej",
-      "description": "控制机械臂执行 MoveJ 运动。参数为关节位置（弧度）和映射名称。",
+      "description": "关节空间点到点运动（请求式，可能先进入 Hook/Hold 再切目标模式）",
       "type": "http",
       "method": "POST",
       "url": "http://127.0.0.1:8080/movej",
@@ -14,54 +14,220 @@
         "properties": {
           "positions": {
             "type": "array",
-            "items": {"type": "number"},
-            "description": "关节目标位置（弧度），例如 [-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0]"
+            "prefixItems": [
+              {"type": "number", "minimum": -2.9670, "maximum": 2.9670},
+              {"type": "number", "minimum": -1.5708, "maximum": 1.5708},
+              {"type": "number", "minimum": -1.5708, "maximum": 1.5708},
+              {"type": "number", "minimum": -2.9670, "maximum": 2.9670},
+              {"type": "number", "minimum": -1.5708, "maximum": 1.5708},
+              {"type": "number", "minimum": -2.9670, "maximum": 2.9670}
+            ],
+            "minItems": 6,
+            "maxItems": 6
           },
           "mapping": {
             "type": "string",
-            "description": "机械臂映射",
-            "enum": ["left_arm", "right_arm"],
+            "enum": ["left_arm", "right_arm", "single_arm"],
             "default": "left_arm"
           }
         },
-        "required": ["positions", "mapping"]
+        "required": ["positions"]
+      }
+    },
+    {
+      "name": "movel",
+      "description": "笛卡尔直线运动（请求式，可能先进入 Hook/Hold 再切目标模式）",
+      "type": "http",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/movel",
+      "headers": {
+        "Content-Type": "application/json"
       },
-      "examples": [
-        {
-          "name": "左臂移动到回家位置",
-          "input": {
-            "positions": [-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0],
-            "mapping": "left_arm"
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "x": {"type": "number", "minimum": -2.0, "maximum": 2.0},
+          "y": {"type": "number", "minimum": -2.0, "maximum": 2.0},
+          "z": {"type": "number", "minimum": -2.0, "maximum": 2.0},
+          "qx": {"type": "number", "minimum": -1.0, "maximum": 1.0},
+          "qy": {"type": "number", "minimum": -1.0, "maximum": 1.0},
+          "qz": {"type": "number", "minimum": -1.0, "maximum": 1.0},
+          "qw": {"type": "number", "minimum": -1.0, "maximum": 1.0},
+          "mapping": {
+            "type": "string",
+            "enum": ["left_arm", "right_arm", "single_arm"],
+            "default": "left_arm"
           }
         },
-        {
-          "name": "右臂移动到回家位置",
-          "input": {
-            "positions": [-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0],
-            "mapping": "right_arm"
+        "required": ["x", "y", "z", "qx", "qy", "qz", "qw"]
+      }
+    },
+    {
+      "name": "movec",
+      "description": "笛卡尔圆弧运动（请求式，可能先进入 Hook/Hold 再切目标模式）",
+      "type": "http",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/movec",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "waypoints": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": -2.0,
+              "maximum": 2.0
+            },
+            "minItems": 14
+          },
+          "mapping": {
+            "type": "string",
+            "enum": ["left_arm", "right_arm", "single_arm"],
+            "default": "left_arm"
           }
         },
-        {
-          "name": "左臂移动到零位置",
-          "input": {
-            "positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            "mapping": "left_arm"
+        "required": ["waypoints"]
+      }
+    },
+    {
+      "name": "joint_velocity",
+      "description": "关节速度控制（请求式；速度命令需持续发送）",
+      "type": "http",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/joint_velocity",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "joint_velocities": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": -3.14,
+              "maximum": 3.14
+            },
+            "minItems": 6,
+            "maxItems": 6
+          },
+          "mapping": {
+            "type": "string",
+            "enum": ["left_arm", "right_arm", "single_arm"],
+            "default": "left_arm"
           }
-        }
-      ]
+        },
+        "required": ["joint_velocities"]
+      }
+    },
+    {
+      "name": "cartesian_velocity",
+      "description": "笛卡尔速度控制（请求式；速度命令需持续发送）",
+      "type": "http",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/cartesian_velocity",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "cartesian_velocities": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": -1.0,
+              "maximum": 1.0
+            },
+            "minItems": 6,
+            "maxItems": 6
+          },
+          "mapping": {
+            "type": "string",
+            "enum": ["left_arm", "right_arm", "single_arm"],
+            "default": "left_arm"
+          }
+        },
+        "required": ["cartesian_velocities"]
+      }
+    },
+    {
+      "name": "trajectory_record",
+      "description": "轨迹录制控制（请求式，start 后会异步切到 TrajectoryRecord）",
+      "type": "http",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/trajectory_record",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["start", "pause", "resume", "complete", "cancel", "stop"]
+          },
+          "filename": {
+            "type": "string",
+            "description": "仅 action=start 时需要；不含扩展名",
+            "default": "trajectory_demo"
+          },
+          "mapping": {
+            "type": "string",
+            "enum": ["left_arm", "right_arm", "single_arm", "*"],
+            "default": "*"
+          }
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "trajectory_replay",
+      "description": "轨迹回放控制（请求式，start 后会异步切到 TrajectoryReplay）",
+      "type": "http",
+      "method": "POST",
+      "url": "http://127.0.0.1:8080/trajectory_replay",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["start", "pause", "resume", "complete", "cancel", "stop"]
+          },
+          "filename": {
+            "type": "string",
+            "description": "仅 action=start 时需要；不含扩展名",
+            "default": "trajectory_demo_smooth"
+          },
+          "mapping": {
+            "type": "string",
+            "enum": ["left_arm", "right_arm", "single_arm", "*"],
+            "default": "*"
+          }
+        },
+        "required": ["action"]
+      }
     },
     {
       "name": "check_arm_server",
       "description": "检查机械臂 HTTP 服务器是否在线",
       "type": "http",
       "method": "GET",
-      "url": "http://127.0.0.1:8080/health",
-      "examples": [
-        {
-          "name": "检查服务器状态",
-          "input": {}
-        }
-      ]
+      "url": "http://127.0.0.1:8080/health"
     }
-  ]
+  ],
+  "execution_semantics": {
+    "type": "asynchronous_request",
+    "notes": [
+      "HTTP 200 仅表示命令入队，不代表机械臂已完成动作。",
+      "部分模式会先进入 Hook/HoldState 进行安全检查，再自动切换到目标模式。",
+      "建议上层在收到 success 后做状态轮询，并设置重试与超时策略。"
+    ]
+  }
 }

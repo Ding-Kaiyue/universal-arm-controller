@@ -1,7 +1,7 @@
 {
   "name": "arm_multimode_controller",
   "display_name": "机械臂多模式控制器",
-  "description": "通过 HTTP 接口控制机械臂执行多种运动模式：MoveJ、MoveL、MoveC、JointVelocity、CartesianVelocity",
+  "description": "通过 HTTP 接口控制机械臂执行多种运动模式：MoveJ、MoveL、MoveC、JointVelocity、CartesianVelocity、TrajectoryRecord、TrajectoryReplay",
   "version": "2.0.0",
   "author": "Arm Controller Team",
   "category": "robotics",
@@ -9,12 +9,20 @@
   "endpoints": {
     "server": "http://127.0.0.1:8080"
   },
+  "execution_semantics": {
+    "type": "asynchronous_request",
+    "notes": [
+      "HTTP success 仅表示命令已入队，不代表动作已完成。",
+      "部分模式会先进入 Hook/HoldState 完成安全检查，再切换到目标模式执行。",
+      "上层应做状态轮询、超时控制和重试策略。"
+    ]
+  },
 
   "skills": [
     {
       "name": "movej",
       "display_name": "MoveJ 运动",
-      "description": "关节空间中的点到点运动（Joint-space Point-to-Point Motion）",
+      "description": "关节空间中的点到点运动（请求式，可能先进入 Hook/HoldState）",
       "method": "POST",
       "path": "/movej",
       "request_schema": {
@@ -22,7 +30,14 @@
         "properties": {
           "positions": {
             "type": "array",
-            "items": {"type": "number"},
+            "prefixItems": [
+              {"type": "number", "minimum": -2.9670, "maximum": 2.9670},
+              {"type": "number", "minimum": -1.5708, "maximum": 1.5708},
+              {"type": "number", "minimum": -1.5708, "maximum": 1.5708},
+              {"type": "number", "minimum": -2.9670, "maximum": 2.9670},
+              {"type": "number", "minimum": -1.5708, "maximum": 1.5708},
+              {"type": "number", "minimum": -2.9670, "maximum": 2.9670}
+            ],
             "description": "6个关节位置数组（弧度）。例如：[1.57, 0, 1.57, 0, 1.57, 0]",
             "minItems": 6,
             "maxItems": 6
@@ -66,19 +81,19 @@
     {
       "name": "movel",
       "display_name": "MoveL 运动",
-      "description": "笛卡尔空间中的直线运动（Cartesian Linear Motion）",
+      "description": "笛卡尔空间中的直线运动（请求式，可能先进入 Hook/HoldState）",
       "method": "POST",
       "path": "/movel",
       "request_schema": {
         "type": "object",
         "properties": {
-          "x": {"type": "number", "description": "X 坐标（米）"},
-          "y": {"type": "number", "description": "Y 坐标（米）"},
-          "z": {"type": "number", "description": "Z 坐标（米）"},
-          "qx": {"type": "number", "description": "四元数 X 分量", "default": 0.0},
-          "qy": {"type": "number", "description": "四元数 Y 分量", "default": 0.0},
-          "qz": {"type": "number", "description": "四元数 Z 分量", "default": 0.0},
-          "qw": {"type": "number", "description": "四元数 W 分量", "default": 1.0},
+          "x": {"type": "number", "description": "X 坐标（米）", "minimum": -2.0, "maximum": 2.0},
+          "y": {"type": "number", "description": "Y 坐标（米）", "minimum": -2.0, "maximum": 2.0},
+          "z": {"type": "number", "description": "Z 坐标（米）", "minimum": -2.0, "maximum": 2.0},
+          "qx": {"type": "number", "description": "四元数 X 分量", "minimum": -1.0, "maximum": 1.0},
+          "qy": {"type": "number", "description": "四元数 Y 分量", "minimum": -1.0, "maximum": 1.0},
+          "qz": {"type": "number", "description": "四元数 Z 分量", "minimum": -1.0, "maximum": 1.0},
+          "qw": {"type": "number", "description": "四元数 W 分量", "minimum": -1.0, "maximum": 1.0},
           "mapping": {
             "type": "string",
             "description": "机械臂映射",
@@ -86,7 +101,7 @@
             "enum": ["left_arm", "right_arm", "single_arm"]
           }
         },
-        "required": ["x", "y", "z"]
+        "required": ["x", "y", "z", "qx", "qy", "qz", "qw"]
       },
       "response_schema": {
         "type": "object",
@@ -165,7 +180,7 @@
     {
       "name": "joint_velocity",
       "display_name": "JointVelocity 控制",
-      "description": "关节速度控制模式（Joint Velocity Control）",
+      "description": "关节速度控制模式（请求式；速度命令需持续发送）",
       "method": "POST",
       "path": "/joint_velocity",
       "request_schema": {
@@ -173,7 +188,7 @@
         "properties": {
           "joint_velocities": {
             "type": "array",
-            "items": {"type": "number"},
+            "items": {"type": "number", "minimum": -3.14, "maximum": 3.14},
             "description": "6个关节速度数组（弧度/秒）。例如：[0.5, 0.3, -0.2, 0, 0.1, 0]",
             "minItems": 6,
             "maxItems": 6
@@ -210,7 +225,7 @@
     {
       "name": "cartesian_velocity",
       "display_name": "CartesianVelocity 控制",
-      "description": "笛卡尔速度控制模式（Cartesian Velocity Control）",
+      "description": "笛卡尔速度控制模式（请求式；速度命令需持续发送）",
       "method": "POST",
       "path": "/cartesian_velocity",
       "request_schema": {
@@ -218,7 +233,7 @@
         "properties": {
           "cartesian_velocities": {
             "type": "array",
-            "items": {"type": "number"},
+            "items": {"type": "number", "minimum": -1.0, "maximum": 1.0},
             "description": "6维速度数组：[vx, vy, vz, wx, wy, wz]（米/秒 和 弧度/秒）",
             "minItems": 6,
             "maxItems": 6
@@ -251,6 +266,82 @@
           }
         }
       ]
+    },
+    {
+      "name": "trajectory_record",
+      "display_name": "TrajectoryRecord 控制",
+      "description": "轨迹录制控制（请求式，start 后会异步切到 TrajectoryRecord）",
+      "method": "POST",
+      "path": "/trajectory_record",
+      "request_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["start", "pause", "resume", "complete", "cancel", "stop"]
+          },
+          "filename": {
+            "type": "string",
+            "description": "仅 action=start 时需要；不含扩展名",
+            "default": "trajectory_demo"
+          },
+          "mapping": {
+            "type": "string",
+            "description": "目标机械臂映射，* 表示全部",
+            "default": "*",
+            "enum": ["left_arm", "right_arm", "single_arm", "*"]
+          }
+        },
+        "required": ["action"]
+      },
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"type": "string", "enum": ["success", "error"]},
+          "message": {"type": "string"},
+          "mode": {"type": "string"},
+          "execution_state": {"type": "integer"},
+          "error": {"type": "string"}
+        }
+      }
+    },
+    {
+      "name": "trajectory_replay",
+      "display_name": "TrajectoryReplay 控制",
+      "description": "轨迹回放控制（请求式，start 后会异步切到 TrajectoryReplay）",
+      "method": "POST",
+      "path": "/trajectory_replay",
+      "request_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["start", "pause", "resume", "complete", "cancel", "stop"]
+          },
+          "filename": {
+            "type": "string",
+            "description": "仅 action=start 时需要；不含扩展名",
+            "default": "trajectory_demo_smooth"
+          },
+          "mapping": {
+            "type": "string",
+            "description": "目标机械臂映射，* 表示全部",
+            "default": "*",
+            "enum": ["left_arm", "right_arm", "single_arm", "*"]
+          }
+        },
+        "required": ["action"]
+      },
+      "response_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"type": "string", "enum": ["success", "error"]},
+          "message": {"type": "string"},
+          "mode": {"type": "string"},
+          "execution_state": {"type": "integer"},
+          "error": {"type": "string"}
+        }
+      }
     },
     {
       "name": "health_check",
@@ -305,6 +396,24 @@
       "examples": [
         "沿 X 轴以 0.1 米/秒的速度运动",
         "笛卡尔速度控制"
+      ]
+    },
+    {
+      "keywords": ["轨迹录制", "示教录制", "开始录制", "暂停录制", "结束录制", "取消录制"],
+      "skill": "trajectory_record",
+      "examples": [
+        "开始录制双臂轨迹，文件名 trajectory_demo",
+        "暂停轨迹录制",
+        "完成轨迹录制"
+      ]
+    },
+    {
+      "keywords": ["轨迹回放", "轨迹复现", "开始回放", "暂停回放", "继续回放", "取消回放"],
+      "skill": "trajectory_replay",
+      "examples": [
+        "回放 trajectory_demo_smooth",
+        "暂停轨迹回放",
+        "继续轨迹回放"
       ]
     },
     {
