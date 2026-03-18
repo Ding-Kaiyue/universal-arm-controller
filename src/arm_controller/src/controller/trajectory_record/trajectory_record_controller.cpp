@@ -770,7 +770,12 @@ void TrajectoryRecordController::command_queue_consumer_thread() {
             if (action == "start") {
                 if (mapping.empty() || mapping == "*") {
                     if (hardware_manager_) {
-                        target_mappings = hardware_manager_->get_all_mappings();
+                        for (const auto& m : hardware_manager_->get_all_mappings()) {
+                            // 仅对有电机反馈的 arm 映射启用录制，跳过纯软件映射（如 gripper）
+                            if (!hardware_manager_->get_motors_id(m).empty()) {
+                                target_mappings.push_back(m);
+                            }
+                        }
                     }
                 } else {
                     target_mappings.push_back(mapping);

@@ -18,7 +18,12 @@ std::vector<std::string> resolve_target_mappings(
     if (action == "start") {
         if (mapping.empty() || mapping == "*") {
             if (hardware_manager) {
-                target_mappings = hardware_manager->get_all_mappings();
+                for (const auto& m : hardware_manager->get_all_mappings()) {
+                    // 仅对有电机反馈的 arm 映射启用复现，跳过纯软件映射（如 gripper）
+                    if (!hardware_manager->get_motors_id(m).empty()) {
+                        target_mappings.push_back(m);
+                    }
+                }
             }
         } else {
             target_mappings.push_back(mapping);

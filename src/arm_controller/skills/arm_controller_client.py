@@ -317,7 +317,8 @@ class ArmControllerClient:
         position: float,
         mapping: str = "left_gripper",
         velocity_percent: int = 50,
-        effort_percent: int = 50
+        effort_percent: int = 50,
+        gripper_type: int = -1
     ) -> Tuple[bool, Dict]:
         """
         执行 GripperControl 命令
@@ -327,15 +328,29 @@ class ArmControllerClient:
             mapping: 夹爪映射，默认 left_gripper
             velocity_percent: 速度百分比 [1,100]
             effort_percent: 力度百分比 [20,100]
+            gripper_type: 夹爪类型（0=OmniPicker, 1=PGC, -1=auto）
 
         Returns:
             (success: bool, response: dict)
         """
+        # 与 HTTP 服务端字段契约对齐：
+        # - position/velocity/effort 都使用 raw [0,255]
+        # - 兼容上层米制+百分比输入，在客户端做一次换算
+        if 0.0 <= position <= 0.025:
+            position_raw = int(round((position / 0.025) * 255.0))
+        else:
+            position_raw = int(round(position))
+        position_raw = max(0, min(255, position_raw))
+
+        velocity_raw = int(round((max(1, min(100, velocity_percent)) / 100.0) * 255.0))
+        effort_raw = int(round((max(20, min(100, effort_percent)) / 100.0) * 255.0))
+
         payload = {
-            "position": position,
+            "position": position_raw,
             "mapping": mapping,
-            "velocity_percent": velocity_percent,
-            "effort_percent": effort_percent
+            "velocity": velocity_raw,
+            "effort": effort_raw,
+            "gripper_type": gripper_type
         }
 
         try:
