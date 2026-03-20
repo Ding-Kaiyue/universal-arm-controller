@@ -25,12 +25,18 @@
 # 配置 CAN 接口
 sudo ip link set can0 txqueuelen 1000
 sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off
-(If you are using dual arm, please don't forget to set can1)
+# 双臂请同时配置 can1
+# sudo ip link set can1 txqueuelen 1000
+# sudo ip link set can1 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off
+
+# 可选：隔离 ROS 网络，避免同网段其他机器干扰
+export ROS_DOMAIN_ID=78
 
 xhost +local:docker
 docker pull dingkaiyue/robotic-arm-controller:latest
 docker run -dit --name robotic_arm \
   --network=host \
+  -e ROS_DOMAIN_ID=${ROS_DOMAIN_ID} \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v $HOME/.Xauthority:/root/.Xauthority:rw \
@@ -43,12 +49,13 @@ source /opt/robotic_arm_ws/install/setup.bash
 ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 ```
 
-**国内用户：** 下载 [robotic-arm-controller-latest.tar.gz](https://pan.baidu.com/s/19Tc-so0SimXrALYAQxx3pQ?pwd=j5v9)（644MB，提取码：j5v9），然后加载镜像：
+**国内用户：** 下载 [robotic-arm-controller-latest.tar.gz](链接: https://pan.baidu.com/s/165rKOZsq94QM9LzqbSPaEg?pwd=cjhk 提取码: cjhk)，然后加载镜像：
 
 ```bash
 docker load < robotic-arm-controller-latest.tar.gz
 docker run -dit --name robotic_arm \
   --network=host \
+  -e ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42} \
   -e DISPLAY=$DISPLAY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v $HOME/.Xauthority:/root/.Xauthority:rw \
