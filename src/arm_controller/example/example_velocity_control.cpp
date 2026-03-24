@@ -59,26 +59,26 @@ int main() {
     const int duration_ms = 1000;  // 1 秒
 
     // CartesianVelocity 演示 - left_arm 和 right_arm 同时运动
-    std::cout << "========== CartesianVelocity 双臂同时演示 (1秒) ==========\n";
-    std::cout << "发送持续 CartesianVelocity 命令 -> left_arm 和 right_arm ...\n";
+    // std::cout << "========== CartesianVelocity 双臂同时演示 (1秒) ==========\n";
+    // std::cout << "发送持续 CartesianVelocity 命令 -> left_arm 和 right_arm ...\n";
 
-    // 创建两个线程，分别控制左右臂
-    std::thread left_cartesian_thread(move_cartesian_arm, "left_arm", std::vector<double>{0.0, 0.0, 0.03, 0.0, 0.0, 0.0}, duration_ms);
-    std::thread right_cartesian_thread(move_cartesian_arm, "right_arm", std::vector<double>{0.0, 0.0, 0.03, 0.0, 0.0, 0.0}, duration_ms);
+    // // 创建两个线程，分别控制左右臂
+    // std::thread left_cartesian_thread(move_cartesian_arm, "left_arm", std::vector<double>{0.0, 0.0, 0.03, 0.0, 0.0, 0.0}, duration_ms);
+    // std::thread right_cartesian_thread(move_cartesian_arm, "right_arm", std::vector<double>{0.0, 0.0, 0.03, 0.0, 0.0, 0.0}, duration_ms);
 
-    // 等待两个线程完成
-    left_cartesian_thread.join();
-    right_cartesian_thread.join();
+    // // 等待两个线程完成
+    // left_cartesian_thread.join();
+    // right_cartesian_thread.join();
 
-    std::this_thread::sleep_for(std::chrono::microseconds(500));  // 等待状态更新
+    // std::this_thread::sleep_for(std::chrono::microseconds(500));  // 等待状态更新
 
     // JointVelocity 演示 - left_arm 和 right_arm 同时运动
     std::cout << "========== JointVelocity 双臂同时演示 (3秒) ==========\n";
     std::cout << "发送持续 JointVelocity 命令 -> left_arm 和 right_arm ...\n";
 
     // 创建两个线程，分别控制左右臂
-    std::thread left_thread(move_arm, "left_arm", std::vector<double>{0.2, 0.0, 0.0, 0.0, 0.0, 0.0}, duration_ms);
-    std::thread right_thread(move_arm, "right_arm", std::vector<double>{-0.2, 0.0, 0.0, 0.0, 0.0, 0.0}, duration_ms);
+    std::thread left_thread(move_arm, "left_arm", std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0, 0.2}, duration_ms);
+    std::thread right_thread(move_arm, "right_arm", std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0, 0.2}, duration_ms);
 
     // 等待两个线程完成
     left_thread.join();

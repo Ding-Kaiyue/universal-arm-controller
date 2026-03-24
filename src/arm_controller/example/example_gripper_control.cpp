@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
     std::cout << "✅ IPC initialized\n";
 
     basic_ops::BasicOpsIPCInterface gripper;
-    const std::string mapping = "left_gripper";  // 可改成你的 gripper mapping
+    const std::string mapping = "right_gripper";  // 可改成你的 gripper mapping
     const int velocity_raw = 128;
     const int effort_raw = 128;
     const int gripper_type = -1; // auto: 按 mapping 推断
