@@ -64,6 +64,9 @@ private:
     std::atomic<bool> consumer_running_{false};
 
     std::chrono::steady_clock steady_clock_;  // 用于命令超时检查的单调时钟
+
+    // 保护 start/stop 的并发调用，避免重复创建订阅和RT线程
+    std::mutex lifecycle_mutex_;
 };
 
 #endif      // __JOINT_VELOCITY_CONTROLLER_HPP__

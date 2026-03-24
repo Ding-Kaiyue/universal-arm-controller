@@ -926,7 +926,6 @@ private:
             }
 
             // 流式发送（与 example_velocity_control 相同思路）
-            std::cout << "[HTTP /joint_velocity] stream branch start" << std::endl;
             auto start = std::chrono::steady_clock::now();
             int sends = 0;
             while (std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -938,7 +937,6 @@ private:
                 std::this_thread::sleep_for(std::chrono::milliseconds(req.interval_ms));
             }
 
-            std::cout << "[HTTP /joint_velocity] stream branch done: sends=" << sends << std::endl;
 
             if (req.auto_stop) {
                 std::vector<double> zero(req.values.size(), 0.0);

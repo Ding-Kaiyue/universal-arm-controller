@@ -124,6 +124,9 @@ private:
 
     std::chrono::steady_clock steady_clock_;
     arm_controller::utils::VelocityStrictSolver solver_;
+
+    // 保护 start/stop 的并发调用，避免重复创建订阅和线程
+    std::mutex lifecycle_mutex_;
 };
 
 #endif      // __CARTESIAN_VELOCITY_CONTROLLER_HPP__

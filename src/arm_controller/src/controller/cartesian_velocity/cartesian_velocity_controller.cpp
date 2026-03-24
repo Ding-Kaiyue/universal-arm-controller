@@ -50,8 +50,13 @@ CartesianVelocityController::~CartesianVelocityController() {
 
 
 void CartesianVelocityController::start(const std::string& mapping) {
-    // 检查是否已初始化（仅用于防止重复创建线程）
-    if (rt_threads_.count(mapping) > 0) {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+
+    // 幂等启动：避免与 ControllerManager 并发调用导致重复创建资源
+    if (rt_threads_.count(mapping) > 0 ||
+        rt_running_per_mapping_.count(mapping) > 0 ||
+        computation_threads_.count(mapping) > 0 ||
+        computation_running_per_mapping_.count(mapping) > 0) {
         return;
     }
 
@@ -81,7 +86,12 @@ void CartesianVelocityController::start(const std::string& mapping) {
                 mapping.c_str(), base_frame.c_str());
 
     // 在激活时创建话题订阅（如果还没创建的话）
-    if (subscriptions_.find(mapping) == subscriptions_.end()) {
+    bool need_subscription = false;
+    {
+        std::lock_guard<std::mutex> sub_lock(subscriptions_mutex_);
+        need_subscription = (subscriptions_.find(mapping) == subscriptions_.end());
+    }
+    if (need_subscription) {
         init_subscriptions(mapping);
     }
 
@@ -144,6 +154,8 @@ void CartesianVelocityController::start(const std::string& mapping) {
 
 
 bool CartesianVelocityController::stop(const std::string& mapping) {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+
     VelocityControllerImpl::stop(mapping);
 
     // 只关闭这个mapping的RT线程（使用per-mapping标志）
@@ -306,13 +318,8 @@ void CartesianVelocityController::command_queue_consumer_thread() {
             }
         }
 
-        // 第二步：检查是否已经初始化（仅用于启动 RT 线程）
-        bool need_init = (rt_threads_.count(mapping) == 0);
-
-        // 第三步：启动控制器（仅在第一次）
-        if (need_init) {
-            start(mapping);
-        }
+        // 第二步：确保控制器已启动（start() 已做并发保护和幂等）
+        start(mapping);
 
         // 第四步：在锁内执行命令
         {

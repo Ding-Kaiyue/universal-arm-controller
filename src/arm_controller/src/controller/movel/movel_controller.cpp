@@ -327,6 +327,12 @@ void MoveLController::command_queue_consumer_thread() {
                         hook_request_callback_(mapping, target_mode);
                     }
 
+                    // 当前命令已从队列弹出，进入 hook 时回塞到队列，避免被丢弃。
+                    arm_controller::CommandQueueIPC::getInstance().push(cmd);
+                    RCLCPP_INFO(node_->get_logger(),
+                                "[%s] MoveL command deferred during hook transition, re-queued (ID: %s)",
+                                mapping.c_str(), cmd_id.c_str());
+
                     // 暂停这条命令的处理，让 hook 完成
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     // 通知其他 consumers 继续处理
