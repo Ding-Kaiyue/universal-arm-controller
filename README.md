@@ -85,6 +85,76 @@ source install/setup.bash
 ros2 launch robotic_arm_bringup robotic_arm_real.launch.py
 ```
 
+## Jetson 性能与中断绑定（实机建议）
+
+以下步骤适用于 Jetson 平台（如 Orin/Tegra），用于提升实时控制稳定性。
+
+### 1) 激活第 9~12 核（CPU8~CPU11）
+
+先查看当前在线/离线核心：
+
+```bash
+lscpu
+cat /sys/devices/system/cpu/online
+cat /sys/devices/system/cpu/offline
+```
+
+如果 `8-11` 处于离线，建议切到最高功耗模式并重启：
+
+```bash
+sudo nvpmodel -m 0
+sudo reboot
+```
+
+重启后再次确认：
+
+```bash
+cat /sys/devices/system/cpu/online
+# 期望看到: 0-11
+```
+
+可选：锁频（减少频率波动带来的时延抖动）
+
+```bash
+sudo jetson_clocks
+```
+
+### 2) 将 CAN 中断绑定到指定 CPU（can0->CPU1, can1->CPU2）
+
+先配置 CAN：
+
+```bash
+sudo ip link set can0 txqueuelen 1000
+sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off
+sudo ip link set can1 txqueuelen 1000
+sudo ip link set can1 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off
+```
+
+查询 can0/can1 对应 IRQ 号：
+
+```bash
+grep -nE "can0|can1" /proc/interrupts
+```
+
+把中断亲和性绑定到 CPU1/CPU2（推荐用 `smp_affinity_list`，避免手算掩码）：
+
+```bash
+# 假设上一步查到 can0 的 IRQ 是 220，can1 的 IRQ 是 221
+# can0 -> CPU1
+echo 1 | sudo tee /proc/irq/220/smp_affinity_list
+# can1 -> CPU2
+echo 2 | sudo tee /proc/irq/221/smp_affinity_list
+```
+
+验证绑定是否生效：
+
+```bash
+cat /proc/irq/220/smp_affinity_list
+cat /proc/irq/221/smp_affinity_list
+```
+
+注意：IRQ 号每次启动可能变化，建议每次开机后重新查询并绑定。
+
 ---
 
 ## 完整文档
