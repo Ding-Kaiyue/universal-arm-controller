@@ -10,12 +10,22 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <functional>
 #include <arm_controller/hardware/hardware_manager.hpp>
 
 class TrajectoryControllerBase : public ModeControllerBase {
 public:
     explicit TrajectoryControllerBase(std::string mode) : ModeControllerBase(mode) {}
     virtual ~TrajectoryControllerBase() = default;
+
+    // 与 Velocity/Teach 控制器一致：允许轨迹控制器请求 ControllerManager 执行模式切换
+    void set_hook_request_callback(
+        std::function<void(const std::string&, const std::string&)> callback) {
+        hook_request_callback_ = std::move(callback);
+    }
+
+protected:
+    std::function<void(const std::string&, const std::string&)> hook_request_callback_;
 };
 
 template<typename T>

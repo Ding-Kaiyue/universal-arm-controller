@@ -312,17 +312,26 @@ void MoveLController::command_queue_consumer_thread() {
         try {
             // ✅ 检查和处理 IPC 侧的模式过渡（包括 hook 检测）
             if (state_mgr) {
-                bool transition_ok = state_mgr->transitionToMode("MoveL");
-                if (!transition_ok) {
-                    // 需要进入 hook 状态来安全切换
-                    if (state_mgr->isInHookState()) {
-                        RCLCPP_DEBUG(node_->get_logger(), "[%s] 🛑 MoveL in hook state - requesting HoldState transition",
-                                     mapping.c_str());
-                        // 暂停这条命令的处理，让 hook 完成
-                        // 通知其他 consumers 继续处理
-                        arm_controller::CommandQueueIPC::getInstance().notifyConsumers();
-                        continue;
+                state_mgr->transitionToMode("MoveL");
+
+                // 需要进入 hook 状态来安全切换
+                if (state_mgr->isInHookState()) {
+                    std::string target_mode = state_mgr->getTargetMode();
+                    if (target_mode.empty()) {
+                        target_mode = "MoveL";
                     }
+                    RCLCPP_DEBUG(node_->get_logger(), "[%s] 🛑 MoveL in hook state - requesting transition to %s",
+                                 mapping.c_str(), target_mode.c_str());
+
+                    if (hook_request_callback_) {
+                        hook_request_callback_(mapping, target_mode);
+                    }
+
+                    // 暂停这条命令的处理，让 hook 完成
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    // 通知其他 consumers 继续处理
+                    arm_controller::CommandQueueIPC::getInstance().notifyConsumers();
+                    continue;
                 }
             }
 

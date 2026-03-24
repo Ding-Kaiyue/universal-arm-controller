@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <cctype>
+#include <cmath>
 
 // 简单的 JSON 构造器（不使用外部库）
 class SimpleJSON {
@@ -53,6 +54,7 @@ public:
     struct MoveJRequest {
         std::vector<double> positions;
         std::string mapping;
+        std::string unit = "rad";
         bool wait_for_result = false;
         int timeout_ms = 15000;
     };
@@ -146,6 +148,38 @@ public:
 
         if (req.positions.empty()) {
             throw std::runtime_error("No valid positions found");
+        }
+
+        req.unit = parseStringFieldOptional(body, "unit", "");
+        for (auto& ch : req.unit) {
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+
+        // Normalize unit aliases and fallback inference when unit is omitted.
+        if (req.unit == "degree" || req.unit == "degrees" || req.unit == "度") {
+            req.unit = "deg";
+        } else if (req.unit == "radian" || req.unit == "radians" || req.unit == "弧度") {
+            req.unit = "rad";
+        }
+
+        if (req.unit.empty()) {
+            constexpr double kPi = 3.14159265358979323846;
+            double max_abs = 0.0;
+            for (const auto& pos : req.positions) {
+                max_abs = std::max(max_abs, std::fabs(pos));
+            }
+            req.unit = (max_abs > kPi) ? "deg" : "rad";
+        }
+
+        if (req.unit != "rad" && req.unit != "deg") {
+            throw std::runtime_error("Invalid unit: expected rad/deg (or degree/radian aliases)");
+        }
+
+        if (req.unit == "deg") {
+            constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+            for (auto& pos : req.positions) {
+                pos *= kDegToRad;
+            }
         }
 
         req.wait_for_result = parseBoolFieldOptional(body, "wait_for_result", false);
@@ -892,6 +926,7 @@ private:
             }
 
             // 流式发送（与 example_velocity_control 相同思路）
+            std::cout << "[HTTP /joint_velocity] stream branch start" << std::endl;
             auto start = std::chrono::steady_clock::now();
             int sends = 0;
             while (std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -902,6 +937,8 @@ private:
                 sends++;
                 std::this_thread::sleep_for(std::chrono::milliseconds(req.interval_ms));
             }
+
+            std::cout << "[HTTP /joint_velocity] stream branch done: sends=" << sends << std::endl;
 
             if (req.auto_stop) {
                 std::vector<double> zero(req.values.size(), 0.0);

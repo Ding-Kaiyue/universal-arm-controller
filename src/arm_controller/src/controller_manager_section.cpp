@@ -279,6 +279,17 @@ void ControllerManagerNode::init_controllers() {
                     }
                 }
 
+                // ✅ 为 MoveJ / MoveL / MoveC 注册模式切换请求回调
+                if (key == "MoveJ" || key == "MoveL" || key == "MoveC") {
+                    auto traj_ctrl = std::dynamic_pointer_cast<TrajectoryControllerBase>(shared_controller);
+                    if (traj_ctrl) {
+                        traj_ctrl->set_hook_request_callback(
+                            [this](const std::string& mapping, const std::string& target_mode) {
+                                start_working_controller(target_mode, mapping);
+                            });
+                    }
+                }
+
                 // ✅ 为 TrajectoryRecord / TrajectoryReplay 注册模式切换请求回调
                 if (key == "TrajectoryRecord" || key == "TrajectoryReplay") {
                     auto teach_ctrl = std::dynamic_pointer_cast<TeachControllerBase>(shared_controller);
