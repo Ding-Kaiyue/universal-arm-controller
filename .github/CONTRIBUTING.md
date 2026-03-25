@@ -205,7 +205,7 @@ type(scope): description
 
 - **Issues**: 通过 GitHub Issues
 - **Pull Requests**: 通过 GitHub PR
-- **商业合作**: kaiyue.ding@raysense.com
+- **商业合作**: d570737261@163.com
 - **技术支持**: d18292819833 (微信)
 
 感谢您的贡献！ 

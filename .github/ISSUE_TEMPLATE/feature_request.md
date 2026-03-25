@@ -30,7 +30,7 @@ assignees: ['Ding-Kaiyue']
 
 ### 商业合作：
 如需商业定制或技术支持，请联系：
-- Email: kaiyue.ding@raysense.com
+- Email: d570737261@163.com
 - 微信: d18292819833
 
 ---

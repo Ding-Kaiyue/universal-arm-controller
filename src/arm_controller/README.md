@@ -43,7 +43,7 @@ MIT License - 详见 [LICENSE](../../LICENSE)
 ## 📞 联系方式
 
 - **GitHub Issues**: [提交问题](https://github.com/Ding-Kaiyue/universal-arm-controller/issues)
-- **Email**: kaiyue.ding@raysense.com
+- **Email**: d570737261@163.com
 
 ---
 

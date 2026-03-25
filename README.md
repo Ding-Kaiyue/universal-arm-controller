@@ -17,12 +17,9 @@
 
 ## 快速开始
 
-### Docker 部署（推荐）
-
-**从 Docker Hub 拉取：**
+### 前置配置
 
 ```bash
-# 配置 CAN 接口
 sudo ip link set can0 txqueuelen 1000
 sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off
 # 双臂请同时配置 can1
@@ -30,8 +27,14 @@ sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000
 # sudo ip link set can1 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off
 
 # 可选：隔离 ROS 网络，避免同网段其他机器干扰
-export ROS_DOMAIN_ID=78
+export ROS_DOMAIN_ID=42
+```
 
+### Docker 部署（推荐）
+
+**从 Docker Hub 拉取：**
+
+```bash
 xhost +local:docker
 docker pull dingkaiyue/robotic-arm-controller:latest
 docker run -dit --name robotic_arm \
@@ -62,13 +65,9 @@ docker run -dit --name robotic_arm \
   dingkaiyue/robotic-arm-controller:latest
 ```
 其余与上面从 Docker Hub 拉取相同。
-### 本地编译
+### 本地部署
 
 ```bash
-# 配置 CAN 接口
-sudo ip link set can0 txqueuelen 1000
-sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off restart-ms 100
-(If you are using dual arm, please don't forget to set can1)
 
 mkdir -p ~/robotic_arm_ws/src && cd ~/robotic_arm_ws/src
 git clone https://github.com/Ding-Kaiyue/universal-arm-controller.git
@@ -169,7 +168,7 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 
 - **GitHub Issues**: [提交问题](https://github.com/Ding-Kaiyue/universal-arm-controller/issues)
   - 使用预定义的 Issue 模板报告 Bug、功能请求或安全问题
-- **Email**: <kaiyue.ding@raysense.com>
+- **Email**: <d570737261@163.com>
 
 ## 贡献
 

@@ -437,7 +437,7 @@ tail -n 100 ~/.ros/log/*.log
 
 ### 7.3 紧急或硬件相关问题
 
-* 联系方式：[kaiyue.ding@raysense.com](mailto:kaiyue.ding@raysense.com)
+* 联系方式：[d570737261@163.com](mailto:d570737261@163.com)
 * 提供详细的问题描述和调试日志
 
 ---
