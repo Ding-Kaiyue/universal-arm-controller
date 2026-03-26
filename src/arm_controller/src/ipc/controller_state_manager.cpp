@@ -11,6 +11,7 @@ const std::unordered_set<std::string> ControllerStateManager::modes_requiring_ho
     "MoveC",
     "JointVelocity",
     "CartesianVelocity",
+    "MinkServo",
     "TrajectoryRecord",
     "TrajectoryReplay",
     "PointRecord",

@@ -88,7 +88,7 @@ def generate_launch_description():
     # 声明参数
     robot_model_arg = DeclareLaunchArgument(
         'robot_model_name',
-        default_value='dual_arm_with_omnipicker_humanoid',
+        default_value='dual_arm620',
         description='Robot model name (e.g., arm620, arm380, ' \
         'dual_arm620, dual_arm_with_pgc, dual_arm_with_omnipicker, dual_arm_with_omnipicker_humanoid)'
     )

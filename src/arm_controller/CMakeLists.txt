@@ -126,6 +126,9 @@ add_library(arm_controller_lib
   src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
   src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
   src/controller/cartesian_velocity/cartesian_velocity_ipc_interface.cpp
+  src/controller/mink_servo/mink_servo_controller.cpp
+  src/controller/mink_servo/mink_servo_interface.cpp
+  src/controller/mink_servo/mink_servo_ipc_interface.cpp
   # src/controller/move2initial/move2initial_controller.cpp
   # src/controller/move2initial/move2initial_interface.cpp
   # src/controller/move2start/move2start_controller.cpp

@@ -4,6 +4,7 @@
 #include "controller/movec/movec_ipc_interface.hpp"
 #include "controller/joint_velocity/joint_velocity_ipc_interface.hpp"
 #include "controller/cartesian_velocity/cartesian_velocity_ipc_interface.hpp"
+#include "controller/mink_servo/mink_servo_ipc_interface.hpp"
 #include "controller/trajectory_record/trajectory_record_ipc_interface.hpp"
 #include "controller/trajectory_replay/trajectory_replay_ipc_interface.hpp"
 #include "controller/basic_ops/basic_ops_ipc_interface.hpp"
@@ -365,6 +366,44 @@ public:
         return req;
     }
 
+    static VelocityRequest parseMinkServo(const std::string& body) {
+        VelocityRequest req;
+        req.mapping = "single_arm";
+
+        size_t tp_start = body.find("\"target_pose\"");
+        if (tp_start == std::string::npos) {
+            throw std::runtime_error("Missing 'target_pose' field");
+        }
+
+        req.values = parseDoubleArray(body, tp_start);
+
+        size_t map_start = body.find("\"mapping\"");
+        if (map_start != std::string::npos) {
+            size_t colon_pos = body.find(':', map_start);
+            size_t quote_start = body.find('"', colon_pos);
+            size_t quote_end = body.find('"', quote_start + 1);
+            if (quote_start != std::string::npos && quote_end != std::string::npos) {
+                req.mapping = body.substr(quote_start + 1, quote_end - quote_start - 1);
+            }
+        }
+
+        if (req.values.size() != 7) {
+            throw std::runtime_error("target_pose must contain 7 values: [x,y,z,qx,qy,qz,qw]");
+        }
+
+        req.duration_ms = parseIntFieldOptional(body, "duration_ms", 0);
+        req.interval_ms = parseIntFieldOptional(body, "interval_ms", 10);
+        req.auto_stop = parseBoolFieldOptional(body, "auto_stop", false);
+        if (req.interval_ms <= 0) {
+            req.interval_ms = 10;
+        }
+        if (req.duration_ms < 0) {
+            req.duration_ms = 0;
+        }
+
+        return req;
+    }
+
     static TeachRequest parseTeach(const std::string& body) {
         TeachRequest req;
         req.action = parseStringField(body, "action");
@@ -532,6 +571,7 @@ private:
     arm_controller::movec::MoveCIPCInterface movec_;
     arm_controller::joint_velocity::JointVelocityIPCInterface joint_velocity_;
     arm_controller::cartesian_velocity::CartesianVelocityIPCInterface cartesian_velocity_;
+    arm_controller::mink_servo::MinkServoIPCInterface mink_servo_;
     arm_controller::trajectory_record::TrajectoryRecordIPCInterface trajectory_record_;
     arm_controller::trajectory_replay::TrajectoryReplayIPCInterface trajectory_replay_;
     arm_controller::basic_ops::BasicOpsIPCInterface basic_ops_;
@@ -732,6 +772,9 @@ private:
                 http_status = "HTTP/1.1 200 OK";
             } else if (method == "POST" && path == "/cartesian_velocity") {
                 response_body = handleCartesianVelocity(body);
+                http_status = "HTTP/1.1 200 OK";
+            } else if (method == "POST" && path == "/mink_servo") {
+                response_body = handleMinkServo(body);
                 http_status = "HTTP/1.1 200 OK";
             } else if (method == "POST" && path == "/trajectory_record") {
                 response_body = handleTrajectoryRecord(body);
@@ -1016,6 +1059,61 @@ private:
         }
     }
 
+    std::string handleMinkServo(const std::string& body) {
+        try {
+            auto req = RequestParser::parseMinkServo(body);
+
+            if (req.duration_ms <= 0) {
+                if (!mink_servo_.execute(req.values, req.mapping)) {
+                    return SimpleJSON::error("MinkServo execution failed");
+                }
+                return SimpleJSON::success(
+                    "Command queued",
+                    mink_servo_.getCurrentMode(req.mapping),
+                    static_cast<int>(mink_servo_.getExecutionState(req.mapping))
+                );
+            }
+
+            {
+                const auto warmup_deadline =
+                    std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+                bool mode_ready = false;
+                while (std::chrono::steady_clock::now() < warmup_deadline) {
+                    if (!mink_servo_.execute(req.values, req.mapping)) {
+                        return SimpleJSON::error("MinkServo warmup execution failed");
+                    }
+                    if (mink_servo_.getCurrentMode(req.mapping) == "MinkServo") {
+                        mode_ready = true;
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
+                if (!mode_ready) {
+                    return SimpleJSON::error("MinkServo mode not ready within warmup timeout");
+                }
+            }
+
+            auto start = std::chrono::steady_clock::now();
+            int sends = 0;
+            while (std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - start).count() < req.duration_ms) {
+                if (!mink_servo_.execute(req.values, req.mapping)) {
+                    return SimpleJSON::error("MinkServo stream execution failed");
+                }
+                sends++;
+                std::this_thread::sleep_for(std::chrono::milliseconds(req.interval_ms));
+            }
+
+            return SimpleJSON::success(
+                "MinkServo stream completed: " + std::to_string(sends) + " sends",
+                mink_servo_.getCurrentMode(req.mapping),
+                static_cast<int>(mink_servo_.getExecutionState(req.mapping))
+            );
+        } catch (const std::exception& e) {
+            return SimpleJSON::error(e.what());
+        }
+    }
+
     std::string handleTrajectoryRecord(const std::string& body) {
         try {
             auto req = RequestParser::parseTeach(body);
@@ -1182,6 +1280,7 @@ int main(int /*argc*/, char** /*argv*/) {
     std::cout << "   POST /movec                 - Cartesian circular motion\n";
     std::cout << "   POST /joint_velocity        - Joint velocity control\n";
     std::cout << "   POST /cartesian_velocity    - Cartesian velocity control\n";
+    std::cout << "   POST /mink_servo            - Pose servo control (Mink mode)\n";
     std::cout << "   POST /trajectory_record     - Trajectory record control\n";
     std::cout << "   POST /trajectory_replay     - Trajectory replay control\n";
     std::cout << "   POST /gripper_control       - Gripper open/close (IPC basic op)\n";
@@ -1201,6 +1300,10 @@ int main(int /*argc*/, char** /*argv*/) {
     std::cout << "    curl -X POST http://127.0.0.1:8080/joint_velocity \\\n";
     std::cout << "      -H 'Content-Type: application/json' \\\n";
     std::cout << "      -d '{\"joint_velocities\": [0.5, 0.3, -0.2, 0, 0.1, 0], \"mapping\": \"left_arm\"}'\n\n";
+    std::cout << "  MinkServo:\n";
+    std::cout << "    curl -X POST http://127.0.0.1:8080/mink_servo \\\n";
+    std::cout << "      -H 'Content-Type: application/json' \\\n";
+    std::cout << "      -d '{\"target_pose\": [0.45, 0.20, 0.35, 0, 0, 0, 1], \"mapping\": \"left_arm\", \"duration_ms\": 1000, \"interval_ms\": 10}'\n\n";
 
     // 保持运行
     while (true) {

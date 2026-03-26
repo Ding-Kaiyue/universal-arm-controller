@@ -100,7 +100,6 @@ void CartesianVelocityController::start(const std::string& mapping) {
     state.last_update = steady_clock_.now();
     state.target = geometry_msgs::msg::TwistStamped();
     state.target.header.frame_id = base_frame;
-    state.first_command_received = false;  // 等待第一个命令
 
     rt_states_[mapping] = state;
 
@@ -191,6 +190,8 @@ bool CartesianVelocityController::stop(const std::string& mapping) {
 
     // 清理该 mapping 的话题订阅
     cleanup_subscriptions(mapping);
+    moveit_adapters_.erase(mapping);
+    mapping_base_frames_.erase(mapping);
 
     // 清除状态、锁、buffer等所有与这个 mapping 相关的资源（需要加锁保护）
     {
@@ -208,9 +209,6 @@ bool CartesianVelocityController::stop(const std::string& mapping) {
             rt_states_mutexes_.erase(mapping);
         }
     }
-
-    moveit_adapters_.erase(mapping);
-    mapping_base_frames_.erase(mapping);
 
     return true;
 }
@@ -321,7 +319,7 @@ void CartesianVelocityController::command_queue_consumer_thread() {
         // 第二步：确保控制器已启动（start() 已做并发保护和幂等）
         start(mapping);
 
-        // 第四步：在锁内执行命令
+        // 第三步：在锁内执行命令
         {
             std::lock_guard<std::mutex> lock(rt_buffers_mutex_);
 
@@ -615,6 +613,7 @@ void CartesianVelocityController::cartesian_computation_thread(const std::string
         // ===== 获取状态和目标命令 =====
         auto it_state = rt_states_.find(mapping);
         if (it_state == rt_states_.end()) {
+            mark_invalid();
             sleep_to_next_cycle(cycle_start);
             continue;
         }

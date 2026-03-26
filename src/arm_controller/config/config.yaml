@@ -34,6 +34,12 @@ controllers:
       name: /controller_api/cartesian_velocity_action/{mapping}
       type: geometry_msgs/msg/Twist
 
+  - key: MinkServo
+    class: MinkServoController
+    input_topic:
+      name: /controller_api/mink_servo_action/{mapping}
+      type: geometry_msgs/msg/PoseStamped
+
   # - key: Move2Initial
   #   class: Move2InitialController
 

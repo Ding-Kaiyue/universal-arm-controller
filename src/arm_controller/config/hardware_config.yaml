@@ -2,7 +2,7 @@
 hardware:
   # 硬件配置列表
   left_arm:
-      robot_type: "dual_arm_with_omnipicker_humanoid"
+      robot_type: "dual_arm620"
       interface: can1
       motors: [1, 2, 3, 4, 5, 6]    # 电机ID列表
       joint_names: ["left_joint1", "left_joint2", "left_joint3", "left_joint4", "left_joint5", "left_joint6"]
@@ -13,7 +13,7 @@ hardware:
       start_position: [0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0]  # 启动位置
 
   right_arm:
-      robot_type: "dual_arm_with_omnipicker_humanoid"
+      robot_type: "dual_arm620"
       interface: can0
       motors: [1, 2, 3, 4, 5, 6]    # 电机ID列表
       joint_names: ["right_joint1", "right_joint2", "right_joint3", "right_joint4", "right_joint5", "right_joint6"]
@@ -23,29 +23,29 @@ hardware:
       initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # 初始位置
       start_position: [0.0, 0.5236, 0.7854, 0.0, -0.5236, 0.0]  # 启动位置
 
-  left_gripper:
-      robot_type: "dual_arm_with_omnipicker_humanoid"
-      gripper_model: "omnipicker"
-      interface: can1
-      motors: []    # 无电机反馈
-      # OmniPicker 关节无反馈，使用软件关节状态避免 MoveIt missing joint warnings
-      joint_names: [
-        "left_hand_narrow1_joint", "left_hand_narrow2_joint", "left_hand_narrow3_joint", "left_hand_narrow_loop_joint",
-        "left_hand_wide1_joint", "left_hand_wide2_joint", "left_hand_wide3_joint", "left_hand_wide_loop_joint"
-      ]
-      frame_id: "left_gripper_base"
-      initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      start_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  # left_gripper:
+  #     robot_type: "dual_arm_with_omnipicker_humanoid"
+  #     gripper_model: "omnipicker"
+  #     interface: can1
+  #     motors: []    # 无电机反馈
+  #     # OmniPicker 关节无反馈，使用软件关节状态避免 MoveIt missing joint warnings
+  #     joint_names: [
+  #       "left_hand_narrow1_joint", "left_hand_narrow2_joint", "left_hand_narrow3_joint", "left_hand_narrow_loop_joint",
+  #       "left_hand_wide1_joint", "left_hand_wide2_joint", "left_hand_wide3_joint", "left_hand_wide_loop_joint"
+  #     ]
+  #     frame_id: "left_gripper_base"
+  #     initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  #     start_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-  right_gripper:
-      robot_type: "dual_arm_with_omnipicker_humanoid"
-      gripper_model: "omnipicker"
-      interface: can0
-      motors: []    # 无电机反馈
-      joint_names: [
-        "right_hand_narrow1_joint", "right_hand_narrow2_joint", "right_hand_narrow3_joint", "right_hand_narrow_loop_joint",
-        "right_hand_wide1_joint", "right_hand_wide2_joint", "right_hand_wide3_joint", "right_hand_wide_loop_joint"
-      ]
-      frame_id: "right_gripper_base"
-      initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      start_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  # right_gripper:
+  #     robot_type: "dual_arm_with_omnipicker_humanoid"
+  #     gripper_model: "omnipicker"
+  #     interface: can0
+  #     motors: []    # 无电机反馈
+  #     joint_names: [
+  #       "right_hand_narrow1_joint", "right_hand_narrow2_joint", "right_hand_narrow3_joint", "right_hand_narrow_loop_joint",
+  #       "right_hand_wide1_joint", "right_hand_wide2_joint", "right_hand_wide3_joint", "right_hand_wide_loop_joint"
+  #     ]
+  #     frame_id: "right_gripper_base"
+  #     initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  #     start_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
