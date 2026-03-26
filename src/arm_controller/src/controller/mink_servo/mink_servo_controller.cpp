@@ -18,12 +18,21 @@ constexpr double kPosGain = 1.5;             // pose -> linear velocity
 constexpr double kRotGain = 1.0;             // orientation error -> angular velocity
 constexpr double kMaxLinear = 0.20;          // m/s
 constexpr double kMaxAngular = 0.80;         // rad/s
-constexpr double kDamping = 1e-4;
+constexpr double kDampingBase = 1e-4;
+constexpr double kDampingAdaptiveGain = 1e-3;
+constexpr double kDampingAdaptiveEps = 1e-6;
+constexpr double kDampingMax = 5e-2;
 constexpr double kNullspaceGain = 0.25;      // joint centering weight
-constexpr double kManipGain = 0.08;          // manipulability gradient weight
-constexpr double kManipThreshold = 0.1;     // below this, enable manipulability boost
-constexpr double kManipGradStep = 1e-4;      // finite-difference step (rad)
+constexpr double kManipThreshold = 0.03;      // below this, singular lock candidate
+constexpr double kSecondaryDisableThreshold = 0.06;  // disable null-space term near singularity
 constexpr double kManipEps = 1e-9;           // numeric epsilon for determinant stability
+constexpr double kSettlePosTolEnter = 0.003; // 3mm
+constexpr double kSettleRotTolEnter = 0.03;  // ~1.7deg (rad)
+constexpr double kSettlePosTolExit = 0.006;  // 6mm hysteresis exit
+constexpr double kSettleRotTolExit = 0.06;   // ~3.4deg hysteresis exit
+constexpr int kSettleCycles = 10;            // consecutive cycles to latch
+constexpr double kSpeedBoostMax = 2.0;       // max alpha boost for "as-fast-as-possible" tracking
+constexpr double kQdAccelLimit = 8.0;        // rad/s^2 slew-rate limit
 constexpr double kKp = 0.05;                  // MIT position gain
 constexpr double kKd = 0.005;                 // MIT velocity gain
 constexpr bool kDryRunPrintOnly = false;       // true: 仅打印即将下发的MIT值令，不实际发送
@@ -468,6 +477,13 @@ void MinkServoController::mink_computation_thread(const std::string& mapping) {
         }
     };
 
+    std::chrono::steady_clock::time_point last_target_stamp{};
+    int settle_counter = 0;
+    bool settle_latched = false;
+    bool singular_latched = false;
+    Eigen::VectorXd qd_prev;
+    bool qd_prev_initialized = false;
+
     while (computation_running->load(std::memory_order_acquire)) {
         auto cycle_start = std::chrono::steady_clock::now();
         if (!is_active(mapping)) {
@@ -505,6 +521,14 @@ void MinkServoController::mink_computation_thread(const std::string& mapping) {
             mark_invalid();
             sleep_to_next_cycle(cycle_start);
             continue;
+        }
+
+        // New target command received -> clear settle latch.
+        if (state_copy.last_update != last_target_stamp) {
+            last_target_stamp = state_copy.last_update;
+            settle_counter = 0;
+            settle_latched = false;
+            singular_latched = false;
         }
 
         const auto q_current_local = hardware_manager_->get_current_joint_positions_lockfree(mapping);
@@ -558,6 +582,40 @@ void MinkServoController::mink_computation_thread(const std::string& mapping) {
         Eigen::AngleAxisd aa(q_err);
         Eigen::Vector3d e_rot = aa.axis() * aa.angle();
 
+        // Settled latch with hysteresis to avoid boundary oscillation.
+        const bool in_settle_band_enter =
+            (e_pos.norm() < kSettlePosTolEnter) && (e_rot.norm() < kSettleRotTolEnter);
+        const bool in_settle_band_exit =
+            (e_pos.norm() < kSettlePosTolExit) && (e_rot.norm() < kSettleRotTolExit);
+        if (!settle_latched && in_settle_band_enter) {
+            if (settle_counter < kSettleCycles) {
+                settle_counter++;
+            }
+            if (settle_counter >= kSettleCycles) {
+                settle_latched = true;
+            }
+        } else if (!settle_latched) {
+            settle_counter = 0;
+        } else if (!in_settle_band_exit) {
+            settle_counter = 0;
+            settle_latched = false;
+        }
+
+        if (settle_latched) {
+            auto it_result = computation_results_.find(mapping);
+            if (it_result != computation_results_.end() && it_result->second) {
+                std::lock_guard<std::mutex> lock(it_result->second->mtx);
+                it_result->second->result.qd = Eigen::VectorXd::Zero(q_current_local.size());
+                it_result->second->result.qd_last = it_result->second->result.qd;
+                it_result->second->result.valid = true;
+                it_result->second->result.timestamp = steady_clock_.now();
+            }
+            qd_prev = Eigen::VectorXd::Zero(q_current_local.size());
+            qd_prev_initialized = true;
+            sleep_to_next_cycle(cycle_start);
+            continue;
+        }
+
         Eigen::Vector3d v_linear = e_pos * kPosGain;
         Eigen::Vector3d v_angular = e_rot * kRotGain;
         // Clamp Cartesian command for safety and to keep IK well-conditioned.
@@ -610,28 +668,22 @@ void MinkServoController::mink_computation_thread(const std::string& mapping) {
             q_max_pos(i) = limits.max_position;
         }
 
-        // Step 3) Primary IK objective (damped least-squares):
-        //   qd_primary = J^T (J J^T + lambda I)^-1 v_task
-        // Damping improves robustness near singular configurations.
+        // Step 3) Primary IK objective (damped least-squares) with adaptive damping.
+        // As sigma_min decreases near singularity, lambda increases.
         Eigen::MatrixXd I6 = Eigen::MatrixXd::Identity(6, 6);
         Eigen::MatrixXd JJt = J_task * J_task.transpose();
+        Eigen::JacobiSVD<Eigen::MatrixXd> svd(J_task, Eigen::ComputeThinU | Eigen::ComputeThinV);
+        const auto& singular_values = svd.singularValues();
+        const double sigma_min = singular_values.size() > 0 ? singular_values(singular_values.size() - 1) : 0.0;
+        const double lambda = std::min(
+            kDampingBase + kDampingAdaptiveGain / (sigma_min * sigma_min + kDampingAdaptiveEps),
+            kDampingMax);
         Eigen::VectorXd qd_primary =
-            J_task.transpose() * (JJt + kDamping * I6).ldlt().solve(v_task);
+            J_task.transpose() * (JJt + lambda * I6).ldlt().solve(v_task);
 
-        // Step 4) Secondary objective A: joint-centering gradient.
-        // Pulls joints toward range midpoint to reduce limit hits.
-        Eigen::VectorXd q_mid = 0.5 * (q_min_pos + q_max_pos);
-        Eigen::VectorXd q_center_grad = (q_mid - q_current_eig);
-
-        Eigen::MatrixXd I = Eigen::MatrixXd::Identity(dof, dof);
-        Eigen::MatrixXd J_pinv = J_task.transpose() * (JJt + kDamping * I6).inverse();
-        Eigen::MatrixXd N = I - J_pinv * J_task;
-
-        // Step 5) Secondary objective B: manipulability maximization in null-space.
-        // We maximize Yoshikawa-style measure:
-        //   w(q) = sqrt(det(J J^T + eps I))
-        // via finite-difference gradient (cheap to integrate and robust in practice).
-        // w(q) = sqrt(det(JJ^T + eps*I)), maximize via finite-difference gradient.
+        // Step 5) Singular lock:
+        // w(q)=sqrt(det(JJ^T+epsI)) below threshold means near singular region.
+        // Instead of pushing out, latch zero velocity until a new target arrives.
         auto manipulability = [&](const Eigen::VectorXd& q_full_eval) -> double {
             pinocchio::computeFrameJacobian(
                 ctx.model, *ctx.data, q_full_eval, ctx.ee_frame,
@@ -646,28 +698,76 @@ void MinkServoController::mink_computation_thread(const std::string& mapping) {
             return std::sqrt(det_val);
         };
 
-        Eigen::VectorXd manip_grad = Eigen::VectorXd::Zero(dof);
         const double w_now = manipulability(q_full);
-        if (w_now < kManipThreshold) {
-            for (int i = 0; i < dof; ++i) {
-                Eigen::VectorXd q_plus = q_full;
-                Eigen::VectorXd q_minus = q_full;
-                q_plus(ctx.q_indices[i]) += kManipGradStep;
-                q_minus(ctx.q_indices[i]) -= kManipGradStep;
-                const double w_plus = manipulability(q_plus);
-                const double w_minus = manipulability(q_minus);
-                manip_grad(i) = (w_plus - w_minus) / (2.0 * kManipGradStep);
+        // Only lock when near target and near singular; do not block large moves.
+        if (w_now < kManipThreshold && in_settle_band_exit) {
+            singular_latched = true;
+        }
+        if (singular_latched) {
+            auto it_result = computation_results_.find(mapping);
+            if (it_result != computation_results_.end() && it_result->second) {
+                std::lock_guard<std::mutex> lock(it_result->second->mtx);
+                it_result->second->result.qd = Eigen::VectorXd::Zero(q_current_local.size());
+                it_result->second->result.qd_last = it_result->second->result.qd;
+                it_result->second->result.valid = true;
+                it_result->second->result.timestamp = steady_clock_.now();
             }
+            qd_prev = Eigen::VectorXd::Zero(q_current_local.size());
+            qd_prev_initialized = true;
+            sleep_to_next_cycle(cycle_start);
+            continue;
         }
 
-        // Step 6) Compose final joint velocity:
-        // primary task + null-space projection of secondary gradients.
-        // Null-space projection preserves end-effector tracking priority.
-        Eigen::VectorXd secondary = kNullspaceGain * q_center_grad + kManipGain * manip_grad;
-        Eigen::VectorXd qd = qd_primary + N * secondary;
+        // Step 6) Compose final joint velocity.
+        // For non-redundant arms (dof <= 6), null-space dimension is typically zero,
+        // so we keep only primary task for cleaner behavior.
+        Eigen::VectorXd qd = qd_primary;
+        if (dof > 6) {
+            // Secondary objective A: joint-centering gradient.
+            Eigen::VectorXd q_mid = 0.5 * (q_min_pos + q_max_pos);
+            Eigen::VectorXd q_center_grad = (q_mid - q_current_eig);
+
+            Eigen::MatrixXd I = Eigen::MatrixXd::Identity(dof, dof);
+            Eigen::MatrixXd J_pinv = J_task.transpose() * (JJt + lambda * I6).inverse();
+            Eigen::MatrixXd N = I - J_pinv * J_task;
+
+            // Null-space term is disabled in poor manipulability region.
+            Eigen::VectorXd secondary = Eigen::VectorXd::Zero(dof);
+            if (w_now >= kSecondaryDisableThreshold) {
+                secondary = kNullspaceGain * q_center_grad;
+            }
+            qd = qd_primary + N * secondary;
+        }
+
+        // Step 7) "As-fast-as-possible" scaling under joint velocity limits.
+        // If the solution has slack, scale qd up uniformly by alpha.
+        double alpha_max = kSpeedBoostMax;
+        for (int i = 0; i < dof; ++i) {
+            const double abs_qd = std::abs(qd(i));
+            if (abs_qd > 1e-9) {
+                alpha_max = std::min(alpha_max, qd_max(i) / abs_qd);
+            }
+        }
+        if (alpha_max > 1.0) {
+            qd *= alpha_max;
+        }
+
+        // Step 8) Slew-rate limit (acceleration constraint) to suppress oscillation.
+        if (!qd_prev_initialized || qd_prev.size() != dof) {
+            qd_prev = Eigen::VectorXd::Zero(dof);
+            qd_prev_initialized = true;
+        }
+        const double dq_max = kQdAccelLimit * kDt;
+        for (int i = 0; i < dof; ++i) {
+            const double low = qd_prev(i) - dq_max;
+            const double high = qd_prev(i) + dq_max;
+            qd(i) = std::min(std::max(qd(i), low), high);
+        }
+
         for (int i = 0; i < dof; ++i) {
             qd(i) = clamp_abs(qd(i), qd_max(i));
         }
+        qd_prev = qd;
 
         {
             auto it_result = computation_results_.find(mapping);

@@ -37,7 +37,7 @@ int main() {
     std::cout << "Moving down 10cm in 5mm steps...\n";
     std::vector<double> target_down = target;
     constexpr int step_count = 20;
-    constexpr double dz_step = 0.005;  // -5mm each step
+    constexpr double dz_step = -0.005;  // 5mm each step
     for (int step = 0; step < step_count; ++step) {
         target_down[2] += dz_step;
         if (!mink.execute(target_down, mapping)) {
