@@ -76,6 +76,7 @@ void CartesianVelocityController::start(const std::string& mapping) {
     VelocityControllerImpl::start(mapping);
 
     initialize_moveit_adapter(mapping);
+    initialize_jacobian_provider(mapping);
 
     std::string base_frame = hardware_manager_->get_frame_id(mapping);
     if (base_frame.empty()) {
@@ -191,6 +192,7 @@ bool CartesianVelocityController::stop(const std::string& mapping) {
     // 清理该 mapping 的话题订阅
     cleanup_subscriptions(mapping);
     moveit_adapters_.erase(mapping);
+    jacobian_providers_.erase(mapping);
     mapping_base_frames_.erase(mapping);
 
     // 清除状态、锁、buffer等所有与这个 mapping 相关的资源（需要加锁保护）
@@ -241,6 +243,35 @@ void CartesianVelocityController::initialize_moveit_adapter(const std::string& m
         moveit_adapters_[mapping] = moveit_adapter;
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Exception: %s", mapping.c_str(), e.what());
+    }
+}
+
+void CartesianVelocityController::initialize_jacobian_provider(const std::string& mapping) {
+    try {
+        if (jacobian_providers_.find(mapping) != jacobian_providers_.end()) {
+            return;
+        }
+
+        auto it_moveit = moveit_adapters_.find(mapping);
+        if (it_moveit == moveit_adapters_.end() || !it_moveit->second) {
+            RCLCPP_WARN(node_->get_logger(),
+                        "[%s] ❎ MoveIt adapter not initialized, skip JacobianProvider init",
+                        mapping.c_str());
+            return;
+        }
+
+        auto jacobian_provider =
+            std::make_shared<arm_controller::kinematics::MoveItJacobianProvider>(node_, it_moveit->second);
+        if (!jacobian_provider->initialize()) {
+            RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Failed to initialize MoveItJacobianProvider",
+                         mapping.c_str());
+            return;
+        }
+
+        jacobian_providers_[mapping] = jacobian_provider;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(node_->get_logger(), "[%s] ❎ Jacobian provider init exception: %s",
+                     mapping.c_str(), e.what());
     }
 }
 
@@ -643,8 +674,8 @@ void CartesianVelocityController::cartesian_computation_thread(const std::string
             continue;
         }
 
-        auto it = moveit_adapters_.find(mapping);
-        if (it == moveit_adapters_.end() || !it->second) {
+        auto it_jacobian = jacobian_providers_.find(mapping);
+        if (it_jacobian == jacobian_providers_.end() || !it_jacobian->second) {
             sleep_to_next_cycle(cycle_start);
             continue;
         }
@@ -653,7 +684,9 @@ void CartesianVelocityController::cartesian_computation_thread(const std::string
         // 计算前再次检查，避免在 computeJacobian（可能阻塞）之前已被要求退出
         if (!computation_running->load(std::memory_order_acquire)) break;
 
-        Eigen::MatrixXd J = it->second->computeJacobian(joint_positions);
+        Eigen::Map<const Eigen::VectorXd> q_eig(joint_positions.data(), static_cast<int>(joint_positions.size()));
+        Eigen::MatrixXd J = it_jacobian->second->computeJacobian(
+            q_eig, "", Eigen::Vector3d::Zero());
         if (!computation_running->load(std::memory_order_acquire)) break;
         if (J.rows() == 0 || J.cols() == 0 || J.hasNaN()) {
             mark_invalid();

@@ -4,6 +4,7 @@
 #include "controller_base/velocity_controller_base.hpp"
 #include "hardware/hardware_manager.hpp"
 #include "trajectory_planning_v3/infrastructure/integration/moveit_adapter.hpp"
+#include "arm_controller/kinematics/jacobian_provider.hpp"
 #include "arm_controller/utils/velocity_strict_solver.hpp"
 #include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
@@ -55,11 +56,13 @@ private:
     void cartesian_computation_thread(const std::string& mapping);
 
     void initialize_moveit_adapter(const std::string& mapping);
+    void initialize_jacobian_provider(const std::string& mapping);
     bool send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities);
 
 private:
     std::shared_ptr<HardwareManager> hardware_manager_;
     std::map<std::string, std::shared_ptr<trajectory_planning::infrastructure::integration::MoveItAdapter>> moveit_adapters_;
+    std::unordered_map<std::string, std::shared_ptr<arm_controller::kinematics::JacobianProvider>> jacobian_providers_;
 
     // ===== Command structure for RT processing =====
     struct TwistCommand {

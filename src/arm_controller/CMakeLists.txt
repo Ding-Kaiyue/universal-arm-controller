@@ -111,6 +111,18 @@ add_library(arm_controller_lib
   src/utils/velocity_qp_solver.cpp
   src/utils/velocity_abb_solver.cpp
   src/utils/velocity_strict_solver.cpp
+  src/kinematics/forward_kinematics.cpp
+  src/kinematics/jacobian_provider.cpp
+  src/algorithm/neo/hessian_builder.cpp
+  src/algorithm/neo/joint_limit_damper.cpp
+  src/algorithm/neo/manipulability_gradient.cpp
+  src/algorithm/neo/obstacle_damper.cpp
+  src/algorithm/neo/point_jacobian_provider.cpp
+  src/algorithm/neo/reactive_qp_builder.cpp
+  src/algorithm/neo/reactive_qp_problem.cpp
+  src/algorithm/neo/reactive_qp_solver.cpp
+  src/algorithm/neo/reactive_qp_validator.cpp
+  src/algorithm/neo/task_velocity_generator.cpp
   src/arm_controller_api.cpp
   src/ipc/shm_manager.cpp
   src/ipc/command_producer.cpp
