@@ -14,6 +14,7 @@ namespace arm_controller::ipc {
 // ============================================================================
 constexpr uint32_t IPC_VERSION = 1;
 constexpr size_t MAX_JOINTS = 16;
+constexpr size_t MAX_COMMAND_PARAMS = 64;
 constexpr size_t MAX_COMMAND_ID_LEN = 128;
 
 // ============================================================================
@@ -62,7 +63,7 @@ struct alignas(16) TrajectoryCommand {
 
     // 参数（根据 mode 解释不同含义）
     int32_t param_count;                       // 参数数量（MoveJ: 关节数; MoveL: x,y,z,qx,qy,qz,qw; MoveC: 轨迹点数*7）
-    double parameters[MAX_JOINTS];             // 参数值（可包含位置、速度等，具体含义由 mode 决定）
+    double parameters[MAX_COMMAND_PARAMS];     // 参数值（可包含位置、速度等，具体含义由 mode 决定）
 
     // 完整性检查
     uint32_t crc32;                            // CRC校验（防止传输过程损坏）
@@ -78,7 +79,7 @@ struct alignas(16) TrajectoryCommand {
         std::memset(command_id, 0, MAX_COMMAND_ID_LEN);
         std::memset(filename, 0, MAX_FILENAME_LEN);
         std::memset(action, 0, MAX_ACTION_LEN);
-        std::memset(parameters, 0, MAX_JOINTS * sizeof(double));
+        std::memset(parameters, 0, MAX_COMMAND_PARAMS * sizeof(double));
     }
 
     // 计算CRC（简化实现，可集成第三方库）
@@ -93,7 +94,7 @@ struct alignas(16) TrajectoryCommand {
     }
 
     bool isValid() const {
-        return !validateCrc() || (param_count > 0 && param_count <= static_cast<int32_t>(MAX_JOINTS));
+        return !validateCrc() || (param_count > 0 && param_count <= static_cast<int32_t>(MAX_COMMAND_PARAMS));
     }
 
     void set_mode(const std::string& m) {
@@ -124,7 +125,7 @@ struct alignas(16) TrajectoryCommand {
     }
 
     void set_parameters(const std::vector<double>& params) {
-        param_count = std::min(params.size(), size_t(MAX_JOINTS));
+        param_count = std::min(params.size(), size_t(MAX_COMMAND_PARAMS));
         for (int32_t i = 0; i < param_count; ++i) {
             parameters[i] = params[i];
         }

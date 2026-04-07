@@ -46,6 +46,18 @@ CommandValidator::validateJointVelocities(
 }
 
 CommandValidator::ValidationResult
+CommandValidator::validateCommandStreaming(
+    const std::vector<double>& command) {
+    if (command.empty()) {
+        return {false, "CommandStreaming parameters cannot be empty"};
+    }
+    if (command.size() > MAX_COMMAND_PARAMS) {
+        return {false, "CommandStreaming parameter count exceeds maximum"};
+    }
+    return {true, ""};
+}
+
+CommandValidator::ValidationResult
 CommandValidator::validateCartesianVelocities(
     const std::vector<double>& velocities) {
     if (velocities.size() != 6) {

@@ -79,6 +79,7 @@ find_package(OsqpEigen REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(csaps REQUIRED)
+find_package(pybind11 QUIET)
 
 # 抑制 Boost.Python 找不到 Python 3.10 的警告（这是一个已知问题，不影响编译）
 set(Boost_NO_WARN_NEW_VERSIONS ON)
@@ -121,6 +122,9 @@ add_library(arm_controller_lib
   src/controller/joint_velocity/joint_velocity_controller.cpp
   src/controller/joint_velocity/joint_velocity_interface.cpp
   src/controller/joint_velocity/joint_velocity_ipc_interface.cpp
+  src/controller/command_streaming/command_streaming_controller.cpp
+  src/controller/command_streaming/command_streaming_interface.cpp
+  src/controller/command_streaming/command_streaming_ipc_interface.cpp
   src/controller/hold_state/hold_state_controller.cpp
   # 其他控制器暂时屏蔽用于测试
   src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
@@ -155,6 +159,10 @@ add_library(arm_controller_lib
   src/controller/trajectory_replay/trajectory_replay_ipc_interface.cpp
   src/controller/basic_ops/basic_ops_ipc_interface.cpp
   src/controller/basic_ops/basic_ops_ipc_service.cpp
+)
+
+set_target_properties(arm_controller_lib PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
 )
 
 ament_target_dependencies(arm_controller_lib
@@ -245,6 +253,29 @@ ament_target_dependencies(arm_controller_http_server
 install(TARGETS arm_controller_http_server
   DESTINATION lib/${PROJECT_NAME}
 )
+
+if(pybind11_FOUND)
+  pybind11_add_module(arm_controller_py
+    src/python_bindings.cpp
+  )
+
+  target_link_libraries(arm_controller_py
+    PRIVATE
+    arm_controller_lib
+  )
+
+  target_include_directories(arm_controller_py PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}
+  )
+
+  install(TARGETS arm_controller_py
+    LIBRARY DESTINATION lib/${PROJECT_NAME}
+  )
+else()
+  message(STATUS "pybind11 not found, skipping arm_controller_py module")
+endif()
 
 # === Build Examples ===
 file(GLOB EXAMPLE_SOURCES example/example_*.cpp)

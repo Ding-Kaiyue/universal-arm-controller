@@ -36,9 +36,9 @@ struct alignas(16) ExecutorControllerState {
           cmd_seq(0),
           timestamp_ns(0),
           progress(0) {
-        std::memset(current_mode, 0, 32);
-        std::memset(error_message, 0, 256);
-    }
+                std::memset(current_mode, 0, 32);
+                std::memset(error_message, 0, 256);
+          }
 };
 
 // ============================================================================
