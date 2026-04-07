@@ -40,6 +40,12 @@ controllers:
       name: /controller_api/mink_servo_action/{mapping}
       type: geometry_msgs/msg/PoseStamped
 
+  - key: CommandStreaming
+    class: CommandStreamingController
+    input_topic:
+      name: /controller_api/command_streaming_action/{mapping}
+      type: sensor_msgs/msg/JointState
+
   # - key: Move2Initial
   #   class: Move2InitialController
 
@@ -107,8 +113,8 @@ acceleration_scaling_factor: 1.0
 
 # 各控制器专用参数（0.0~1.0）
 movej:
-  velocity_scaling_factor: 0.8
-  acceleration_scaling_factor: 0.8
+  velocity_scaling_factor: 0.1
+  acceleration_scaling_factor: 0.1
 
 movel:
   velocity_scaling_factor: 0.5

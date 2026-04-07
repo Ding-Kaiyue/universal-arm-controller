@@ -152,6 +152,9 @@ add_library(arm_controller_lib
   src/controller/joint_velocity/joint_velocity_controller.cpp
   src/controller/joint_velocity/joint_velocity_interface.cpp
   src/controller/joint_velocity/joint_velocity_ipc_interface.cpp
+  src/controller/command_streaming/command_streaming_controller.cpp
+  src/controller/command_streaming/command_streaming_interface.cpp
+  src/controller/command_streaming/command_streaming_ipc_interface.cpp
   src/controller/hold_state/hold_state_controller.cpp
   # 其他控制器暂时屏蔽用于测试
   src/controller/cartesian_velocity/cartesian_velocity_controller.cpp

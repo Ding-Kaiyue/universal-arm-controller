@@ -6,6 +6,7 @@
 #include "joint_velocity/joint_velocity_controller.hpp"
 #include "cartesian_velocity/cartesian_velocity_controller.hpp"
 #include "mink_servo/mink_servo_controller.hpp"
+#include "command_streaming/command_streaming_controller.hpp"
 // #include "move2initial/move2initial_controller.hpp"
 // #include "move2start/move2start_controller.hpp"
 #include "ros2_action_control/ros2_action_control_controller.hpp"
@@ -31,6 +32,8 @@ std::unordered_map<std::string, ControllerInterface::Creator> get_available_cont
             return std::make_shared<CartesianVelocityController>(node); }},
         {"MinkServoController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<MinkServoController>(node); }},
+        {"CommandStreamingController", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<CommandStreamingController>(node); }},
         // {"Move2InitialController", [](rclcpp::Node::SharedPtr node) {
         //     return std::make_shared<Move2InitialController>(node); }},
         // {"Move2StartController", [](rclcpp::Node::SharedPtr node) {

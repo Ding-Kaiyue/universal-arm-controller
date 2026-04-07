@@ -25,6 +25,8 @@ public:
         const std::vector<double>& positions);
     static ValidationResult validateJointVelocities(
         const std::vector<double>& velocities);
+    static ValidationResult validateCommandStreaming(
+        const std::vector<double>& command);
     static ValidationResult validateCartesianVelocities(
         const std::vector<double>& velocities);
     static ValidationResult validatePose(

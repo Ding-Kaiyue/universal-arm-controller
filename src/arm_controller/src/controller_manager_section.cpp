@@ -200,6 +200,7 @@ void ControllerManagerNode::init_controllers() {
             "JointVelocity",
             "CartesianVelocity",
             "MinkServo",
+            "CommandStreaming",
             "MoveJ",
             "MoveL",
             "MoveC",
@@ -270,7 +271,8 @@ void ControllerManagerNode::init_controllers() {
                 }
 
                 // ✅ 为 velocity controllers 注册 hook 请求回调
-                if (key == "JointVelocity" || key == "CartesianVelocity" || key == "MinkServo") {
+                if (key == "JointVelocity" || key == "CartesianVelocity" ||
+                    key == "MinkServo" || key == "CommandStreaming") {
                     auto velocity_ctrl = std::dynamic_pointer_cast<VelocityControllerBase>(shared_controller);
                     if (velocity_ctrl) {
                         velocity_ctrl->set_hook_request_callback(
