@@ -3,16 +3,16 @@
 #include <cmath>
 #include <Eigen/Geometry>
 
-#include "algorithm/reactive_qp/hessian_builder.hpp"
-#include "algorithm/reactive_qp/joint_limit_adapter.hpp"
-#include "algorithm/reactive_qp/manipulability_gradient.hpp"
-#include "algorithm/reactive_qp/obstacle_damper.hpp"
-#include "algorithm/reactive_qp/point_jacobian_provider.hpp"
-#include "algorithm/reactive_qp/reactive_qp_builder.hpp"
-#include "algorithm/reactive_qp/reactive_qp_problem.hpp"
-#include "algorithm/reactive_qp/reactive_qp_solver.hpp"
-#include "algorithm/reactive_qp/reactive_qp_validator.hpp"
-#include "algorithm/reactive_qp/task_velocity_generator.hpp"
+#include "algorithm/neo/hessian_builder.hpp"
+#include "algorithm/neo/joint_limit_adapter.hpp"
+#include "algorithm/neo/manipulability_gradient.hpp"
+#include "algorithm/neo/obstacle_damper.hpp"
+#include "algorithm/neo/point_jacobian_provider.hpp"
+#include "algorithm/neo/reactive_qp_builder.hpp"
+#include "algorithm/neo/reactive_qp_problem.hpp"
+#include "algorithm/neo/reactive_qp_solver.hpp"
+#include "algorithm/neo/reactive_qp_validator.hpp"
+#include "algorithm/neo/task_velocity_generator.hpp"
 
 namespace rq = arm_controller::algorithm::reactive_qp;
 
