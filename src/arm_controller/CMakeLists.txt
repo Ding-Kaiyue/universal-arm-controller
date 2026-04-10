@@ -116,6 +116,7 @@ add_library(arm_controller_lib
   src/algorithm/neo/hessian_builder.cpp
   src/algorithm/neo/joint_limit_damper.cpp
   src/algorithm/neo/manipulability_gradient.cpp
+  src/algorithm/neo/body_obstacle_constraint_builder.cpp
   src/algorithm/neo/obstacle_damper.cpp
   src/algorithm/neo/point_jacobian_provider.cpp
   src/algorithm/neo/reactive_qp_builder.cpp
@@ -123,6 +124,17 @@ add_library(arm_controller_lib
   src/algorithm/neo/reactive_qp_solver.cpp
   src/algorithm/neo/reactive_qp_validator.cpp
   src/algorithm/neo/task_velocity_generator.cpp
+  src/algorithm/cartesian_path_planner/astar/astar_planner.cpp
+  src/algorithm/cartesian_path_planner/collision/cartesian_collision_checker.cpp
+  src/algorithm/cartesian_path_planner/collision/clearance_evaluator.cpp
+  src/algorithm/cartesian_path_planner/collision/whole_body_ellipsoid_pose_validator.cpp
+  src/algorithm/cartesian_path_planner/core/cartesian_path_planner.cpp
+  src/algorithm/cartesian_path_planner/core/trajectory_parameterizer.cpp
+  src/algorithm/cartesian_path_planner/map/dummy_distance_field.cpp
+  src/algorithm/cartesian_path_planner/replanning/replanner_manager.cpp
+  src/algorithm/cartesian_path_planner/smoothing/shortcut_smoother.cpp
+  src/algorithm/cartesian_path_planner/sampling/reference_sampler.cpp
+  src/algorithm/sphere_model/link_sphere_model.cpp
   src/arm_controller_api.cpp
   src/ipc/shm_manager.cpp
   src/ipc/command_producer.cpp
