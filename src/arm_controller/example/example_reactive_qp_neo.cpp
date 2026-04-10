@@ -13,12 +13,19 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <pinocchio/parsers/urdf.hpp>
 
-#include "algorithm/reactive_qp/reactive_qp_builder.hpp"
-#include "algorithm/reactive_qp/reactive_qp_solver.hpp"
-#include "algorithm/reactive_qp/task_velocity_generator.hpp"
+#include "algorithm/neo/reactive_qp_builder.hpp"
+#include "algorithm/neo/reactive_qp_solver.hpp"
+#include "algorithm/neo/task_velocity_generator.hpp"
+#include "algorithm/neo/point_jacobian_provider.hpp"
+#include "algorithm/neo/body_obstacle_constraint_builder.hpp"
+#include "algorithm/sphere_model/link_sphere_model.hpp"
+#include "algorithm/cartesian_path_planner/map/dummy_distance_field.hpp"
+#include "algorithm/cartesian_path_planner/map/obstacle_primitives.hpp"
 #include "arm_controller/kinematics/jacobian_provider.hpp"
+#include "arm_controller/kinematics/forward_kinematics.hpp"
 
 namespace rq = arm_controller::algorithm::reactive_qp;
+namespace cp = arm_controller::algorithm::cartesian_path_planner;
 
 namespace {
 
@@ -179,11 +186,17 @@ int main(int argc, char** argv) {
     auto node = std::make_shared<rclcpp::Node>("example_reactive_qp_neo");
 
     // Usage:
-    //   ./example_reactive_qp_neo [mapping] [robot_type]
+    //   ./example_reactive_qp_neo [mapping] [robot_type] [enable_obstacle] [obs_distance] [obs_safety] [obs_influence] [obs_gain]
     // Example:
-    //   ./example_reactive_qp_neo left_arm dual_arm620
+    //   ./example_reactive_qp_neo left_arm dual_arm620 1 0.12 0.08 0.30 6.0
     const std::string mapping = (argc > 1) ? argv[1] : "left_arm";
     const std::string robot_type = (argc > 2) ? argv[2] : "dual_arm620";
+    const bool enable_obstacle_damper =
+        (argc > 3) ? (std::stoi(argv[3]) != 0) : false;
+    const double obs_distance = (argc > 4) ? std::stod(argv[4]) : 0.12;
+    const double obs_safety = (argc > 5) ? std::stod(argv[5]) : 0.08;
+    const double obs_influence = (argc > 6) ? std::stod(argv[6]) : 0.30;
+    const double obs_gain = (argc > 7) ? std::stod(argv[7]) : 6.0;
 
     // 1) Generate desired task-space twist from pose + optional feedforward twist.
     rq::TaskVelocityGenerator task_velocity_generator;
@@ -240,9 +253,19 @@ int main(int argc, char** argv) {
         }
     }
 
-    arm_controller::kinematics::PinocchioJacobianProvider jacobian_provider(
+    auto jacobian_provider = std::make_shared<arm_controller::kinematics::PinocchioJacobianProvider>(
         node, model, q_indices, v_indices, ee_frame);
-    if (!jacobian_provider.initialize()) {
+    arm_controller::kinematics::PinocchioForwardKinematics fk_provider(
+        node, model, q_indices, ee_frame);
+
+    if (!fk_provider.initialize()) {
+        std::cerr << "[example_reactive_qp_neo] Failed to initialize PinocchioForwardKinematics."
+                  << std::endl;
+        rclcpp::shutdown();
+        return 1;
+    }
+
+    if (!jacobian_provider->initialize()) {
         std::cerr << "[example_reactive_qp_neo] Failed to initialize PinocchioJacobianProvider."
                   << std::endl;
         rclcpp::shutdown();
@@ -270,7 +293,7 @@ int main(int argc, char** argv) {
     }
 
     const Eigen::MatrixXd jacobian_task =
-        jacobian_provider.computeJacobian(q_current, "", Eigen::Vector3d::Zero());
+        jacobian_provider->computeJacobian(q_current, "", Eigen::Vector3d::Zero());
     if (jacobian_task.rows() != 6 || jacobian_task.cols() != dof || !jacobian_task.allFinite()) {
         std::cerr << "[example_reactive_qp_neo] Jacobian compute failed: shape="
                   << jacobian_task.rows() << "x" << jacobian_task.cols() << std::endl;
@@ -302,10 +325,62 @@ int main(int argc, char** argv) {
     qp_input.qd_max = qd_max;
     qp_input.joint_limits.q_min = q_min;
     qp_input.joint_limits.q_max = q_max;
+    if (enable_obstacle_damper) {
+        arm_controller::kinematics::ForwardKinematicsOutput fk_out;
+        if (!fk_provider.compute(q_current, fk_out)) {
+            std::cerr << "[example_reactive_qp_neo] FK compute failed for body obstacle constraints."
+                      << std::endl;
+            rclcpp::shutdown();
+            return 1;
+        }
+
+        auto distance_field = std::make_shared<cp::DummyDistanceField>(
+            Eigen::Vector3d(-2.0, -2.0, -2.0),
+            Eigen::Vector3d(2.0, 2.0, 2.0));
+        cp::SphereObstacle obstacle_sphere;
+        obstacle_sphere.center = fk_out.ee_position + Eigen::Vector3d(obs_distance, 0.0, 0.0);
+        obstacle_sphere.radius = 0.08;
+        distance_field->addSphere(obstacle_sphere);
+
+        const std::string hardware_cfg_path =
+            ament_index_cpp::get_package_share_directory("arm_controller") +
+            "/config/hardware_config.yaml";
+        std::vector<rq::LinkCollisionEllipsoid> link_ellipsoids;
+        std::string sphere_model_error;
+        if (!arm_controller::algorithm::sphere_model::LinkSphereModel::buildEllipsoidsForMapping(
+                hardware_cfg_path, mapping, model, link_ellipsoids, &sphere_model_error)) {
+            std::cerr << "[example_reactive_qp_neo] Ellipsoid model build failed: "
+                      << sphere_model_error << std::endl;
+            rclcpp::shutdown();
+            return 1;
+        }
+        rq::KinematicsPointJacobianProvider point_jacobian_provider(jacobian_provider);
+        const auto distance_query =
+            rq::BodyObstacleConstraintBuilder::makeDistanceQueryFromField(distance_field);
+        std::string obstacle_error;
+        const int generated = rq::BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
+            q_current,
+            fk_out.link_poses,
+            link_ellipsoids,
+            point_jacobian_provider,
+            distance_query,
+            qp_input.obstacle_constraints,
+            &obstacle_error);
+
+        if (generated <= 0) {
+            std::cerr << "[example_reactive_qp_neo] No body obstacle constraints generated: "
+                      << obstacle_error << std::endl;
+            rclcpp::shutdown();
+            return 1;
+        }
+    }
 
     rq::ReactiveQpBuildConfig qp_config;
     qp_config.enable_joint_limit_damper = false;
-    qp_config.enable_obstacle_damper = false;
+    qp_config.enable_obstacle_damper = enable_obstacle_damper;
+    qp_config.obstacle_damper.safety_distance = obs_safety;
+    qp_config.obstacle_damper.influence_distance = obs_influence;
+    qp_config.obstacle_damper.cbf_gain = obs_gain;
     qp_config.hessian.task_tracking_weight = 1.0;
     qp_config.hessian.joint_velocity_weight = 1e-4;
     qp_config.hessian.slack_weight = 100.0;
@@ -333,6 +408,15 @@ int main(int argc, char** argv) {
 
     std::cout << "mapping: " << mapping << std::endl;
     std::cout << "robot_type: " << robot_type << std::endl;
+    std::cout << "enable_obstacle_damper: " << (enable_obstacle_damper ? "true" : "false") << std::endl;
+    if (enable_obstacle_damper) {
+        std::cout << "obstacle_config: distance=" << obs_distance
+                  << ", safety=" << obs_safety
+                  << ", influence=" << obs_influence
+                  << ", gain=" << obs_gain << std::endl;
+        std::cout << "body_obstacle_constraints: "
+                  << qp_input.obstacle_constraints.size() << std::endl;
+    }
     std::cout << "q_current: " << q_current.transpose() << std::endl;
     std::cout << "v_des: " << task_output.v_des.transpose() << std::endl;
     std::cout << "J(0, :): " << jacobian_task.row(0) << std::endl;

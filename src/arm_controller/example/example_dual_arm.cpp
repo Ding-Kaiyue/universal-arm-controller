@@ -25,40 +25,40 @@ int main() {
     movel::MoveLIPCInterface movel;
     movec::MoveCIPCInterface movec;
 
-    // // 1. MoveJ 演示 - left_arm 先到达关节目标
-    // std::cout << "========== MoveJ 演示 ==========\n";
-    // std::cout << "发送 MoveJ 命令 -> left_arm ...\n";
-    // if (!movej.execute({-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0}, "left_arm")) {
-    //     std::cerr << "❌ 失败: " << movej.getLastError() << "\n";
-    // } else {
-    //     std::cout << "✅ 已入队\n";
-    // }
-    // std::cout << "\n";
+    // 1. MoveJ 演示 - left_arm 先到达关节目标
+    std::cout << "========== MoveJ 演示 ==========\n";
+    std::cout << "发送 MoveJ 命令 -> left_arm ...\n";
+    if (!movej.execute({-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0}, "left_arm")) {
+        std::cerr << "❌ 失败: " << movej.getLastError() << "\n";
+    } else {
+        std::cout << "✅ 已入队\n";
+    }
+    std::cout << "\n";
 
-    // // 2. MoveJ 演示
-    // std::cout << "========== MoveJ 演示 ==========\n";
-    // std::cout << "发送 MoveJ 命令 -> right_arm ...\n";
-    // if (!movej.execute({-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0}, "right_arm")) {
-    //     std::cerr << "❌ 失败: " << movej.getLastError() << "\n";
-    // } else {
-    //     std::cout << "✅ 已入队\n";
-    // }
-    // std::cout << "\n";
+    // 2. MoveJ 演示
+    std::cout << "========== MoveJ 演示 ==========\n";
+    std::cout << "发送 MoveJ 命令 -> right_arm ...\n";
+    if (!movej.execute({-1.57, -0.3236, -0.5854, 0.0, 0.5236, 0.0}, "right_arm")) {
+        std::cerr << "❌ 失败: " << movej.getLastError() << "\n";
+    } else {
+        std::cout << "✅ 已入队\n";
+    }
+    std::cout << "\n";
 
     // 3. MoveL 演示 - left_arm 从关节空间目标直线到笛卡尔目标 (0.19, -0.5, 0.63)
-    std::cout << "========== MoveL 演示 ==========\n";
-    std::cout << "发送 MoveL 命令 -> left_arm ...\n";
+    // std::cout << "========== MoveL 演示 ==========\n";
+    // std::cout << "发送 MoveL 命令 -> left_arm ...\n";
     // if (!movel.execute(0.19, -0.2, 0.63, -0.4546, 0.4546, -0.5417, 0.5417, "left_arm")) {
     //     std::cerr << "❌ 失败: " << movel.getLastError() << "\n";
     // } else {
     //     std::cout << "✅ 已入队\n";
     // }
-    if (!movel.execute(0.3, 0.414, 0.648, 0.707, 0.643, -0.007, 0.296, "left_arm")) {
-        std::cerr << "❌ 失败: " << movel.getLastError() << "\n";
-    } else {
-        std::cout << "✅ 已入队\n";
-    }
-    std::cout << "\n";
+    // if (!movel.execute(0.3, 0.414, 0.648, 0.707, 0.643, -0.007, 0.296, "left_arm")) {
+    //     std::cerr << "❌ 失败: " << movel.getLastError() << "\n";
+    // } else {
+    //     std::cout << "✅ 已入队\n";
+    // }
+    // std::cout << "\n";
 
     // // 4. MoveL 演示
     // std::cout << "========== MoveL 演示 ==========\n";
