@@ -89,4 +89,34 @@ TaskVelocityOutput TaskVelocityGenerator::compute(
     return out;
 }
 
+Eigen::Isometry3d TaskVelocityFrameAdapter::transformPose(
+    const Eigen::Isometry3d& T_dst_src,
+    const Eigen::Isometry3d& T_src_obj) {
+    return T_dst_src * T_src_obj;
+}
+
+Eigen::Matrix<double, 6, 1> TaskVelocityFrameAdapter::rotateTwist(
+    const Eigen::Matrix<double, 6, 1>& V_src,
+    const Eigen::Matrix3d& R_dst_src) {
+    Eigen::Matrix<double, 6, 1> V_dst = Eigen::Matrix<double, 6, 1>::Zero();
+    V_dst.head<3>() = R_dst_src * V_src.head<3>();
+    V_dst.tail<3>() = R_dst_src * V_src.tail<3>();
+    return V_dst;
+}
+
+TaskVelocityInput TaskVelocityFrameAdapter::transformInput(
+    const TaskVelocityInput& in_src,
+    const Eigen::Isometry3d& T_dst_src) {
+    TaskVelocityInput out = in_src;
+    out.T_current = transformPose(T_dst_src, in_src.T_current);
+
+    if (in_src.has_target_pose) {
+        out.T_target = transformPose(T_dst_src, in_src.T_target);
+    }
+    if (in_src.has_target_twist) {
+        out.target_twist = rotateTwist(in_src.target_twist, T_dst_src.linear());
+    }
+    return out;
+}
+
 }  // namespace arm_controller::algorithm::reactive_qp

@@ -73,4 +73,25 @@ class TaskVelocityGenerator {
         double threshold);
 };
 
+// Frame conversion helpers for feeding world-frame references into NEO.
+// If NEO uses base frame, call with T_base_world.
+class TaskVelocityFrameAdapter {
+public:
+    // Pose conversion: T_dst_obj = T_dst_src * T_src_obj
+    static Eigen::Isometry3d transformPose(
+        const Eigen::Isometry3d& T_dst_src,
+        const Eigen::Isometry3d& T_src_obj);
+
+    // Twist conversion by frame-rotation only (same EE reference point).
+    // V = [v; w], both linear and angular are rotated to dst frame.
+    static Eigen::Matrix<double, 6, 1> rotateTwist(
+        const Eigen::Matrix<double, 6, 1>& V_src,
+        const Eigen::Matrix3d& R_dst_src);
+
+    // Convert a full task input from src frame to dst frame.
+    static TaskVelocityInput transformInput(
+        const TaskVelocityInput& in_src,
+        const Eigen::Isometry3d& T_dst_src);
+};
+
 }  // namespace arm_controller::algorithm::reactive_qp
