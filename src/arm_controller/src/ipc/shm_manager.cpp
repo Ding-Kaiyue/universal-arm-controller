@@ -42,6 +42,13 @@ bool SharedMemoryManager::initialize(Role role) {
                 return false;
             }
 
+            // 创建跨进程执行状态表
+            state_table_ = segment_->construct<SharedExecutionStateTable>(STATE_TABLE_NAME)();
+            if (!state_table_) {
+                std::cerr << "Failed to construct SharedExecutionStateTable" << std::endl;
+                return false;
+            }
+
             // 创建互斥量和条件变量
             mutex_ = std::make_shared<boost::interprocess::named_mutex>(
                 boost::interprocess::open_or_create,
@@ -91,6 +98,12 @@ bool SharedMemoryManager::open() {
         if (!queue_) {
             std::cerr << "Failed to find CommandDeque" << std::endl;
             return false;
+        }
+
+        // 查找跨进程状态表（兼容老版本 SHM：找不到不作为 fatal）
+        state_table_ = segment_->find<SharedExecutionStateTable>(STATE_TABLE_NAME).first;
+        if (!state_table_) {
+            std::cerr << "⚠️  SharedExecutionStateTable not found (legacy SHM), cross-process state sync disabled" << std::endl;
         }
 
         // 打开互斥量和条件变量
@@ -145,6 +158,14 @@ boost::interprocess::named_condition* SharedMemoryManager::getCondition() {
     return condition_.get();
 }
 
+SharedExecutionStateTable* SharedMemoryManager::getStateTable() {
+    if (!initialized_) {
+        std::cerr << "❌ SharedMemoryManager not properly initialized" << std::endl;
+        return nullptr;
+    }
+    return state_table_;
+}
+
 bool SharedMemoryManager::isValid() const {
     return initialized_ && header_ && header_->isValid() && queue_;
 }
@@ -152,6 +173,7 @@ bool SharedMemoryManager::isValid() const {
 void SharedMemoryManager::close() {
     queue_ = nullptr;
     header_ = nullptr;
+    state_table_ = nullptr;
     segment_.reset();
     mutex_.reset();
     condition_.reset();

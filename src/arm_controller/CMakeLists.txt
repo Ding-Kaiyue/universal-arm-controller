@@ -8,6 +8,7 @@ endif()
 
 # Build options
 option(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable LTO for optimization" OFF)
+option(BUILD_PYTHON_IPC_BINDINGS "Build Python IPC producer bindings (pybind11)" ON)
 
 # Memory-efficient linker settings for low-memory systems
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-keep-memory")
@@ -84,6 +85,11 @@ find_package(csaps REQUIRED)
 set(Boost_NO_WARN_NEW_VERSIONS ON)
 
 find_package(pinocchio REQUIRED)
+
+if(BUILD_PYTHON_IPC_BINDINGS)
+  find_package(pybind11 QUIET)
+  find_package(Python3 QUIET COMPONENTS Interpreter)
+endif()
 
 
 include_directories(
@@ -184,6 +190,12 @@ add_library(arm_controller_lib
   src/controller/basic_ops/basic_ops_ipc_service.cpp
 )
 
+# arm_controller_ipc (pybind11 MODULE) links against arm_controller_lib.
+# Ensure this static library is built with -fPIC so it can be linked into a shared object.
+set_target_properties(arm_controller_lib PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+)
+
 ament_target_dependencies(arm_controller_lib
   rclcpp
   rclcpp_action
@@ -272,6 +284,48 @@ ament_target_dependencies(arm_controller_http_server
 install(TARGETS arm_controller_http_server
   DESTINATION lib/${PROJECT_NAME}
 )
+
+if(BUILD_PYTHON_IPC_BINDINGS)
+  if(pybind11_FOUND)
+    set(ARM_CONTROLLER_PYTHON_MODULE_INSTALL_DIR "lib/${PROJECT_NAME}/python")
+    if(Python3_FOUND)
+      set(ARM_CONTROLLER_PYTHON_MODULE_INSTALL_DIR
+        "lib/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/dist-packages")
+    else()
+      message(WARNING "Python3 interpreter not found. Falling back to non-standard python module install dir: ${ARM_CONTROLLER_PYTHON_MODULE_INSTALL_DIR}")
+    endif()
+
+    pybind11_add_module(arm_controller_ipc
+      src/python_arm_controller_ipc_pybind.cpp
+    )
+
+    target_link_libraries(arm_controller_ipc
+      PRIVATE
+      arm_controller_lib
+    )
+
+    target_include_directories(arm_controller_ipc
+      PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+
+    install(TARGETS arm_controller_ipc
+      LIBRARY DESTINATION ${ARM_CONTROLLER_PYTHON_MODULE_INSTALL_DIR}
+    )
+
+    configure_file(
+      ${CMAKE_CURRENT_SOURCE_DIR}/env-hooks/${PROJECT_NAME}_pythonpath.dsv.in
+      ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}_pythonpath.dsv
+      @ONLY
+    )
+    ament_environment_hooks(
+      ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}_pythonpath.dsv
+    )
+  else()
+    message(WARNING "BUILD_PYTHON_IPC_BINDINGS=ON but pybind11 not found. Python IPC module will not be built.")
+  endif()
+endif()
 
 # === Build Examples ===
 file(GLOB EXAMPLE_SOURCES example/example_*.cpp)

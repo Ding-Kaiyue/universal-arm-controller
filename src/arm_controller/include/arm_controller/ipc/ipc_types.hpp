@@ -15,6 +15,9 @@ namespace arm_controller::ipc {
 constexpr uint32_t IPC_VERSION = 1;
 constexpr size_t MAX_JOINTS = 16;
 constexpr size_t MAX_COMMAND_ID_LEN = 128;
+constexpr size_t MAX_STATE_MAPPINGS = 16;
+constexpr size_t MAX_STATE_MAPPING_LEN = 32;
+constexpr size_t MAX_STATE_MODE_LEN = 32;
 
 // ============================================================================
 // 数据结构 1: 共享内存头
@@ -172,6 +175,29 @@ struct QueueMetadata {
     uint32_t tail;                 // 写指针
     uint32_t count;                // 当前元素个数
     uint64_t dropped_count;        // 丢弃的命令计数（溢出时）
+};
+
+// ============================================================================
+// 数据结构 5: 跨进程执行状态表（供 Producer/Consumer 共享）
+// ============================================================================
+struct SharedExecutionStateEntry {
+    uint8_t occupied;                              // 0=empty, 1=used
+    char mapping[MAX_STATE_MAPPING_LEN];           // left_arm/right_arm/...
+    char current_mode[MAX_STATE_MODE_LEN];         // HoldState/MoveJ/...
+    int32_t execution_state;                       // 对齐 ExecutionState(int32_t)
+    uint64_t timestamp_ns;                         // 最后更新时间戳
+
+    SharedExecutionStateEntry()
+        : occupied(0),
+          execution_state(0),
+          timestamp_ns(0) {
+        std::memset(mapping, 0, sizeof(mapping));
+        std::memset(current_mode, 0, sizeof(current_mode));
+    }
+};
+
+struct SharedExecutionStateTable {
+    SharedExecutionStateEntry entries[MAX_STATE_MAPPINGS];
 };
 
 }  // namespace arm_controller::ipc

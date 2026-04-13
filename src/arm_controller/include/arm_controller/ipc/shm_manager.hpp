@@ -38,6 +38,7 @@ public:
     static constexpr const char* HEADER_NAME = "shm_header";
     static constexpr const char* MUTEX_NAME = "arm_controller_mutex";
     static constexpr const char* COND_NAME = "arm_controller_cond";
+    static constexpr const char* STATE_TABLE_NAME = "execution_state_table";
     static constexpr size_t SHM_SIZE = 16 * 1024 * 1024;  // 16 MB
 
     SharedMemoryManager() = default;
@@ -63,6 +64,9 @@ public:
     // 获取条件变量
     boost::interprocess::named_condition* getCondition();
 
+    // 获取跨进程执行状态表
+    SharedExecutionStateTable* getStateTable();
+
     // ✅ 清理共享内存（仅 Owner 可以调用）
     static void cleanup();
 
@@ -78,6 +82,7 @@ private:
     std::shared_ptr<boost::interprocess::named_condition> condition_;
     CommandDeque* queue_ = nullptr;
     ShmHeader* header_ = nullptr;
+    SharedExecutionStateTable* state_table_ = nullptr;
     bool initialized_ = false;
     Role role_ = Role::Participant;  // 记录初始化角色
 };

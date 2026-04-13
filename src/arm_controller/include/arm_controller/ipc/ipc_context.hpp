@@ -38,6 +38,7 @@ public:
 
     // 检查初始化状态
     bool isInitialized() const { return initialized_; }
+    bool isOwnerRole() const { return role_ == ipc::Role::Owner; }
 
     // ========================================================================
     // 访问器：供模式接口使用

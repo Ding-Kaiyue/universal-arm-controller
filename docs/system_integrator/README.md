@@ -24,6 +24,7 @@
 | 文档 | 用途 | 何时阅读 |
 |------|------|--------|
 | **[SYSTEM_INTEGRATION.md](SYSTEM_INTEGRATION.md)** | 系统集成指南 | 准备集成时 |
+| **[PYTHON_IPC_PRODUCER.md](PYTHON_IPC_PRODUCER.md)** | Python 直连 IPC 生产者接入 | 需要用 Python 直接发 IPC 命令时 |
 
 ---
 

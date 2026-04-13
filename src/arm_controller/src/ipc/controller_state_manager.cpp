@@ -1,7 +1,114 @@
 #include "arm_controller/ipc/controller_state_manager.hpp"
+#include "arm_controller/ipc/ipc_context.hpp"
+#include <chrono>
+#include <cstring>
 #include <iostream>
 
 namespace arm_controller::ipc {
+namespace {
+
+uint64_t now_ns() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+SharedExecutionStateEntry* find_or_alloc_entry(SharedExecutionStateTable* table,
+                                               const std::string& mapping) {
+    if (!table) {
+        return nullptr;
+    }
+
+    SharedExecutionStateEntry* empty = nullptr;
+    for (size_t i = 0; i < MAX_STATE_MAPPINGS; ++i) {
+        auto& entry = table->entries[i];
+        if (entry.occupied != 0 && std::string(entry.mapping) == mapping) {
+            return &entry;
+        }
+        if (!empty && entry.occupied == 0) {
+            empty = &entry;
+        }
+    }
+
+    if (!empty) {
+        return nullptr;
+    }
+
+    empty->occupied = 1;
+    std::strncpy(empty->mapping, mapping.c_str(), MAX_STATE_MAPPING_LEN - 1);
+    empty->mapping[MAX_STATE_MAPPING_LEN - 1] = '\0';
+    return empty;
+}
+
+const SharedExecutionStateEntry* find_entry(const SharedExecutionStateTable* table,
+                                            const std::string& mapping) {
+    if (!table) {
+        return nullptr;
+    }
+    for (size_t i = 0; i < MAX_STATE_MAPPINGS; ++i) {
+        const auto& entry = table->entries[i];
+        if (entry.occupied != 0 && std::string(entry.mapping) == mapping) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+bool read_shared_state(const std::string& mapping, std::string& mode, ExecutionState& state) {
+    auto shm_manager = IPCContext::getInstance().getSharedMemoryManager();
+    if (!shm_manager || !shm_manager->isValid()) {
+        return false;
+    }
+
+    auto* mutex = shm_manager->getMutex();
+    auto* table = shm_manager->getStateTable();
+    if (!mutex || !table) {
+        return false;
+    }
+
+    try {
+        boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
+        const auto* entry = find_entry(table, mapping);
+        if (!entry) {
+            return false;
+        }
+        mode = std::string(entry->current_mode);
+        state = static_cast<ExecutionState>(entry->execution_state);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+void write_shared_state(const std::string& mapping,
+                        const std::string& mode,
+                        ExecutionState state) {
+    auto shm_manager = IPCContext::getInstance().getSharedMemoryManager();
+    if (!shm_manager || !shm_manager->isValid()) {
+        return;
+    }
+
+    auto* mutex = shm_manager->getMutex();
+    auto* table = shm_manager->getStateTable();
+    if (!mutex || !table) {
+        return;
+    }
+
+    try {
+        boost::interprocess::scoped_lock<boost::interprocess::named_mutex> lock(*mutex);
+        auto* entry = find_or_alloc_entry(table, mapping);
+        if (!entry) {
+            return;
+        }
+        std::strncpy(entry->current_mode, mode.c_str(), MAX_STATE_MODE_LEN - 1);
+        entry->current_mode[MAX_STATE_MODE_LEN - 1] = '\0';
+        entry->execution_state = static_cast<int32_t>(state);
+        entry->timestamp_ns = now_ns();
+    } catch (...) {
+        // 共享状态写入失败时不抛异常，保留本地状态作为退化路径
+    }
+}
+
+}  // namespace
 
 // 定义需要hook状态才能安全停止的模式
 // 这些是轨迹规划模式，需要在切换前进入HoldState
@@ -19,6 +126,12 @@ const std::unordered_set<std::string> ControllerStateManager::modes_requiring_ho
 };
 
 std::string ControllerStateManager::getCurrentMode() const {
+    std::string shared_mode;
+    ExecutionState shared_state = ExecutionState::IDLE;
+    if (read_shared_state(mapping_, shared_mode, shared_state)) {
+        return shared_mode;
+    }
+
     std::lock_guard<std::mutex> lock(state_mutex_);
     return current_mode_;
 }
@@ -29,6 +142,12 @@ std::string ControllerStateManager::getTargetMode() const {
 }
 
 ExecutionState ControllerStateManager::getExecutionState() const {
+    std::string shared_mode;
+    ExecutionState shared_state = ExecutionState::IDLE;
+    if (read_shared_state(mapping_, shared_mode, shared_state)) {
+        return shared_state;
+    }
+
     std::lock_guard<std::mutex> lock(state_mutex_);
     return execution_state_;
 }
@@ -39,28 +158,26 @@ bool ControllerStateManager::isInHookState() const {
 }
 
 void ControllerStateManager::setExecutionState(ExecutionState state) {
-    std::string state_str;
-    switch (state) {
-        case ExecutionState::IDLE: state_str = "IDLE"; break;
-        case ExecutionState::PENDING: state_str = "PENDING"; break;
-        case ExecutionState::EXECUTING: state_str = "EXECUTING"; break;
-        case ExecutionState::SUCCESS: state_str = "SUCCESS"; break;
-        case ExecutionState::FAILED: state_str = "FAILED"; break;
-        default: state_str = "UNKNOWN"; break;
-    }
-
+    std::string mode_to_write;
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         execution_state_ = state;
+        mode_to_write = current_mode_;
     }
+    write_shared_state(mapping_, mode_to_write, state);
 }
 
 void ControllerStateManager::initializeCurrentMode(const std::string& mode) {
-    std::lock_guard<std::mutex> lock(state_mutex_);
-    current_mode_ = mode;
-    target_mode_ = mode;
-    execution_state_ = ExecutionState::IDLE;
-    in_hook_state_ = false;  // ✅ 清除 hook_state 标志
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        current_mode_ = mode;
+        target_mode_ = mode;
+        execution_state_ = ExecutionState::IDLE;
+        in_hook_state_ = false;  // ✅ 清除 hook_state 标志
+    }
+    if (IPCContext::getInstance().isOwnerRole()) {
+        write_shared_state(mapping_, mode, ExecutionState::IDLE);
+    }
 }
 
 bool ControllerStateManager::need_stop_before_transition_(
@@ -116,6 +233,9 @@ bool ControllerStateManager::transitionToMode(const std::string& target_mode) {
 
 void ControllerStateManager::updateFromExecutor(
     const ExecutorControllerState& executor_state) {
+    bool need_write = false;
+    std::string mode_to_write;
+    ExecutionState state_to_write = ExecutionState::IDLE;
 
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
@@ -129,17 +249,23 @@ void ControllerStateManager::updateFromExecutor(
             in_hook_state_ = false;
             current_mode_ = target_mode_;
             execution_state_ = ExecutionState::IDLE;
+            need_write = true;
+            mode_to_write = current_mode_;
+            state_to_write = execution_state_;
 
             std::cout << "✅ [" << mapping_ << "] Hook transition completed, now in mode: "
                       << current_mode_ << std::endl;
-            return;
-        }
-
-        // 更新当前模式和执行状态（从执行进程反馈）
-        if (!in_hook_state_) {
+        } else if (!in_hook_state_) {
+            // 更新当前模式和执行状态（从执行进程反馈）
             current_mode_ = executor_state.current_mode;
             execution_state_ = (ExecutionState)executor_state.execution_state;
+            need_write = true;
+            mode_to_write = current_mode_;
+            state_to_write = execution_state_;
         }
+    }
+    if (need_write) {
+        write_shared_state(mapping_, mode_to_write, state_to_write);
     }
 }
 

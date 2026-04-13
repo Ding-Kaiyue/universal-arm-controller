@@ -79,6 +79,16 @@ bool IPCContext::initializeAsConsumer(int argc, char** argv) {
                 last_error_ = "Failed to initialize shared memory as Owner";
                 return false;
             }
+        } else if (!shm_manager_->getStateTable()) {
+            // 兼容旧版本 SHM（没有 execution_state_table）：重建一次
+            std::cout << "Legacy SHM detected (missing execution_state_table), recreating as Owner..." << std::endl;
+            SharedMemoryManager::cleanup();
+            shm_manager_.reset();
+            shm_manager_ = std::make_shared<SharedMemoryManager>();
+            if (!shm_manager_->initialize(ipc::Role::Owner)) {
+                last_error_ = "Failed to recreate shared memory with execution_state_table";
+                return false;
+            }
         }
 
         // ✅ 设置为 Owner 角色（Consumer）
