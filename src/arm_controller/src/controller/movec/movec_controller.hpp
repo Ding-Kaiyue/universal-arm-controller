@@ -78,8 +78,8 @@ private:
 
     // 规划状态追踪
     std::map<std::string, bool> last_planning_success_;
+    std::mutex planning_state_mutex_;
 };
 
 
 #endif  // __MOVEC_CONTROLLER_HPP__
-
