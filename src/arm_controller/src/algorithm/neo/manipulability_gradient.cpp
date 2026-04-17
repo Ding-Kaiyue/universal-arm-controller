@@ -1,14 +1,14 @@
 #include "manipulability_gradient.hpp"
+#include "manipulator_hessian_tensor.hpp"
 
 #include <Eigen/Cholesky>
-#include <algorithm>
 #include <cmath>
 #include <limits>
 
 namespace arm_controller::algorithm::reactive_qp {
 
 ManipulabilityGradient::ManipulabilityGradient(
-    std::shared_ptr<PointJacobianProvider> jacobian_provider)
+    std::shared_ptr<arm_controller::kinematics::JacobianProvider> jacobian_provider)
     : jacobian_provider_(std::move(jacobian_provider)) {}
 
 double ManipulabilityGradient::computeLogYoshikawaManipulability(
@@ -56,13 +56,17 @@ bool ManipulabilityGradient::compute(
 	if (!jacobian_provider_) {
 		return false;
 	}
-	if (q.size() <= 0 || config.finite_difference_step <= 0.0) {
+	if (q.size() <= 0) {
 		return false;
 	}
 
-	const Eigen::MatrixXd j_nominal = jacobian_provider_->computePointJacobian(
+	const Eigen::MatrixXd j_nominal = jacobian_provider_->computeJacobian(
 		q, config.link_name, config.point_in_link);
 	if (j_nominal.cols() != q.size() || j_nominal.rows() <= 0 || !j_nominal.allFinite()) {
+		return false;
+	}
+	// Analytic tensor builder assumes spatial Jacobian (6xn).
+	if (j_nominal.rows() != 6) {
 		return false;
 	}
 
@@ -100,34 +104,23 @@ bool ManipulabilityGradient::compute(
 		}
 	}
 
+	std::vector<Eigen::MatrixXd> dJ_dq;
+	if (!ManipulatorHessianTensorBuilder::buildFromJacobian(j_nominal, dJ_dq, nullptr)) {
+		return false;
+	}
+	if (static_cast<int>(dJ_dq.size()) != dof) {
+		return false;
+	}
+
 	out_gradient = Eigen::VectorXd::Zero(dof);
-	const double h = config.finite_difference_step;
-
 	for (int i = 0; i < dof; ++i) {
-		Eigen::VectorXd q_plus = q;
-		Eigen::VectorXd q_minus = q;
-		q_plus(i) += h;
-		q_minus(i) -= h;
-
-		const Eigen::MatrixXd j_plus = jacobian_provider_->computePointJacobian(
-			q_plus, config.link_name, config.point_in_link);
-		const Eigen::MatrixXd j_minus = jacobian_provider_->computePointJacobian(
-			q_minus, config.link_name, config.point_in_link);
-		if (j_plus.rows() != task_dim || j_minus.rows() != task_dim || 
-			j_plus.cols() != dof || j_minus.cols() != dof ||
-			!j_plus.allFinite() || !j_minus.allFinite()) {
+		const Eigen::MatrixXd& dJ_dqi = dJ_dq[static_cast<std::size_t>(i)];
+		if (dJ_dqi.rows() != task_dim || dJ_dqi.cols() != dof || !dJ_dqi.allFinite()) {
 			return false;
 		}
 
-		// dJ/dq_i ≈ (J(q + h e_i) - J(q - h e_i)) / (2h)
-		const Eigen::MatrixXd dJ_dqi = (j_plus - j_minus) / (2.0 * h);
-
-		// grad_i = trace(gram^{-1} * dJ_dqi * J^T)
-		//
-		// 不显式求逆，先解：
-		//   X = gram^{-1} * dJ_dqi
-		// 再算：
-		//   trace(X * J^T)
+		// For log-manipulability:
+		//   grad_i = trace((J J^T + lambda I)^(-1) * (dJ/dq_i) * J^T)
 		const Eigen::MatrixXd X = ldlt.solve(dJ_dqi);
 		if (ldlt.info() != Eigen::Success || !X.allFinite()) {
 			return false;
@@ -136,7 +129,6 @@ bool ManipulabilityGradient::compute(
 		if (!std::isfinite(trace_term)) {
 			return false;
 		}
-
 		out_gradient(i) = trace_term;
 	}
 	return out_gradient.allFinite();

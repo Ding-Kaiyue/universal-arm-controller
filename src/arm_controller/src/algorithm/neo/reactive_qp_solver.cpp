@@ -22,6 +22,12 @@ bool ReactiveQpSolver::configureSolver(const ReactiveQpProblem& problem) {
     solver_.clearSolver();
     solver_.data()->setNumberOfVariables(nv);
     solver_.data()->setNumberOfConstraints(nc);
+    if (initialized_) {
+        // OsqpEigen data object keeps matrix-set state across solves.
+        // Clear explicitly before setting new QP matrices in control loops.
+        solver_.data()->clearHessianMatrix();
+        solver_.data()->clearLinearConstraintsMatrix();
+    }
 
     const Eigen::SparseMatrix<double> h_sparse = problem.hessian.sparseView();
     const Eigen::SparseMatrix<double> a_sparse = problem.constraint_matrix.sparseView();

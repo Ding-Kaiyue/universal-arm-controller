@@ -163,6 +163,9 @@ bool ReactiveQpBuilder::build(
     HessianBuildInput hessian_input;
     hessian_input.jacobian_task = input.jacobian_task;
     hessian_input.desired_twist = input.desired_twist;
+    hessian_input.q_current = input.q_current;
+    hessian_input.posture_velocity_reference = input.posture_velocity_reference;
+    hessian_input.posture_joint_weights = input.posture_joint_weights;
     hessian_input.manipulability_gradient = input.manipulability_gradient;
     if (!HessianBuilder::build(
             hessian_input, config.hessian, out_problem.hessian, out_problem.gradient)) {

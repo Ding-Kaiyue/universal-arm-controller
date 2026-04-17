@@ -7,12 +7,12 @@
 #include "algorithm/neo/joint_limit_adapter.hpp"
 #include "algorithm/neo/manipulability_gradient.hpp"
 #include "algorithm/neo/obstacle_damper.hpp"
-#include "algorithm/neo/point_jacobian_provider.hpp"
 #include "algorithm/neo/reactive_qp_builder.hpp"
 #include "algorithm/neo/reactive_qp_problem.hpp"
 #include "algorithm/neo/reactive_qp_solver.hpp"
 #include "algorithm/neo/reactive_qp_validator.hpp"
 #include "algorithm/neo/task_velocity_generator.hpp"
+#include "arm_controller/kinematics/jacobian_provider.hpp"
 
 namespace rq = arm_controller::algorithm::reactive_qp;
 
@@ -171,29 +171,26 @@ TEST(ObstacleDamperTest, InvalidConfigProducesNoRows) {
     EXPECT_EQ(rq::ObstacleDamper::countActiveRows(all, cfg, 2), 0);
 }
 
-TEST(PointJacobianProviderTest, NullUnderlyingProviderReturnsEmpty) {
-    rq::KinematicsPointJacobianProvider provider(nullptr);
-    const Eigen::MatrixXd J =
-        provider.computePointJacobian(Eigen::Vector2d::Zero(), "ee", Eigen::Vector3d::Zero());
-    EXPECT_EQ(J.size(), 0);
-}
-
-class MockPointJacobianProvider : public rq::PointJacobianProvider {
+class MockJacobianProvider : public arm_controller::kinematics::JacobianProvider {
  public:
-    Eigen::MatrixXd computePointJacobian(
+    bool initialize() override { return true; }
+    Eigen::MatrixXd computeJacobian(
         const Eigen::VectorXd& q,
         const std::string&,
         const Eigen::Vector3d&) const override {
-        Eigen::MatrixXd J(3, 2);
+        Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, 2);
         J << 1.0 + q(0), 0.0,
              0.0, 1.0 + q(1),
-             0.2, 0.1;
+             0.2, 0.1,
+             0.0, 0.0,
+             0.0, 0.0,
+             0.0, 0.0;
         return J;
     }
 };
 
 TEST(ManipulabilityGradientTest, ComputesFiniteLogManipGradient) {
-    auto mock = std::make_shared<MockPointJacobianProvider>();
+    auto mock = std::make_shared<MockJacobianProvider>();
     rq::ManipulabilityGradient mg(mock);
     rq::ManipulabilityGradientConfig cfg;
     cfg.finite_difference_step = 1e-4;

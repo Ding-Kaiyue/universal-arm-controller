@@ -77,6 +77,9 @@ public:
     std::vector<double> get_current_joint_positions(const std::string& mapping) const;
     std::vector<double> get_current_joint_velocities(const std::string& mapping) const;
     std::vector<double> get_current_joint_efforts(const std::string& mapping) const;
+    // Returns seconds since last joint feedback update for this mapping.
+    // std::numeric_limits<double>::infinity() means unknown/stale (no valid timestamp).
+    double get_joint_feedback_age_sec(const std::string& mapping) const;
     // 软件映射（无电机反馈）用：直接更新并发布 joint_state
     bool update_software_joint_state(
         const std::string& mapping,

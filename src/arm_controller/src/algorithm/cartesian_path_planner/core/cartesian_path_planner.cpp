@@ -40,6 +40,60 @@ bool validateWholeBodyPath(
 
     std::optional<Eigen::VectorXd> q_prev = input.q_start_seed;
     for (std::size_t i = 1; i < path.waypoints.size(); ++i) {
+        auto fillFailedDiag = [&]() {
+            failed_waypoint_idx = i;
+            if (input.whole_body_pose_diagnostic) {
+                const auto diag = input.whole_body_pose_diagnostic(
+                    path.waypoints[i].position,
+                    path.waypoints[i].orientation,
+                    input.safe_distance,
+                    q_prev);
+                const Eigen::Vector3d rpy_deg = rotationToRpyDeg(path.waypoints[i].orientation);
+                std::ostringstream oss;
+                oss << "[planner] waypoint " << i
+                    << " pose=("
+                    << path.waypoints[i].position.x() << ", "
+                    << path.waypoints[i].position.y() << ", "
+                    << path.waypoints[i].position.z() << ")"
+                    << " rpy_deg=("
+                    << rpy_deg.x() << ", "
+                    << rpy_deg.y() << ", "
+                    << rpy_deg.z() << ")";
+                if (!diag.ik_ok) {
+                    oss << " reason=ik_fail";
+                } else if (!diag.collision_free) {
+                    oss << " reason=" << (diag.reason.empty() ? "collision_fail" : diag.reason)
+                        << " min_margin=" << diag.min_margin;
+                    if (!diag.worst_link_name.empty()) {
+                        oss << " worst_link=" << diag.worst_link_name;
+                    }
+                } else {
+                    oss << " reason=segment_fail";
+                }
+                std::cout << oss.str() << std::endl;
+                if (failed_diag != nullptr) {
+                    *failed_diag = diag;
+                }
+            } else if (failed_diag != nullptr) {
+                *failed_diag = {};
+            }
+        };
+
+        if (input.whole_body_segment_validator) {
+            Eigen::VectorXd q_end;
+            if (!input.whole_body_segment_validator(
+                    path.waypoints[i - 1],
+                    path.waypoints[i],
+                    input.safe_distance,
+                    q_prev,
+                    q_end)) {
+                fillFailedDiag();
+                return false;
+            }
+            q_prev = q_end;
+            continue;
+        }
+
         if (input.whole_body_pose_validator) {
             Eigen::VectorXd q_sol;
             if (!input.whole_body_pose_validator(
@@ -48,42 +102,7 @@ bool validateWholeBodyPath(
                     input.safe_distance,
                     q_prev,
                     q_sol)) {
-                failed_waypoint_idx = i;
-                if (input.whole_body_pose_diagnostic) {
-                    const auto diag = input.whole_body_pose_diagnostic(
-                        path.waypoints[i].position,
-                        path.waypoints[i].orientation,
-                        input.safe_distance,
-                        q_prev);
-                    const Eigen::Vector3d rpy_deg = rotationToRpyDeg(path.waypoints[i].orientation);
-                    std::ostringstream oss;
-                    oss << "[planner] waypoint " << i
-                        << " pose=("
-                        << path.waypoints[i].position.x() << ", "
-                        << path.waypoints[i].position.y() << ", "
-                        << path.waypoints[i].position.z() << ")"
-                        << " rpy_deg=("
-                        << rpy_deg.x() << ", "
-                        << rpy_deg.y() << ", "
-                        << rpy_deg.z() << ")";
-                    if (!diag.ik_ok) {
-                        oss << " reason=ik_fail";
-                    } else if (!diag.collision_free) {
-                        oss << " reason=" << (diag.reason.empty() ? "collision_fail" : diag.reason)
-                            << " min_margin=" << diag.min_margin;
-                        if (!diag.worst_link_name.empty()) {
-                            oss << " worst_link=" << diag.worst_link_name;
-                        }
-                    } else {
-                        oss << " reason=unknown";
-                    }
-                    std::cout << oss.str() << std::endl;
-                    if (failed_diag != nullptr) {
-                        *failed_diag = diag;
-                    }
-                } else if (failed_diag != nullptr) {
-                    *failed_diag = {};
-                }
+                fillFailedDiag();
                 return false;
             }
             q_prev = q_sol;
@@ -203,8 +222,47 @@ TimedCartesianTrajectory CartesianPathPlanner::planTrajectory(
     if (!out.success) {
         return {};
     }
-    return parameterizer_.parameterize(
+    TimedCartesianTrajectory traj = parameterizer_.parameterize(
         out.path, input.R_start, input.R_goal, input.safe_distance);
+    if (traj.empty()) {
+        return {};
+    }
+
+    if (input.whole_body_pose_validator) {
+        traj.waypoint_joint_targets.clear();
+        traj.waypoint_joint_targets.reserve(traj.waypoints.size());
+
+        std::optional<Eigen::VectorXd> q_prev = input.q_start_seed;
+        bool all_valid = true;
+        for (const auto& wp : traj.waypoints) {
+            Eigen::VectorXd q_sol;
+            if (!input.whole_body_pose_validator(
+                    wp.position,
+                    wp.orientation,
+                    input.safe_distance,
+                    q_prev,
+                    q_sol)) {
+                all_valid = false;
+                break;
+            }
+            traj.waypoint_joint_targets.push_back(q_sol);
+            q_prev = q_sol;
+        }
+
+        if (!all_valid ||
+            traj.waypoint_joint_targets.size() != traj.waypoints.size()) {
+            if (!input.whole_body_postcheck_non_blocking) {
+                std::cout << "[planner] timed trajectory IK cache build failed in strict whole-body mode; abort trajectory"
+                          << std::endl;
+                return {};
+            }
+            std::cout << "[planner] warning: failed to build full IK waypoint cache for timed trajectory"
+                      << std::endl;
+            traj.waypoint_joint_targets.clear();
+        }
+    }
+
+    return traj;
 }
 
 }  // namespace arm_controller::algorithm::cartesian_path_planner

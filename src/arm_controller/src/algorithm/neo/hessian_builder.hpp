@@ -8,6 +8,9 @@ struct HessianBuilderConfig {
 	double task_tracking_weight{1.0};
 	double joint_velocity_weight{1e-4};
 	double slack_weight{1e2};
+	// Weight for posture preference on joint velocity:
+	//   w_posture * ||W_posture * (qdot - qdot_ref)||^2
+	double posture_weight{0.0};
 	// Weight for maximizing log-manipulability:
 	// objective contains -w_log_m * (∇log m(q))^T * qdot
 	// For log-gradient, start from a conservative non-zero weight.
@@ -17,6 +20,13 @@ struct HessianBuilderConfig {
 struct HessianBuildInput {
 	Eigen::MatrixXd jacobian_task;
 	Eigen::VectorXd desired_twist;
+	// Current joint position q in R^n.
+	Eigen::VectorXd q_current;
+	// Optional posture velocity reference qdot_ref in R^n.
+	Eigen::VectorXd posture_velocity_reference;
+	// Optional non-negative per-joint posture weights in R^n.
+	// If empty, all ones are used.
+	Eigen::VectorXd posture_joint_weights;
 	// IMPORTANT:
 	// This is gradient of log manipulability, i.e. ∇log m(q), not ∇m(q).
 	Eigen::VectorXd manipulability_gradient;

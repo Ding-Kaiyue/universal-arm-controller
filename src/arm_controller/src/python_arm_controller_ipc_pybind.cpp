@@ -9,6 +9,7 @@
 #include "controller/joint_velocity/joint_velocity_ipc_interface.hpp"
 #include "controller/cartesian_velocity/cartesian_velocity_ipc_interface.hpp"
 #include "controller/mink_servo/mink_servo_ipc_interface.hpp"
+#include "controller/reactive_task/reactive_task_ipc_interface.hpp"
 #include "controller/trajectory_record/trajectory_record_ipc_interface.hpp"
 #include "controller/trajectory_replay/trajectory_replay_ipc_interface.hpp"
 #include "controller/basic_ops/basic_ops_ipc_interface.hpp"
@@ -99,6 +100,16 @@ PYBIND11_MODULE(arm_controller_ipc, m) {
         .def("get_execution_state", &arm_controller::mink_servo::MinkServoIPCInterface::getExecutionState,
              py::arg("mapping"))
         .def("get_last_error", &arm_controller::mink_servo::MinkServoIPCInterface::getLastError);
+
+    py::class_<arm_controller::reactive_task::ReactiveTaskIPCInterface>(m, "ReactiveTask")
+        .def(py::init<>())
+        .def("execute", &arm_controller::reactive_task::ReactiveTaskIPCInterface::execute,
+             py::arg("target_pose"), py::arg("mapping"))
+        .def("get_current_mode", &arm_controller::reactive_task::ReactiveTaskIPCInterface::getCurrentMode,
+             py::arg("mapping"))
+        .def("get_execution_state", &arm_controller::reactive_task::ReactiveTaskIPCInterface::getExecutionState,
+             py::arg("mapping"))
+        .def("get_last_error", &arm_controller::reactive_task::ReactiveTaskIPCInterface::getLastError);
 
     py::class_<arm_controller::trajectory_record::TrajectoryRecordIPCInterface>(m, "TrajectoryRecord")
         .def(py::init<>())

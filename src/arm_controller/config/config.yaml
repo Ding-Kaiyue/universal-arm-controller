@@ -67,6 +67,12 @@ controllers:
       name: /controller_api/movel_action/{mapping}
       type: geometry_msgs/msg/Pose
 
+  - key: ReactiveTask
+    class: ReactiveTaskController
+    input_topic:
+      name: /controller_api/reactive_task_action/{mapping}
+      type: geometry_msgs/msg/Pose
+
   # - key: PointRecord
   #   class: PointRecordController
   #   input_topics:

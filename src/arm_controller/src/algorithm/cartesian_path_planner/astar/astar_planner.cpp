@@ -111,38 +111,6 @@ bool sampledWholeBodySegmentCheck(
     return true;
 }
 
-bool exactWholeBodySegmentCheck(
-    const CartesianWaypoint& from,
-    const CartesianWaypoint& to,
-    const PathPlanningInput& input,
-    Eigen::VectorXd* q_end,
-    const std::optional<Eigen::VectorXd>& q_seed,
-    const double edge_step) {
-    if (input.whole_body_segment_validator) {
-        Eigen::VectorXd q_tmp;
-        if (!input.whole_body_segment_validator(from, to, input.safe_distance, q_seed, q_tmp)) {
-            return false;
-        }
-        if (q_end != nullptr) {
-            *q_end = q_tmp;
-        }
-        return true;
-    }
-    if (input.whole_body_pose_validator) {
-        Eigen::VectorXd q_tmp;
-        if (!sampledWholeBodySegmentCheck(
-                from, to, input.safe_distance, edge_step,
-                input.whole_body_pose_validator, q_seed, q_tmp)) {
-            return false;
-        }
-        if (q_end != nullptr) {
-            *q_end = q_tmp;
-        }
-        return true;
-    }
-    return true;
-}
-
 bool validateTransition(
     const CartesianWaypoint& from,
     const CartesianWaypoint& to,

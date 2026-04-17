@@ -7,6 +7,7 @@
 #include <sstream>
 #include <iomanip>
 #include <set>
+#include <limits>
 
 std::shared_ptr<HardwareManager> HardwareManager::getInstance() {
     std::lock_guard<std::mutex> lock(instance_mutex_);
@@ -417,6 +418,24 @@ std::vector<double> HardwareManager::get_current_joint_efforts(const std::string
                 "[%s] Joint state not found, returning empty effort vector",
                 mapping.c_str());
     return std::vector<double>{};
+}
+
+double HardwareManager::get_joint_feedback_age_sec(const std::string& mapping) const {
+    std::lock_guard<std::mutex> lock(joint_state_mutex_);
+
+    auto it = mapping_joint_states_.find(mapping);
+    if (it == mapping_joint_states_.end()) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    const auto& stamp = it->second.header.stamp;
+    if (stamp.nanosec == 0 && stamp.sec == 0) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    const auto now = node_->now();
+    const auto dt = now - stamp;
+    return std::max(0.0, dt.seconds());
 }
 
 bool HardwareManager::update_software_joint_state(

@@ -30,6 +30,10 @@ struct ReactiveQpBuildInput {
 
     // Gradient of log manipulability, i.e. ∇log m(q), in R^n.
     Eigen::VectorXd manipulability_gradient;
+    // Optional posture reference qdot_ref and per-joint posture weights.
+    // If empty, posture term is effectively disabled unless config assigns defaults.
+    Eigen::VectorXd posture_velocity_reference;
+    Eigen::VectorXd posture_joint_weights;
 
     // Joint velocity bounds: qd_min <= qdot <= qd_max
     Eigen::VectorXd qd_min;

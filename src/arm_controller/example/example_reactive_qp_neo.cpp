@@ -1,4 +1,6 @@
 #include <chrono>
+#include <algorithm>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -16,7 +18,8 @@
 #include "algorithm/neo/reactive_qp_builder.hpp"
 #include "algorithm/neo/reactive_qp_solver.hpp"
 #include "algorithm/neo/task_velocity_generator.hpp"
-#include "algorithm/neo/point_jacobian_provider.hpp"
+#include "algorithm/neo/manipulability_gradient.hpp"
+#include "algorithm/neo/joint_preference_loader.hpp"
 #include "algorithm/neo/body_obstacle_constraint_builder.hpp"
 #include "algorithm/sphere_model/link_sphere_model.hpp"
 #include "algorithm/cartesian_path_planner/map/dummy_distance_field.hpp"
@@ -179,6 +182,59 @@ bool loadJointLimitsFromYaml(
     }
 }
 
+void applyHumanLikeJointPreferenceTable(
+    const std::vector<rq::HumanLikeJointPreference>& table,
+    Eigen::VectorXd& q_min,
+    Eigen::VectorXd& q_max,
+    const Eigen::VectorXd& q_current,
+    Eigen::VectorXd& out_qdot_ref,
+    Eigen::VectorXd& out_posture_weights,
+    double posture_k) {
+    const int dof = static_cast<int>(q_current.size());
+    out_qdot_ref = Eigen::VectorXd::Zero(dof);
+    out_posture_weights = Eigen::VectorXd::Zero(dof);
+    for (int i = 0; i < dof; ++i) {
+        if (i >= q_min.size() || i >= q_max.size() || i >= static_cast<int>(table.size())) {
+            continue;
+        }
+        const auto& p = table[static_cast<std::size_t>(i)];
+        if (p.enable_range_clamp) {
+            // Avoid immediate CBF infeasibility when current joint is outside the preferred range.
+            // In that case, keep hard limits unchanged for now and rely on posture bias to pull back.
+            const bool outside_preferred =
+                (q_current(i) < p.preferred_min) || (q_current(i) > p.preferred_max);
+            if (!outside_preferred) {
+                q_min(i) = std::max(q_min(i), p.preferred_min);
+                q_max(i) = std::min(q_max(i), p.preferred_max);
+                if (q_min(i) >= q_max(i)) {
+                    const double mid = 0.5 * (q_min(i) + q_max(i));
+                    q_min(i) = mid - 1e-3;
+                    q_max(i) = mid + 1e-3;
+                }
+            }
+        }
+        const double center = std::clamp(p.preferred_center, q_min(i) + 0.05, q_max(i) - 0.05);
+        out_qdot_ref(i) = posture_k * (center - q_current(i));
+        out_posture_weights(i) = std::max(0.0, p.posture_weight);
+    }
+}
+
+void printHumanLikeJointPreferenceTable(const std::vector<rq::HumanLikeJointPreference>& table) {
+    std::cout << "human_like_joint_preference_table:" << std::endl;
+    std::cout << "  idx  name           clamp   min      max      center   weight" << std::endl;
+    for (std::size_t i = 0; i < table.size(); ++i) {
+        const auto& p = table[i];
+        std::cout << "  " << std::setw(3) << i
+                  << "  " << std::setw(12) << p.joint_name
+                  << "  " << std::setw(5) << (p.enable_range_clamp ? "yes" : "no")
+                  << "  " << std::setw(7) << std::fixed << std::setprecision(3) << p.preferred_min
+                  << "  " << std::setw(7) << std::fixed << std::setprecision(3) << p.preferred_max
+                  << "  " << std::setw(7) << std::fixed << std::setprecision(3) << p.preferred_center
+                  << "  " << std::setw(6) << std::fixed << std::setprecision(3) << p.posture_weight
+                  << std::endl;
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -186,29 +242,36 @@ int main(int argc, char** argv) {
     auto node = std::make_shared<rclcpp::Node>("example_reactive_qp_neo");
 
     // Usage:
-    //   ./example_reactive_qp_neo [mapping] [robot_type] [enable_obstacle] [obs_distance] [obs_safety] [obs_influence] [obs_gain]
+    //   ./example_reactive_qp_neo [mapping] [robot_type]
     // Example:
-    //   ./example_reactive_qp_neo left_arm dual_arm620 1 0.12 0.08 0.30 6.0
+    //   ./example_reactive_qp_neo left_arm dual_arm620
     const std::string mapping = (argc > 1) ? argv[1] : "left_arm";
     const std::string robot_type = (argc > 2) ? argv[2] : "dual_arm620";
-    const bool enable_obstacle_damper =
-        (argc > 3) ? (std::stoi(argv[3]) != 0) : false;
-    const double obs_distance = (argc > 4) ? std::stod(argv[4]) : 0.12;
-    const double obs_safety = (argc > 5) ? std::stod(argv[5]) : 0.08;
-    const double obs_influence = (argc > 6) ? std::stod(argv[6]) : 0.30;
-    const double obs_gain = (argc > 7) ? std::stod(argv[7]) : 6.0;
+    const std::string reactive_cfg_path =
+        ament_index_cpp::get_package_share_directory("arm_controller") +
+        "/config/reactive_task_config.yaml";
+
+    std::string cfg_error;
+    rq::ReactiveQpExampleConfig example_cfg;
+    if (!rq::ReactiveQpExampleConfigLoader::loadFromYaml(
+            reactive_cfg_path, example_cfg, &cfg_error)) {
+        std::cerr << "[example_reactive_qp_neo] Failed to load example config from "
+                  << reactive_cfg_path << ": " << cfg_error << std::endl;
+        rclcpp::shutdown();
+        return 1;
+    }
+    const bool enable_obstacle_damper = example_cfg.qp_build.enable_obstacle_damper;
+    const double obs_distance = example_cfg.obstacle_distance;
 
     // 1) Generate desired task-space twist from pose + optional feedforward twist.
     rq::TaskVelocityGenerator task_velocity_generator;
     rq::TaskVelocityInput task_input;
-    rq::TaskVelocityConfig task_config;
-    task_config.max_linear_speed = 1.0;
-    task_config.max_angular_speed = 1.0;
+    rq::TaskVelocityConfig task_config = example_cfg.task_velocity;
 
     task_input.T_current = Eigen::Isometry3d::Identity();
     task_input.has_target_pose = true;
     task_input.T_target = Eigen::Isometry3d::Identity();
-    task_input.T_target.translation() = Eigen::Vector3d(0.05, -0.02, 0.01);
+    task_input.T_target.translation() = example_cfg.target_translation;
 
     const rq::TaskVelocityOutput task_output =
         task_velocity_generator.compute(task_input, task_config);
@@ -314,13 +377,45 @@ int main(int argc, char** argv) {
         rclcpp::shutdown();
         return 1;
     }
+    rq::HumanLikeJointPreferenceConfig joint_pref_cfg;
+    if (!rq::JointPreferenceLoader::loadFromYaml(
+            reactive_cfg_path, joint_names, joint_pref_cfg, &limits_error)) {
+        std::cerr << "[example_reactive_qp_neo] Failed to load joint preferences from "
+                  << reactive_cfg_path << ": " << limits_error << std::endl;
+        rclcpp::shutdown();
+        return 1;
+    }
+    const auto& joint_pref_table = joint_pref_cfg.joints;
+    printHumanLikeJointPreferenceTable(joint_pref_table);
+
+    Eigen::VectorXd posture_qdot_ref;
+    Eigen::VectorXd posture_joint_weights;
+    applyHumanLikeJointPreferenceTable(
+        joint_pref_table,
+        q_min,
+        q_max,
+        q_current,
+        posture_qdot_ref,
+        posture_joint_weights,
+        joint_pref_cfg.posture_k);
 
     // 4) Build QP problem from v_des + Pinocchio Jacobian.
     rq::ReactiveQpBuildInput qp_input;
     qp_input.q_current = q_current;
     qp_input.jacobian_task = jacobian_task;
     qp_input.desired_twist = task_output.v_des;
-    qp_input.manipulability_gradient = Eigen::VectorXd::Zero(dof);
+    rq::ManipulabilityGradient manipulability_gradient_solver(jacobian_provider);
+    rq::ManipulabilityGradientConfig manipulability_cfg = example_cfg.manipulability;
+    double log_m_value = 0.0;
+    if (!manipulability_gradient_solver.compute(
+            q_current, manipulability_cfg, qp_input.manipulability_gradient, &log_m_value)) {
+        std::cerr << "[example_reactive_qp_neo] Failed to compute manipulability gradient."
+                  << std::endl;
+        rclcpp::shutdown();
+        return 1;
+    }
+    qp_input.posture_velocity_reference = posture_qdot_ref;
+    qp_input.posture_joint_weights = posture_joint_weights;
     qp_input.qd_min = qd_min;
     qp_input.qd_max = qd_max;
     qp_input.joint_limits.q_min = q_min;
@@ -354,7 +449,6 @@ int main(int argc, char** argv) {
             rclcpp::shutdown();
             return 1;
         }
-        rq::KinematicsPointJacobianProvider point_jacobian_provider(jacobian_provider);
         const auto distance_query =
             rq::BodyObstacleConstraintBuilder::makeDistanceQueryFromField(distance_field);
         std::string obstacle_error;
@@ -362,7 +456,7 @@ int main(int argc, char** argv) {
             q_current,
             fk_out.link_poses,
             link_ellipsoids,
-            point_jacobian_provider,
+            *jacobian_provider,
             distance_query,
             qp_input.obstacle_constraints,
             &obstacle_error);
@@ -375,16 +469,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    rq::ReactiveQpBuildConfig qp_config;
-    qp_config.enable_joint_limit_damper = false;
+    rq::ReactiveQpBuildConfig qp_config = example_cfg.qp_build;
     qp_config.enable_obstacle_damper = enable_obstacle_damper;
-    qp_config.obstacle_damper.safety_distance = obs_safety;
-    qp_config.obstacle_damper.influence_distance = obs_influence;
-    qp_config.obstacle_damper.cbf_gain = obs_gain;
-    qp_config.hessian.task_tracking_weight = 1.0;
-    qp_config.hessian.joint_velocity_weight = 1e-4;
-    qp_config.hessian.slack_weight = 100.0;
-    qp_config.hessian.manipulability_weight = 0.0;
 
     rq::ReactiveQpProblem qp_problem;
     std::string error;
@@ -405,21 +491,26 @@ int main(int argc, char** argv) {
 
     const Eigen::VectorXd qdot = solution.head(dof);
     const Eigen::VectorXd slack = solution.tail(6);
+    const Eigen::VectorXd task_pred_vw = jacobian_task * qdot + slack;
+    const Eigen::VectorXd task_residual_vw = task_pred_vw - task_output.v_des;
 
     std::cout << "mapping: " << mapping << std::endl;
     std::cout << "robot_type: " << robot_type << std::endl;
     std::cout << "enable_obstacle_damper: " << (enable_obstacle_damper ? "true" : "false") << std::endl;
     if (enable_obstacle_damper) {
         std::cout << "obstacle_config: distance=" << obs_distance
-                  << ", safety=" << obs_safety
-                  << ", influence=" << obs_influence
-                  << ", gain=" << obs_gain << std::endl;
+                  << ", safety=" << qp_config.obstacle_damper.safety_distance
+                  << ", influence=" << qp_config.obstacle_damper.influence_distance
+                  << ", gain=" << qp_config.obstacle_damper.cbf_gain << std::endl;
         std::cout << "body_obstacle_constraints: "
                   << qp_input.obstacle_constraints.size() << std::endl;
     }
     std::cout << "q_current: " << q_current.transpose() << std::endl;
     std::cout << "v_des: " << task_output.v_des.transpose() << std::endl;
-    std::cout << "J(0, :): " << jacobian_task.row(0) << std::endl;
+    std::cout << "J (full 6x" << dof << "):\n" << jacobian_task << std::endl;
+    std::cout << "task_pred assuming J=[v;w]: " << task_pred_vw.transpose() << std::endl;
+    std::cout << "task_residual [v;w]: " << task_residual_vw.transpose()
+              << ", norm=" << task_residual_vw.norm() << std::endl;
     std::cout << "qdot : " << qdot.transpose() << std::endl;
     std::cout << "slack: " << slack.transpose() << std::endl;
     std::cout << "Result: SUCCESS" << std::endl;

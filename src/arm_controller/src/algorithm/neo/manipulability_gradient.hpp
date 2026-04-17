@@ -4,7 +4,7 @@
 #include <memory>
 #include <string>
 
-#include "point_jacobian_provider.hpp"
+#include "arm_controller/kinematics/jacobian_provider.hpp"
 
 namespace arm_controller::algorithm::reactive_qp {
 
@@ -17,7 +17,8 @@ struct ManipulabilityGradientConfig {
 
 class ManipulabilityGradient {
 public:
-	explicit ManipulabilityGradient(std::shared_ptr<PointJacobianProvider> jacobian_provider);
+	explicit ManipulabilityGradient(
+        std::shared_ptr<arm_controller::kinematics::JacobianProvider> jacobian_provider);
 
 	// 计算 log manipulability:
 	//   log m(q) = 0.5 * log det(J(q) J(q)^T + lambda * I)
@@ -37,7 +38,7 @@ private:
 		const Eigen::MatrixXd& jacobian,
 		double determinant_damping);
 
-	std::shared_ptr<PointJacobianProvider> jacobian_provider_;
+	std::shared_ptr<arm_controller::kinematics::JacobianProvider> jacobian_provider_;
 };
 
 }  // namespace arm_controller::algorithm::reactive_qp

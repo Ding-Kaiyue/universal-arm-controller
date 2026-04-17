@@ -5,6 +5,7 @@
 #include "controller/joint_velocity/joint_velocity_ipc_interface.hpp"
 #include "controller/cartesian_velocity/cartesian_velocity_ipc_interface.hpp"
 #include "controller/mink_servo/mink_servo_ipc_interface.hpp"
+#include "controller/reactive_task/reactive_task_ipc_interface.hpp"
 #include "controller/trajectory_record/trajectory_record_ipc_interface.hpp"
 #include "controller/trajectory_replay/trajectory_replay_ipc_interface.hpp"
 #include "controller/basic_ops/basic_ops_ipc_interface.hpp"
@@ -572,6 +573,7 @@ private:
     arm_controller::joint_velocity::JointVelocityIPCInterface joint_velocity_;
     arm_controller::cartesian_velocity::CartesianVelocityIPCInterface cartesian_velocity_;
     arm_controller::mink_servo::MinkServoIPCInterface mink_servo_;
+    arm_controller::reactive_task::ReactiveTaskIPCInterface reactive_task_;
     arm_controller::trajectory_record::TrajectoryRecordIPCInterface trajectory_record_;
     arm_controller::trajectory_replay::TrajectoryReplayIPCInterface trajectory_replay_;
     arm_controller::basic_ops::BasicOpsIPCInterface basic_ops_;
@@ -775,6 +777,9 @@ private:
                 http_status = "HTTP/1.1 200 OK";
             } else if (method == "POST" && path == "/mink_servo") {
                 response_body = handleMinkServo(body);
+                http_status = "HTTP/1.1 200 OK";
+            } else if (method == "POST" && path == "/reactive_task") {
+                response_body = handleReactiveTask(body);
                 http_status = "HTTP/1.1 200 OK";
             } else if (method == "POST" && path == "/trajectory_record") {
                 response_body = handleTrajectoryRecord(body);
@@ -1114,6 +1119,21 @@ private:
         }
     }
 
+    std::string handleReactiveTask(const std::string& body) {
+        try {
+            auto req = RequestParser::parseMinkServo(body);
+            if (!reactive_task_.execute(req.values, req.mapping)) {
+                return SimpleJSON::error("ReactiveTask execution failed");
+            }
+            return SimpleJSON::success(
+                "Command queued",
+                reactive_task_.getCurrentMode(req.mapping),
+                static_cast<int>(reactive_task_.getExecutionState(req.mapping)));
+        } catch (const std::exception& e) {
+            return SimpleJSON::error(e.what());
+        }
+    }
+
     std::string handleTrajectoryRecord(const std::string& body) {
         try {
             auto req = RequestParser::parseTeach(body);
@@ -1281,6 +1301,7 @@ int main(int /*argc*/, char** /*argv*/) {
     std::cout << "   POST /joint_velocity        - Joint velocity control\n";
     std::cout << "   POST /cartesian_velocity    - Cartesian velocity control\n";
     std::cout << "   POST /mink_servo            - Pose servo control (Mink mode)\n";
+    std::cout << "   POST /reactive_task         - One-shot pose command (A* + NEO)\n";
     std::cout << "   POST /trajectory_record     - Trajectory record control\n";
     std::cout << "   POST /trajectory_replay     - Trajectory replay control\n";
     std::cout << "   POST /gripper_control       - Gripper open/close (IPC basic op)\n";
@@ -1304,6 +1325,10 @@ int main(int /*argc*/, char** /*argv*/) {
     std::cout << "    curl -X POST http://127.0.0.1:8080/mink_servo \\\n";
     std::cout << "      -H 'Content-Type: application/json' \\\n";
     std::cout << "      -d '{\"target_pose\": [0.45, 0.20, 0.35, 0, 0, 0, 1], \"mapping\": \"left_arm\", \"duration_ms\": 1000, \"interval_ms\": 10}'\n\n";
+    std::cout << "  ReactiveTask:\n";
+    std::cout << "    curl -X POST http://127.0.0.1:8080/reactive_task \\\n";
+    std::cout << "      -H 'Content-Type: application/json' \\\n";
+    std::cout << "      -d '{\"target_pose\": [0.45, 0.20, 0.35, 0, 0, 0, 1], \"mapping\": \"left_arm\"}'\n\n";
 
     // 保持运行
     while (true) {

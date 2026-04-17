@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -86,6 +87,23 @@ public:
         int current_point_index,
         std::string* error = nullptr);
 
+    // Build next segment into pending buffer from predicted active trajectory
+    // without interrupting current active execution.
+    bool preparePendingFromPredictedActiveTrajectory(
+        const PathPlanningInput& goal_input,
+        int current_point_index,
+        std::string* error = nullptr);
+    // Build next segment into pending buffer from an explicit active-trajectory
+    // point index (no extra horizon prediction inside this method).
+    bool preparePendingFromActiveTrajectoryPoint(
+        const PathPlanningInput& goal_input,
+        int start_point_index,
+        std::string* error = nullptr);
+
+    // Commit prepared pending segment to active segment.
+    bool commitPendingSegment(std::string* error = nullptr);
+    bool hasPendingTrajectory() const;
+
     // Sample predicted replan start pose used by planFromPredictedActiveTrajectory.
     bool samplePredictedReplanStart(
         int current_point_index,
@@ -93,6 +111,12 @@ public:
 
     // Sample current active trajectory by point index.
     bool sample(int point_index, TimedCartesianSample& out) const;
+    // Sample current active trajectory by elapsed execution time (seconds).
+    bool sampleByElapsedTime(double elapsed_sec, TimedCartesianSample& out) const;
+    // Convert elapsed execution time (seconds) to active segment point index.
+    int pointIndexAtTime(double elapsed_sec) const;
+    // Get total duration (seconds) of active segment.
+    double activeSegmentTotalDurationSec() const;
 
     bool hasActiveTrajectory() const;
     int activeSegmentPointCount() const;
@@ -109,6 +133,14 @@ private:
         const TimedCartesianTrajectory& in_traj) const;
 
     int predictedPointIndex(int current_point_index) const;
+    int predictedPointIndex(
+        const TimedCartesianTrajectory& traj,
+        int current_point_index) const;
+
+    bool sampleFromTrajectory(
+        const TimedCartesianTrajectory& traj,
+        int point_index,
+        TimedCartesianSample& out) const;
 
     Eigen::Vector3d estimateTrajectoryVelocityAtPoint(
         const TimedCartesianTrajectory& traj,
@@ -122,8 +154,10 @@ private:
     std::shared_ptr<CartesianPathPlanner> planner_;
     ReferenceSampler sampler_;
 
+    mutable std::mutex state_mutex_;
     bool started_{false};
     TimedSegment active_;
+    TimedSegment pending_;
 };
 
 }  // namespace arm_controller::algorithm::cartesian_path_planner

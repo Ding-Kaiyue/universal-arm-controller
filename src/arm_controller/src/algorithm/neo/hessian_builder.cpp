@@ -1,4 +1,5 @@
 #include "hessian_builder.hpp"
+#include <cmath>
 
 namespace arm_controller::algorithm::reactive_qp {
 
@@ -14,6 +15,25 @@ bool HessianBuilder::build(
 		return false;
 	}
 	if (input.desired_twist.size() != task_dim) {
+		return false;
+	}
+	if (input.q_current.size() != dof) {
+		return false;
+	}
+
+	Eigen::VectorXd qdot_ref = input.posture_velocity_reference;
+	if (qdot_ref.size() == 0) {
+		qdot_ref = Eigen::VectorXd::Zero(dof);
+	}
+	if (qdot_ref.size() != dof) {
+		return false;
+	}
+
+	Eigen::VectorXd posture_w = input.posture_joint_weights;
+	if (posture_w.size() == 0) {
+		posture_w = Eigen::VectorXd::Ones(dof);
+	}
+	if (posture_w.size() != dof) {
 		return false;
 	}
 
@@ -35,16 +55,24 @@ bool HessianBuilder::build(
 	const double w_task = config.task_tracking_weight;
 	const double w_qdot = config.joint_velocity_weight;
 	const double w_slack = config.slack_weight;
+	const double w_posture = config.posture_weight;
 	const double w_log_m = config.manipulability_weight;
 
 	// Minimize:
 	//   w_task * ||J*qdot + s - v_des||^2
 	// + w_qdot * ||qdot||^2
 	// + w_slack * ||s||^2
+	// + w_posture * ||W_posture * (qdot - qdot_ref)||^2
 	// - w_log_m * (grad_log_m)^T * qdot
 	out_hessian.topLeftCorner(dof, dof).noalias() +=
 		2.0 * w_task * input.jacobian_task.transpose() * input.jacobian_task;
 	out_hessian.topLeftCorner(dof, dof).diagonal().array() += 2.0 * w_qdot;
+	for (int i = 0; i < dof; ++i) {
+		const double wi = (posture_w(i) > 0.0) ? posture_w(i) : 0.0;
+		const double wi2 = wi * wi;
+		out_hessian(i, i) += 2.0 * w_posture * wi2;
+		out_gradient(i) += -2.0 * w_posture * wi2 * qdot_ref(i);
+	}
 
 	out_hessian.topRightCorner(dof, task_dim).noalias() +=
 		2.0 * w_task * input.jacobian_task.transpose();

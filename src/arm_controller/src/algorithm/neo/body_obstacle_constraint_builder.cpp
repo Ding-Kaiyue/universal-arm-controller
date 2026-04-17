@@ -48,7 +48,7 @@ int BodyObstacleConstraintBuilder::appendLinkSphereConstraints(
     const Eigen::VectorXd& q_current,
     const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
     const std::vector<LinkCollisionSphere>& link_spheres,
-    const PointJacobianProvider& jacobian_provider,
+    const arm_controller::kinematics::JacobianProvider& jacobian_provider,
     const DistanceQueryFn& distance_query,
     std::vector<ObstacleConstraintInput>& out_constraints,
     std::string* error) {
@@ -76,7 +76,7 @@ int BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
     const Eigen::VectorXd& q_current,
     const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
     const std::vector<LinkCollisionEllipsoid>& link_ellipsoids,
-    const PointJacobianProvider& jacobian_provider,
+    const arm_controller::kinematics::JacobianProvider& jacobian_provider,
     const DistanceQueryFn& distance_query,
     std::vector<ObstacleConstraintInput>& out_constraints,
     std::string* error) {
@@ -129,7 +129,7 @@ int BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
         }
 
         const Eigen::MatrixXd J_point =
-            jacobian_provider.computePointJacobian(q_current, e.link_name, e.center_in_link);
+            jacobian_provider.computeJacobian(q_current, e.link_name, e.center_in_link);
         if (J_point.rows() < 3 || J_point.cols() != dof || !J_point.allFinite()) {
             continue;
         }

@@ -120,11 +120,12 @@ add_library(arm_controller_lib
   src/kinematics/forward_kinematics.cpp
   src/kinematics/jacobian_provider.cpp
   src/algorithm/neo/hessian_builder.cpp
+  src/algorithm/neo/joint_preference_loader.cpp
   src/algorithm/neo/joint_limit_damper.cpp
   src/algorithm/neo/manipulability_gradient.cpp
+  src/algorithm/neo/manipulator_hessian_tensor.cpp
   src/algorithm/neo/body_obstacle_constraint_builder.cpp
   src/algorithm/neo/obstacle_damper.cpp
-  src/algorithm/neo/point_jacobian_provider.cpp
   src/algorithm/neo/reactive_qp_builder.cpp
   src/algorithm/neo/reactive_qp_problem.cpp
   src/algorithm/neo/reactive_qp_solver.cpp
@@ -159,6 +160,9 @@ add_library(arm_controller_lib
   src/controller/mink_servo/mink_servo_controller.cpp
   src/controller/mink_servo/mink_servo_interface.cpp
   src/controller/mink_servo/mink_servo_ipc_interface.cpp
+  src/controller/reactive_task/reactive_task_controller.cpp
+  src/controller/reactive_task/reactive_task_interface.cpp
+  src/controller/reactive_task/reactive_task_ipc_interface.cpp
   # src/controller/move2initial/move2initial_controller.cpp
   # src/controller/move2initial/move2initial_interface.cpp
   # src/controller/move2start/move2start_controller.cpp
@@ -228,6 +232,7 @@ target_link_libraries(arm_controller_lib
   OsqpEigen::OsqpEigen
   csaps::csaps
   pinocchio::pinocchio
+  yaml-cpp
 )
 
 # 为库本身添加覆盖率编译选项（在构建测试时）

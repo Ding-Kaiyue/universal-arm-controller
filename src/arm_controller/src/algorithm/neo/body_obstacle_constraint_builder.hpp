@@ -11,7 +11,7 @@
 
 #include "algorithm/cartesian_path_planner/map/distance_field_interface.hpp"
 #include "obstacle_damper.hpp"
-#include "point_jacobian_provider.hpp"
+#include "arm_controller/kinematics/jacobian_provider.hpp"
 
 namespace arm_controller::algorithm::reactive_qp {
 
@@ -57,7 +57,7 @@ public:
         const Eigen::VectorXd& q_current,
         const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
         const std::vector<LinkCollisionSphere>& link_spheres,
-        const PointJacobianProvider& jacobian_provider,
+        const arm_controller::kinematics::JacobianProvider& jacobian_provider,
         const DistanceQueryFn& distance_query,
         std::vector<ObstacleConstraintInput>& out_constraints,
         std::string* error = nullptr);
@@ -71,7 +71,7 @@ public:
         const Eigen::VectorXd& q_current,
         const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
         const std::vector<LinkCollisionEllipsoid>& link_ellipsoids,
-        const PointJacobianProvider& jacobian_provider,
+        const arm_controller::kinematics::JacobianProvider& jacobian_provider,
         const DistanceQueryFn& distance_query,
         std::vector<ObstacleConstraintInput>& out_constraints,
         std::string* error = nullptr);

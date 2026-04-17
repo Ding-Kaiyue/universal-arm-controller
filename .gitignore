@@ -49,6 +49,7 @@ Icon?
 *.user
 *.sublime-project
 *.sublime-workspace
+.codex
 
 # === Dependency / External ===
 *.so

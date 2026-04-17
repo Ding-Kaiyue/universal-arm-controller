@@ -113,6 +113,160 @@ struct RunArtifacts {
     std::vector<IkRecord> ik_records;
 };
 
+struct ExampleRuntimeConfig {
+    cp::PlannerCommonConfig planner_common;
+    cp::AStarConfig planner_astar;
+    cp::SmoothingConfig planner_smoothing;
+    cp::ReplannerConfig replanner;
+    double request_safe_distance{0.03};
+    double request_goal_tolerance{0.03};
+    bool whole_body_postcheck_non_blocking{false};
+    int whole_body_postcheck_max_attempts{5};
+    double whole_body_retry_forbidden_radius{0.045};
+    Eigen::Vector3d map_margin_xyz{0.60, 0.60, 0.60};
+    int max_control_ticks{60};
+};
+
+bool parseVec3(const YAML::Node& node, Eigen::Vector3d& out) {
+    if (!node || !node.IsSequence() || node.size() != 3) {
+        return false;
+    }
+    out << node[0].as<double>(), node[1].as<double>(), node[2].as<double>();
+    return true;
+}
+
+bool loadRuntimeConfig(const std::string& yaml_path, ExampleRuntimeConfig& cfg, std::string* error) {
+    try {
+        // Defaults aligned with ReactiveTaskController fallback.
+        cfg.replanner.segment_sample_step_m = 0.04;
+        cfg.replanner.replan_every_control_ticks = 10;
+        cfg.replanner.control_cycle_sec = 0.10;
+        cfg.replanner.prediction_horizon_ticks = 10;
+        cfg.replanner.planning_latency_sec = 0.06;
+        cfg.replanner.handoff_blend_points = 8;
+
+        cfg.planner_common.default_segment_speed = 0.20;
+        cfg.planner_common.enable_interpolator_smoothing = true;
+        cfg.planner_common.interpolator_continuity_order = 2;
+        cfg.planner_common.interpolator_target_dt = 0.01;
+
+        cfg.planner_astar.voxel_resolution = 0.015;
+        cfg.planner_astar.neighbor_mode = 18;
+        cfg.planner_astar.use_se3_search = true;
+        cfg.planner_astar.orientation_bin_size_rad = 0.7853981634;
+        cfg.planner_astar.orientation_goal_tolerance_rad = 1.20;
+        cfg.planner_astar.enable_inplace_rotation_neighbors = false;
+        cfg.planner_astar.force_axis_translation_neighbors_in_se3 = true;
+        cfg.planner_astar.obstacle_penalty_weight = 1.2;
+        cfg.planner_astar.corridor_deviation_weight = 3.0;
+        cfg.planner_astar.goal_shortcut_clearance_margin = 0.02;
+        cfg.planner_astar.orientation_cost_weight = 0.08;
+        cfg.planner_astar.orientation_heuristic_weight = 0.20;
+        cfg.planner_astar.max_iterations = 3000000;
+        cfg.planner_astar.max_planning_time_sec = 12.0;
+        cfg.planner_astar.edge_check_step = 0.005;
+
+        cfg.planner_smoothing.max_shortcut_trials = 50;
+        cfg.planner_smoothing.collision_check_step = 0.005;
+        cfg.planner_smoothing.local_adjust_iterations = 15;
+        cfg.planner_smoothing.local_adjust_alpha = 0.30;
+
+        cfg.request_safe_distance = 0.03;
+        cfg.request_goal_tolerance = 0.03;
+        cfg.whole_body_postcheck_non_blocking = false;
+        cfg.whole_body_postcheck_max_attempts = 5;
+        cfg.whole_body_retry_forbidden_radius = 0.045;
+        cfg.map_margin_xyz = Eigen::Vector3d(0.60, 0.60, 0.60);
+        cfg.max_control_ticks = 60;
+
+        const YAML::Node root = YAML::LoadFile(yaml_path);
+        const YAML::Node rtc = root["reactive_task_controller"];
+        if (!rtc || !rtc.IsMap()) {
+            return true;
+        }
+
+        if (rtc["max_control_ticks"]) {
+            cfg.max_control_ticks = std::max(1, rtc["max_control_ticks"].as<int>());
+        }
+
+        if (const YAML::Node req = rtc["request"]; req && req.IsMap()) {
+            if (req["safe_distance"]) {
+                cfg.request_safe_distance = std::max(0.0, req["safe_distance"].as<double>());
+            }
+            if (req["goal_tolerance"]) {
+                cfg.request_goal_tolerance = std::max(1e-6, req["goal_tolerance"].as<double>());
+            } else if (rtc["goal_position_tolerance"]) {
+                cfg.request_goal_tolerance = std::max(1e-6, rtc["goal_position_tolerance"].as<double>());
+            }
+            if (req["whole_body_postcheck_non_blocking"]) {
+                cfg.whole_body_postcheck_non_blocking = req["whole_body_postcheck_non_blocking"].as<bool>();
+            }
+            if (req["whole_body_postcheck_max_attempts"]) {
+                cfg.whole_body_postcheck_max_attempts =
+                    std::max(1, req["whole_body_postcheck_max_attempts"].as<int>());
+            }
+            if (req["whole_body_retry_forbidden_radius"]) {
+                cfg.whole_body_retry_forbidden_radius =
+                    std::max(0.0, req["whole_body_retry_forbidden_radius"].as<double>());
+            }
+            Eigen::Vector3d map_margin;
+            if (parseVec3(req["map_margin_xyz"], map_margin)) {
+                cfg.map_margin_xyz = map_margin.cwiseMax(Eigen::Vector3d::Zero());
+            }
+        } else if (rtc["goal_position_tolerance"]) {
+            cfg.request_goal_tolerance = std::max(1e-6, rtc["goal_position_tolerance"].as<double>());
+        }
+
+        if (const YAML::Node rep = rtc["replanner"]; rep && rep.IsMap()) {
+            if (rep["segment_sample_step_m"]) cfg.replanner.segment_sample_step_m = std::max(1e-4, rep["segment_sample_step_m"].as<double>());
+            if (rep["replan_every_control_ticks"]) cfg.replanner.replan_every_control_ticks = std::max(1, rep["replan_every_control_ticks"].as<int>());
+            if (rep["control_cycle_sec"]) cfg.replanner.control_cycle_sec = std::max(1e-4, rep["control_cycle_sec"].as<double>());
+            if (rep["prediction_horizon_ticks"]) cfg.replanner.prediction_horizon_ticks = std::max(1, rep["prediction_horizon_ticks"].as<int>());
+            if (rep["planning_latency_sec"]) cfg.replanner.planning_latency_sec = std::max(0.0, rep["planning_latency_sec"].as<double>());
+            if (rep["handoff_blend_points"]) cfg.replanner.handoff_blend_points = std::max(1, rep["handoff_blend_points"].as<int>());
+        }
+
+        if (const YAML::Node planner = rtc["planner"]; planner && planner.IsMap()) {
+            if (const YAML::Node common = planner["common"]; common && common.IsMap()) {
+                if (common["default_segment_speed"]) cfg.planner_common.default_segment_speed = common["default_segment_speed"].as<double>();
+                if (common["enable_interpolator_smoothing"]) cfg.planner_common.enable_interpolator_smoothing = common["enable_interpolator_smoothing"].as<bool>();
+                if (common["interpolator_continuity_order"]) cfg.planner_common.interpolator_continuity_order = common["interpolator_continuity_order"].as<int>();
+                if (common["interpolator_target_dt"]) cfg.planner_common.interpolator_target_dt = common["interpolator_target_dt"].as<double>();
+            }
+            if (const YAML::Node astar = planner["astar"]; astar && astar.IsMap()) {
+                if (astar["voxel_resolution"]) cfg.planner_astar.voxel_resolution = astar["voxel_resolution"].as<double>();
+                if (astar["neighbor_mode"]) cfg.planner_astar.neighbor_mode = astar["neighbor_mode"].as<int>();
+                if (astar["use_se3_search"]) cfg.planner_astar.use_se3_search = astar["use_se3_search"].as<bool>();
+                if (astar["orientation_bin_size_rad"]) cfg.planner_astar.orientation_bin_size_rad = astar["orientation_bin_size_rad"].as<double>();
+                if (astar["orientation_goal_tolerance_rad"]) cfg.planner_astar.orientation_goal_tolerance_rad = astar["orientation_goal_tolerance_rad"].as<double>();
+                if (astar["enable_inplace_rotation_neighbors"]) cfg.planner_astar.enable_inplace_rotation_neighbors = astar["enable_inplace_rotation_neighbors"].as<bool>();
+                if (astar["force_axis_translation_neighbors_in_se3"]) cfg.planner_astar.force_axis_translation_neighbors_in_se3 = astar["force_axis_translation_neighbors_in_se3"].as<bool>();
+                if (astar["obstacle_penalty_weight"]) cfg.planner_astar.obstacle_penalty_weight = astar["obstacle_penalty_weight"].as<double>();
+                if (astar["corridor_deviation_weight"]) cfg.planner_astar.corridor_deviation_weight = astar["corridor_deviation_weight"].as<double>();
+                if (astar["goal_shortcut_clearance_margin"]) cfg.planner_astar.goal_shortcut_clearance_margin = astar["goal_shortcut_clearance_margin"].as<double>();
+                if (astar["orientation_cost_weight"]) cfg.planner_astar.orientation_cost_weight = astar["orientation_cost_weight"].as<double>();
+                if (astar["orientation_heuristic_weight"]) cfg.planner_astar.orientation_heuristic_weight = astar["orientation_heuristic_weight"].as<double>();
+                if (astar["max_iterations"]) cfg.planner_astar.max_iterations = astar["max_iterations"].as<int>();
+                if (astar["max_planning_time_sec"]) cfg.planner_astar.max_planning_time_sec = astar["max_planning_time_sec"].as<double>();
+                if (astar["edge_check_step"]) cfg.planner_astar.edge_check_step = astar["edge_check_step"].as<double>();
+            }
+            if (const YAML::Node smoothing = planner["smoothing"]; smoothing && smoothing.IsMap()) {
+                if (smoothing["max_shortcut_trials"]) cfg.planner_smoothing.max_shortcut_trials = smoothing["max_shortcut_trials"].as<int>();
+                if (smoothing["collision_check_step"]) cfg.planner_smoothing.collision_check_step = smoothing["collision_check_step"].as<double>();
+                if (smoothing["local_adjust_iterations"]) cfg.planner_smoothing.local_adjust_iterations = smoothing["local_adjust_iterations"].as<int>();
+                if (smoothing["local_adjust_alpha"]) cfg.planner_smoothing.local_adjust_alpha = smoothing["local_adjust_alpha"].as<double>();
+            }
+        }
+
+        return true;
+    } catch (const std::exception& e) {
+        if (error != nullptr) {
+            *error = e.what();
+        }
+        return false;
+    }
+}
+
 double effectiveEllipsoidRadiusAlongNormal(
     const Eigen::Matrix3d& R_world_link,
     const Eigen::Vector3d& radii_link,
@@ -529,7 +683,7 @@ Eigen::Matrix3d fixedGoalOrientation() {
            Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX()).toRotationMatrix();
 }
 
-DemoScene buildDemoScene(const MappingContext& ctx) {
+DemoScene buildDemoScene(const MappingContext& ctx, const ExampleRuntimeConfig& cfg) {
     DemoScene scene;
     scene.request.p_start = ctx.p_current;
     scene.request.R_start = ctx.R_current;
@@ -537,15 +691,15 @@ DemoScene buildDemoScene(const MappingContext& ctx) {
     scene.request.R_goal = fixedGoalOrientation();
     scene.request.q_start_seed = Eigen::Map<const Eigen::VectorXd>(
         ctx.q_current.data(), static_cast<Eigen::Index>(ctx.q_current.size()));
-    scene.request.safe_distance = 0.03;
-    scene.request.goal_tolerance = 0.03;
-    scene.request.whole_body_postcheck_non_blocking = false;
-    scene.request.whole_body_postcheck_max_attempts = 3;
-    scene.request.whole_body_retry_forbidden_radius = 0.045;
+    scene.request.safe_distance = cfg.request_safe_distance;
+    scene.request.goal_tolerance = cfg.request_goal_tolerance;
+    scene.request.whole_body_postcheck_non_blocking = cfg.whole_body_postcheck_non_blocking;
+    scene.request.whole_body_postcheck_max_attempts = cfg.whole_body_postcheck_max_attempts;
+    scene.request.whole_body_retry_forbidden_radius = cfg.whole_body_retry_forbidden_radius;
 
     const Eigen::Vector3d min_corner = scene.request.p_start.cwiseMin(scene.request.p_goal);
     const Eigen::Vector3d max_corner = scene.request.p_start.cwiseMax(scene.request.p_goal);
-    const Eigen::Vector3d map_margin(0.60, 0.60, 0.60);
+    const Eigen::Vector3d map_margin = cfg.map_margin_xyz;
     scene.map_min = min_corner - map_margin;
     scene.map_max = max_corner + map_margin;
     scene.map = std::make_shared<cp::DummyDistanceField>(scene.map_min, scene.map_max);
@@ -562,56 +716,10 @@ DemoScene buildDemoScene(const MappingContext& ctx) {
 
 std::shared_ptr<cp::CartesianPathPlanner> buildPlanner(
     const std::shared_ptr<cp::DummyDistanceField>& map,
-    const Eigen::Vector3d& map_min) {
-    cp::PlannerCommonConfig common_cfg;
-    common_cfg.default_segment_speed = 0.20;
-    common_cfg.enable_interpolator_smoothing = true;
-    common_cfg.interpolator_continuity_order = 2;
-    common_cfg.interpolator_target_dt = 0.01;
-
-    cp::AStarConfig astar_cfg;
-    astar_cfg.voxel_resolution = 0.015;
-    astar_cfg.neighbor_mode = 18;
-    astar_cfg.use_se3_search = true;
-    astar_cfg.orientation_bin_size_rad = 0.7853981634;
-    astar_cfg.orientation_goal_tolerance_rad = 1.20;
-    astar_cfg.enable_inplace_rotation_neighbors = false;
-    astar_cfg.force_axis_translation_neighbors_in_se3 = true;
-    astar_cfg.obstacle_penalty_weight = 1.2;
-    astar_cfg.corridor_deviation_weight = 3.0;
-    astar_cfg.goal_shortcut_clearance_margin = 0.02;
-    astar_cfg.orientation_cost_weight = 0.08;
-    astar_cfg.orientation_heuristic_weight = 0.20;
-    astar_cfg.max_iterations = 3000000;
-    astar_cfg.max_planning_time_sec = 12.0;
-    astar_cfg.edge_check_step = 0.005;
-
-    cp::SmoothingConfig smoothing_cfg;
-    smoothing_cfg.max_shortcut_trials = 50;
-    smoothing_cfg.collision_check_step = 0.005;
-    smoothing_cfg.local_adjust_iterations = 15;
-    smoothing_cfg.local_adjust_alpha = 0.30;
-
+    const Eigen::Vector3d& map_min,
+    const ExampleRuntimeConfig& cfg) {
     return std::make_shared<cp::CartesianPathPlanner>(
-        common_cfg, astar_cfg, smoothing_cfg, map, map_min);
-}
-
-cp::ReplannerConfig defaultReplannerConfig() {
-    cp::ReplannerConfig cfg;
-    cfg.segment_sample_step_m = 0.04;
-    cfg.replan_every_control_ticks = 10;
-    cfg.control_cycle_sec = 0.004;
-    cfg.prediction_horizon_ticks = 10;
-    cfg.planning_latency_sec = 0.06;
-    return cfg;
-}
-
-int advanceExecutionIndex(const int current_idx, const int point_count) {
-    if (point_count <= 0) {
-        return 0;
-    }
-    constexpr int kExecutionStride = 2;
-    return std::min(current_idx + kExecutionStride, point_count - 1);
+        cfg.planner_common, cfg.planner_astar, cfg.planner_smoothing, map, map_min);
 }
 
 std::vector<Eigen::Vector3d> sampleActiveSegmentPoints(const cp::ReplannerManager& replanner) {
@@ -1113,9 +1221,16 @@ int runOneMapping(const rclcpp::Node::SharedPtr& node, const std::string& mappin
     const std::string robot_desc_share =
         ament_index_cpp::get_package_share_directory("robot_description");
     const std::string hardware_cfg_path = arm_share + "/config/hardware_config.yaml";
+    const std::string reactive_cfg_path = arm_share + "/config/reactive_task_config.yaml";
+
+    ExampleRuntimeConfig runtime_cfg;
+    std::string error;
+    if (!loadRuntimeConfig(reactive_cfg_path, runtime_cfg, &error)) {
+        std::cerr << "[replanner_minimal] load runtime config failed: " << error << std::endl;
+        return 1;
+    }
 
     MappingContext ctx;
-    std::string error;
     if (!loadMappingConfig(hardware_cfg_path, mapping, ctx, &error)) {
         std::cerr << "[replanner_minimal] loadMappingConfig failed: " << error << std::endl;
         return 1;
@@ -1144,15 +1259,16 @@ int runOneMapping(const rclcpp::Node::SharedPtr& node, const std::string& mappin
         return 1;
     }
 
-    DemoScene scene = buildDemoScene(ctx);
+    DemoScene scene = buildDemoScene(ctx, runtime_cfg);
     auto whole_body_validator = buildWholeBodyValidator(ctx, adapters, scene.map, pinocchio);
     scene.request.whole_body_pose_validator = whole_body_validator.makePoseValidatorFn();
     scene.request.whole_body_segment_validator = whole_body_validator.makeSegmentValidatorFn();
     scene.request.whole_body_pose_diagnostic = whole_body_validator.makePoseDiagnosticFn();
 
-    auto planner = buildPlanner(scene.map, scene.map_min);
+    auto planner = buildPlanner(scene.map, scene.map_min, runtime_cfg);
     cp::ReplannerManager replanner(planner);
-    replanner.setConfig(defaultReplannerConfig());
+    const cp::ReplannerConfig replanner_cfg = runtime_cfg.replanner;
+    replanner.setConfig(replanner_cfg);
 
     printSceneSummary(ctx, scene);
 
@@ -1184,8 +1300,8 @@ int runOneMapping(const rclcpp::Node::SharedPtr& node, const std::string& mappin
         artifacts);
 
     bool reached_goal = false;
-    int exec_idx = 0;
-    const int total_control_ticks = 60;
+    double exec_time_sec = 0.0;
+    const int total_control_ticks = runtime_cfg.max_control_ticks;
     for (int tick = 1; tick <= total_control_ticks; ++tick) {
         const int point_count = replanner.activeSegmentPointCount();
         if (point_count <= 0) {
@@ -1195,10 +1311,11 @@ int runOneMapping(const rclcpp::Node::SharedPtr& node, const std::string& mappin
             return 1;
         }
 
-        exec_idx = std::min(exec_idx, point_count - 1);
+        exec_time_sec = std::min(exec_time_sec, replanner.activeSegmentTotalDurationSec());
+        const int exec_idx = replanner.pointIndexAtTime(exec_time_sec);
 
         cp::TimedCartesianSample current;
-        if (!replanner.sample(exec_idx, current)) {
+        if (!replanner.sampleByElapsedTime(exec_time_sec, current)) {
             std::cerr << "[replanner_minimal] sample failed at tick " << tick
                       << " (" << mapping << ")" << std::endl;
             exportRunJson(mapping, scene, artifacts);
@@ -1214,7 +1331,7 @@ int runOneMapping(const rclcpp::Node::SharedPtr& node, const std::string& mappin
         }
 
         if (!replanner.shouldReplanAtControlTick(tick)) {
-            exec_idx = advanceExecutionIndex(exec_idx, point_count);
+            exec_time_sec += replanner_cfg.control_cycle_sec;
             continue;
         }
 
@@ -1230,7 +1347,7 @@ int runOneMapping(const rclcpp::Node::SharedPtr& node, const std::string& mappin
             std::cerr << "[replanner_minimal] replan failed at tick " << tick
                       << " (" << mapping << "): " << error
                       << " (keep current segment)" << std::endl;
-            exec_idx = advanceExecutionIndex(exec_idx, point_count);
+            exec_time_sec += replanner_cfg.control_cycle_sec;
             continue;
         }
 
@@ -1246,7 +1363,7 @@ int runOneMapping(const rclcpp::Node::SharedPtr& node, const std::string& mappin
             tick,
             true,
             artifacts);
-        exec_idx = 0;
+        exec_time_sec = 0.0;
     }
 
     if (!reached_goal) {
