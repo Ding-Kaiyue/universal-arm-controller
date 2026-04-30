@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <memory>
 #include <vector>
 
@@ -20,16 +21,29 @@ public:
         const CartesianPath& path,
         const Eigen::Matrix3d& R_start,
         const Eigen::Matrix3d& R_goal,
-        double safe_distance
+        double hard_clearance
     ) const;
 private:
     TimedCartesianTrajectory smoothWithInterpolator(
         const TimedCartesianTrajectory& in_traj,
-        double safe_distance) const;
+        double hard_clearance) const;
+
+    std::optional<TimedCartesianTrajectory> tryMinimumSnapOptimization(
+        const TimedCartesianTrajectory& in_traj,
+        const TimedCartesianTrajectory& anchor_traj,
+        double hard_clearance) const;
+
+    TimedCartesianTrajectory buildResampledTrajectory(
+        const TimedCartesianTrajectory& source_traj,
+        const TimedCartesianTrajectory& anchor_traj) const;
+
+    CartesianWaypoint sampleWaypointAtTime(
+        const TimedCartesianTrajectory& traj,
+        double time_from_start) const;
 
     bool isTrajectoryCollisionFree(
         const TimedCartesianTrajectory& traj,
-        double safe_distance) const;
+        double hard_clearance) const;
 
     PlannerCommonConfig cfg_;
     std::shared_ptr<const DistanceFieldInterface> distance_field_;

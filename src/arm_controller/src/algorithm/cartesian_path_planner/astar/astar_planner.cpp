@@ -9,8 +9,10 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <queue>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -32,6 +34,8 @@ struct SearchDiagnostics {
     int rejected_state{0};
     int rejected_segment{0};
     int rejected_whole_body{0};
+    int rejected_whole_body_ik{0};
+    int rejected_whole_body_margin{0};
     int accepted_neighbors{0};
 };
 
@@ -118,7 +122,7 @@ bool validateTransition(
     const CartesianCollisionChecker& collision_checker,
     const double edge_step) {
     if (!collision_checker.isSegmentValid(
-            from.position, to.position, input.safe_distance, edge_step, input.forbidden_spheres)) {
+            from.position, to.position, input.hard_clearance, edge_step, input.forbidden_spheres)) {
         return false;
     }
     return true;
@@ -206,6 +210,170 @@ double corridorDeviationPenalty(
     return cfg.corridor_deviation_weight * d * d;
 }
 
+double wholeBodyMarginPenalty(
+    const PathPlanningInput::WholeBodyPoseDiagnostic& diag,
+    const AStarConfig& cfg) {
+    if (cfg.whole_body_penalty_weight <= 0.0) {
+        return 0.0;
+    }
+    if (!diag.ik_ok || !std::isfinite(diag.min_margin)) {
+        return 0.0;
+    }
+
+    const double influence_margin = std::max(1e-6, cfg.whole_body_penalty_margin);
+    const double ratio = std::abs(diag.min_margin) / influence_margin;
+    if (ratio <= 1.0) {
+        return cfg.whole_body_penalty_weight * ratio * ratio;
+    }
+    return cfg.whole_body_penalty_weight * (1.0 + 0.25 * (ratio - 1.0));
+}
+
+bool wholeBodyAwareSearchEnabled(const PathPlanningInput& input) {
+    return static_cast<bool>(
+        input.whole_body_segment_validator || input.whole_body_pose_diagnostic ||
+        input.whole_body_pose_validator);
+}
+
+PathPlanningInput::WholeBodyPoseDiagnostic makeWholeBodyFailureDiagnostic(
+    const std::string& reason,
+    const bool ik_ok) {
+    PathPlanningInput::WholeBodyPoseDiagnostic diag;
+    diag.ik_ok = ik_ok;
+    diag.collision_free = false;
+    diag.min_margin = -1.0;
+    diag.reason = reason;
+    return diag;
+}
+
+bool shouldRejectWholeBodyPose(
+    const PathPlanningInput::WholeBodyPoseDiagnostic& diag,
+    const AStarConfig& cfg) {
+    if (!diag.ik_ok) {
+        return cfg.whole_body_reject_on_ik_fail;
+    }
+    if (!diag.collision_free) {
+        return true;
+    }
+    if (std::isfinite(cfg.whole_body_hard_reject_margin) &&
+        diag.min_margin < cfg.whole_body_hard_reject_margin) {
+        return true;
+    }
+    return false;
+}
+
+void recordWholeBodyReject(
+    SearchDiagnostics& diag,
+    const PathPlanningInput::WholeBodyPoseDiagnostic& wb_diag) {
+    ++diag.rejected_whole_body;
+    if (!wb_diag.ik_ok) {
+        ++diag.rejected_whole_body_ik;
+    } else {
+        ++diag.rejected_whole_body_margin;
+    }
+}
+
+bool evaluateWholeBodyPose(
+    const CartesianWaypoint& waypoint,
+    const PathPlanningInput& input,
+    const AStarConfig& cfg,
+    const std::optional<Eigen::VectorXd>& q_seed,
+    Eigen::VectorXd* q_solution,
+    PathPlanningInput::WholeBodyPoseDiagnostic* diag_out) {
+    if (input.whole_body_pose_diagnostic) {
+        PathPlanningInput::WholeBodyPoseDiagnostic diag = input.whole_body_pose_diagnostic(
+            waypoint.position,
+            waypoint.orientation,
+            input.safe_distance,
+            q_seed);
+        if (q_solution != nullptr && diag.q_solution.size() > 0) {
+            *q_solution = diag.q_solution;
+        }
+        if (diag_out != nullptr) {
+            *diag_out = diag;
+        }
+        return !shouldRejectWholeBodyPose(diag, cfg);
+    }
+
+    if (input.whole_body_pose_validator) {
+        Eigen::VectorXd q_local;
+        if (!input.whole_body_pose_validator(
+                waypoint.position,
+                waypoint.orientation,
+                input.safe_distance,
+                q_seed,
+                q_local)) {
+            if (diag_out != nullptr) {
+                *diag_out = makeWholeBodyFailureDiagnostic("pose_validator_fail", false);
+            }
+            return false;
+        }
+        if (q_solution != nullptr) {
+            *q_solution = q_local;
+        }
+        if (diag_out != nullptr) {
+            diag_out->ik_ok = true;
+            diag_out->collision_free = true;
+            diag_out->min_margin = std::numeric_limits<double>::infinity();
+            diag_out->reason = "ok";
+            diag_out->q_solution = q_local;
+        }
+    }
+
+    return true;
+}
+
+bool validateWholeBodyEdge(
+    const CartesianWaypoint& from,
+    const CartesianWaypoint& to,
+    const PathPlanningInput& input,
+    const double edge_step,
+    const std::optional<Eigen::VectorXd>& q_seed,
+    Eigen::VectorXd* q_end,
+    PathPlanningInput::WholeBodyPoseDiagnostic* failed_diag = nullptr) {
+    if (input.whole_body_segment_validator) {
+        Eigen::VectorXd q_local;
+        PathPlanningInput::WholeBodyPoseDiagnostic failed_local;
+        if (!input.whole_body_segment_validator(
+                from,
+                to,
+                input.safe_distance,
+                q_seed,
+                q_local,
+                &failed_local)) {
+            if (failed_diag != nullptr) {
+                *failed_diag = failed_local;
+            }
+            return false;
+        }
+        if (q_end != nullptr) {
+            *q_end = q_local;
+        }
+        return true;
+    }
+
+    if (input.whole_body_pose_validator) {
+        Eigen::VectorXd q_local;
+        if (!sampledWholeBodySegmentCheck(
+                from,
+                to,
+                input.safe_distance,
+                edge_step,
+                input.whole_body_pose_validator,
+                q_seed,
+                q_local)) {
+            if (failed_diag != nullptr) {
+                *failed_diag = makeWholeBodyFailureDiagnostic("segment_pose_validator_fail", false);
+            }
+            return false;
+        }
+        if (q_end != nullptr) {
+            *q_end = q_local;
+        }
+    }
+
+    return true;
+}
+
 }  // namespace
 
 AStarPlanner::AStarPlanner(
@@ -226,24 +394,55 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
         std::cout << "[astar] failed: distance_field is null" << std::endl;
         return out;
     }
-    if (!collision_checker_.isStateValid(input.p_start, input.safe_distance, input.forbidden_spheres) ||
-        !collision_checker_.isStateValid(input.p_goal, input.safe_distance, input.forbidden_spheres)) {
-        std::cout << "[astar] failed: start/goal state invalid for safe_distance="
-                  << input.safe_distance
-                  << " start_valid="
-                  << (collision_checker_.isStateValid(
-                          input.p_start, input.safe_distance, input.forbidden_spheres) ? "true" : "false")
-                  << " goal_valid="
-                  << (collision_checker_.isStateValid(
-                          input.p_goal, input.safe_distance, input.forbidden_spheres) ? "true" : "false")
+
+    const bool start_valid =
+        collision_checker_.isStateValid(input.p_start, input.hard_clearance, input.forbidden_spheres);
+    const bool goal_valid =
+        collision_checker_.isStateValid(input.p_goal, input.hard_clearance, input.forbidden_spheres);
+    if (!start_valid || !goal_valid) {
+        std::cout << "[astar] failed: start/goal state invalid for hard_clearance="
+                  << input.hard_clearance
+                  << " start_valid=" << (start_valid ? "true" : "false")
+                  << " goal_valid=" << (goal_valid ? "true" : "false")
                   << std::endl;
         return out;
     }
 
+    const bool whole_body_aware_search = wholeBodyAwareSearchEnabled(input);
     const CartesianWaypoint start_wp{input.p_start, input.R_start};
     const CartesianWaypoint goal_wp{input.p_goal, input.R_goal};
 
-    // Fast path: if exact start->goal connection is already valid, skip lattice search.
+    std::optional<Eigen::VectorXd> start_seed = input.q_start_seed;
+    Eigen::VectorXd q_start;
+    if (whole_body_aware_search) {
+        PathPlanningInput::WholeBodyPoseDiagnostic start_diag;
+        if (!evaluateWholeBodyPose(start_wp, input, cfg_, start_seed, &q_start, &start_diag)) {
+            std::cout << "[astar] failed: start whole-body invalid reason="
+                      << (start_diag.reason.empty() ? "whole_body_fail" : start_diag.reason)
+                      << " min_margin=" << start_diag.min_margin
+                      << " ik_ok=" << (start_diag.ik_ok ? "true" : "false");
+            if (!start_diag.worst_link_name.empty()) {
+                std::cout << " worst_link=" << start_diag.worst_link_name;
+            }
+            std::cout << " worst_point=("
+                      << start_diag.worst_point_world.x() << ", "
+                      << start_diag.worst_point_world.y() << ", "
+                      << start_diag.worst_point_world.z() << ")"
+                      << " worst_distance=" << start_diag.worst_distance
+                      << " r_eff=" << start_diag.worst_effective_radius
+                      << " safe_distance=" << start_diag.safe_distance_used
+                      << " required_clearance=" << start_diag.required_clearance
+                      << " worst_gradient_norm=" << start_diag.worst_gradient_norm
+                      << " start_pose=("
+                      << start_wp.position.x() << ", "
+                      << start_wp.position.y() << ", "
+                      << start_wp.position.z() << ")"
+                      << std::endl;
+            return out;
+        }
+        start_seed = q_start;
+    }
+
     {
         Eigen::VectorXd q_goal_direct;
         if (validateTransition(
@@ -258,7 +457,15 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
                 input,
                 distance_field_,
                 cfg_.edge_check_step,
-                input.whole_body_retry_penalty_margin)) {
+                input.whole_body_retry_penalty_margin) &&
+            (!whole_body_aware_search ||
+             validateWholeBodyEdge(
+                 start_wp,
+                 goal_wp,
+                 input,
+                 cfg_.edge_check_step,
+                 start_seed,
+                 &q_goal_direct))) {
             out.success = true;
             out.path.waypoints = {start_wp, goal_wp};
             out.path.length = (input.p_goal - input.p_start).norm();
@@ -276,6 +483,13 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
     AStarNode start_node;
     start_node.index = start;
     start_node.g = 0.0;
+    if (q_start.size() > 0) {
+        start_node.q = q_start;
+        start_node.has_q = true;
+    } else if (input.q_start_seed.has_value()) {
+        start_node.q = *input.q_start_seed;
+        start_node.has_q = true;
+    }
     start_node.h = cfg_.heuristic_weight *
                    se3GridHeuristic(
                        start,
@@ -286,9 +500,6 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
     nodes[start] = start_node;
     open.push(OpenItem{start, start_node.f()});
 
-    // 6D anti-explosion strategy:
-    // - translational neighbors can be forced to axis-only in SE3 mode
-    // - optional in-place orientation neighbors (+/-1 bin)
     const auto neighbor_offsets = getPoseNeighborOffsets(
         cfg_.neighbor_mode,
         cfg_.use_se3_search && cfg_.force_axis_translation_neighbors_in_se3,
@@ -314,8 +525,9 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
         }
         const AStarNode current = current_node_it->second;
         if (current_item.f > current.f() + 1e-12) {
-            continue;  // stale queue item
+            continue;
         }
+
         ++diag.expanded_nodes;
         const CartesianWaypoint current_wp = resolveWaypoint(
             current.index, start, goal, start_wp, goal_wp, map_min_, cfg_, input.R_start);
@@ -331,8 +543,6 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
             break;
         }
 
-        // Pure geometric A* benefits a lot from line-of-sight shortcut to goal.
-        // Whole-body checking stays in the post-validation stage.
         const double dist_to_goal = (p_cur - input.p_goal).norm();
         if (validateTransition(
                 current_wp,
@@ -347,16 +557,37 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
                 distance_field_,
                 cfg_.edge_check_step,
                 cfg_.goal_shortcut_clearance_margin)) {
-            AStarNode goal_node;
-            goal_node.index = goal;
-            goal_node.g = current.g + dist_to_goal;
-            goal_node.h = 0.0;
-            goal_node.parent = current.index;
-            goal_node.has_parent = true;
-            nodes[goal] = goal_node;
-            found = true;
-            reached_goal = goal;
-            break;
+            std::optional<Eigen::VectorXd> q_seed;
+            if (current.has_q) {
+                q_seed = current.q;
+            } else if (input.q_start_seed.has_value()) {
+                q_seed = input.q_start_seed;
+            }
+
+            Eigen::VectorXd q_goal_direct;
+            if (!whole_body_aware_search ||
+                validateWholeBodyEdge(
+                    current_wp,
+                    goal_wp,
+                    input,
+                    cfg_.edge_check_step,
+                    q_seed,
+                    &q_goal_direct)) {
+                AStarNode goal_node;
+                goal_node.index = goal;
+                goal_node.g = current.g + dist_to_goal;
+                goal_node.h = 0.0;
+                goal_node.parent = current.index;
+                goal_node.has_parent = true;
+                if (q_goal_direct.size() > 0) {
+                    goal_node.q = q_goal_direct;
+                    goal_node.has_q = true;
+                }
+                nodes[goal] = goal_node;
+                found = true;
+                reached_goal = goal;
+                break;
+            }
         }
 
         for (const auto& off : neighbor_offsets) {
@@ -364,8 +595,7 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
             const bool is_inplace_rotation =
                 (off.x == 0 && off.y == 0 && off.z == 0) &&
                 (off.wx != 0 || off.wy != 0 || off.wz != 0);
-            if (is_inplace_rotation &&
-                !cfg_.use_se3_search) {
+            if (is_inplace_rotation && !cfg_.use_se3_search) {
                 continue;
             }
 
@@ -381,7 +611,7 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
                 nb, start, goal, start_wp, goal_wp, map_min_, cfg_, input.R_start);
             const Eigen::Vector3d& p_nb = next_wp.position;
             if (!collision_checker_.isStateValid(
-                    p_nb, input.safe_distance, input.forbidden_spheres)) {
+                    p_nb, input.hard_clearance, input.forbidden_spheres)) {
                 ++diag.rejected_state;
                 continue;
             }
@@ -389,7 +619,7 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
             if (!collision_checker_.isSegmentValid(
                     current_wp.position,
                     next_wp.position,
-                    input.safe_distance,
+                    input.hard_clearance,
                     cfg_.edge_check_step,
                     input.forbidden_spheres)) {
                 ++diag.rejected_segment;
@@ -404,6 +634,48 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
                     cfg_.edge_check_step)) {
                 continue;
             }
+
+            Eigen::VectorXd next_q;
+            bool has_next_q = false;
+            PathPlanningInput::WholeBodyPoseDiagnostic pose_diag;
+            if (whole_body_aware_search) {
+                std::optional<Eigen::VectorXd> q_seed;
+                if (current.has_q) {
+                    q_seed = current.q;
+                } else if (input.q_start_seed.has_value()) {
+                    q_seed = input.q_start_seed;
+                }
+                if (!evaluateWholeBodyPose(next_wp, input, cfg_, q_seed, &next_q, &pose_diag)) {
+                    recordWholeBodyReject(diag, pose_diag);
+                    continue;
+                }
+
+                PathPlanningInput::WholeBodyPoseDiagnostic edge_diag;
+                Eigen::VectorXd q_edge_end;
+                if (!validateWholeBodyEdge(
+                        current_wp,
+                        next_wp,
+                        input,
+                        cfg_.edge_check_step,
+                        q_seed,
+                        &q_edge_end,
+                        &edge_diag)) {
+                    if (edge_diag.reason.empty()) {
+                        edge_diag = makeWholeBodyFailureDiagnostic("segment_validator_fail", false);
+                    }
+                    recordWholeBodyReject(diag, edge_diag);
+                    continue;
+                }
+
+                if (q_edge_end.size() > 0) {
+                    next_q = q_edge_end;
+                }
+                has_next_q = next_q.size() > 0;
+            } else if (current.has_q) {
+                next_q = current.q;
+                has_next_q = true;
+            }
+
             ++diag.accepted_neighbors;
 
             const double trans_cost = (p_nb - p_cur).norm();
@@ -416,8 +688,10 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
                                    clearance_evaluator_.obstaclePenalty(p_nb, input.safe_distance);
             const double retry_penalty = forbiddenSpherePenalty(p_nb, input);
             const double corridor_penalty = corridorDeviationPenalty(p_nb, input, cfg_);
-            const double new_g =
-                current.g + trans_cost + rot_cost + penalty + retry_penalty + corridor_penalty;
+            const double whole_body_penalty =
+                whole_body_aware_search ? wholeBodyMarginPenalty(pose_diag, cfg_) : 0.0;
+            const double new_g = current.g + trans_cost + rot_cost + penalty + retry_penalty +
+                                 corridor_penalty + whole_body_penalty;
 
             auto it = nodes.find(nb);
             if (it == nodes.end() || new_g < it->second.g) {
@@ -433,6 +707,10 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
                              cfg_.orientation_heuristic_weight);
                 node.parent = current.index;
                 node.has_parent = true;
+                if (has_next_q) {
+                    node.q = next_q;
+                    node.has_q = true;
+                }
                 nodes[nb] = node;
                 open.push(OpenItem{nb, node.f()});
             }
@@ -445,6 +723,8 @@ PathPlanningOutput AStarPlanner::plan(const PathPlanningInput& input) {
                   << " reject_state=" << diag.rejected_state
                   << " reject_segment=" << diag.rejected_segment
                   << " reject_whole_body=" << diag.rejected_whole_body
+                  << " reject_whole_body_ik=" << diag.rejected_whole_body_ik
+                  << " reject_whole_body_margin=" << diag.rejected_whole_body_margin
                   << " accepted=" << diag.accepted_neighbors
                   << " iterations=" << iterations
                   << std::endl;

@@ -19,13 +19,24 @@ hardware:
       # 4) 也支持 radii: [rx, ry, rz]，用于椭球体（推荐）
       # 5) 下述参数按 dual_arm620.urdf 的关节原点与惯性中心写入
       collision_spheres:
-        # 椭球长轴沿 link 主方向，短轴垂直 link，减少重叠
-        - {link_name: "left_Link1", center: [0.007, 0.000, 0.048], radii: [0.024, 0.024, 0.040]}
-        - {link_name: "left_Link2", center: [0.000, 0.170, -0.002], radii: [0.025, 0.135, 0.025]}
-        - {link_name: "left_Link3", center: [0.000, -0.082, 0.007], radii: [0.024, 0.072, 0.024]}
-        - {link_name: "left_Link4", center: [0.004, 0.000, 0.043], radii: [0.022, 0.022, 0.036]}
-        - {link_name: "left_Link5", center: [0.008, 0.058, 0.000], radii: [0.022, 0.050, 0.022]}
-        - {link_name: "left_Link6", center: [-0.002, 0.000, 0.011], radii: [0.020, 0.020, 0.030]}
+        # Mesh-driven segmented ellipsoids. Long links are split into shorter
+        # pieces to better follow the STL envelope and reduce false clearance
+        # penalties from a single oversized support radius.
+        - {link_name: "left_Link1", center: [0.004, 0.000, 0.037], radii: [0.036, 0.033, 0.025], debug_name: "ellipsoid_left_Link1_0"}
+        - {link_name: "left_Link1", center: [0.004, 0.000, 0.088], radii: [0.037, 0.033, 0.025], debug_name: "ellipsoid_left_Link1_1"}
+        - {link_name: "left_Link2", center: [0.000, 0.004, 0.000], radii: [0.035, 0.048, 0.049], debug_name: "ellipsoid_left_Link2_0"}
+        - {link_name: "left_Link2", center: [0.000, 0.099, 0.001], radii: [0.035, 0.048, 0.040], debug_name: "ellipsoid_left_Link2_1"}
+        - {link_name: "left_Link2", center: [0.000, 0.200, 0.000], radii: [0.027, 0.048, 0.033], debug_name: "ellipsoid_left_Link2_2"}
+        - {link_name: "left_Link2", center: [0.000, 0.292, 0.001], radii: [0.032, 0.048, 0.043], debug_name: "ellipsoid_left_Link2_3"}
+        - {link_name: "left_Link3", center: [0.000, -0.137, 0.000], radii: [0.022, 0.025, 0.022], debug_name: "ellipsoid_left_Link3_0"}
+        - {link_name: "left_Link3", center: [0.000, -0.087, 0.001], radii: [0.026, 0.025, 0.027], debug_name: "ellipsoid_left_Link3_1"}
+        - {link_name: "left_Link3", center: [0.000, -0.036, 0.006], radii: [0.030, 0.025, 0.042], debug_name: "ellipsoid_left_Link3_2"}
+        - {link_name: "left_Link3", center: [0.000, 0.015, 0.040], radii: [0.033, 0.025, 0.010], debug_name: "ellipsoid_left_Link3_3"}
+        - {link_name: "left_Link4", center: [0.002, 0.000, 0.024], radii: [0.034, 0.024, 0.023], debug_name: "ellipsoid_left_Link4_0"}
+        - {link_name: "left_Link4", center: [0.002, 0.000, 0.070], radii: [0.035, 0.024, 0.023], debug_name: "ellipsoid_left_Link4_1"}
+        - {link_name: "left_Link5", center: [0.006, 0.004, 0.000], radii: [0.038, 0.033, 0.026], debug_name: "ellipsoid_left_Link5_0"}
+        - {link_name: "left_Link5", center: [0.006, 0.070, 0.000], radii: [0.031, 0.033, 0.025], debug_name: "ellipsoid_left_Link5_1"}
+        - {link_name: "left_Link6", center: [0.000, 0.000, 0.011], radii: [0.033, 0.033, 0.010], debug_name: "ellipsoid_left_Link6_0"}
 
   right_arm:
       robot_type: "dual_arm620"
@@ -38,12 +49,21 @@ hardware:
       initial_position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # 初始位置
       start_position: [0.0, 0.5236, 0.7854, 0.0, -0.5236, 0.0]  # 启动位置
       collision_spheres:
-        - {link_name: "right_Link1", center: [0.007, 0.000, 0.048], radii: [0.024, 0.024, 0.040]}
-        - {link_name: "right_Link2", center: [0.000, 0.170, -0.002], radii: [0.025, 0.135, 0.025]}
-        - {link_name: "right_Link3", center: [0.000, -0.082, 0.007], radii: [0.024, 0.072, 0.024]}
-        - {link_name: "right_Link4", center: [0.004, 0.000, 0.043], radii: [0.022, 0.022, 0.036]}
-        - {link_name: "right_Link5", center: [0.008, 0.058, 0.000], radii: [0.022, 0.050, 0.022]}
-        - {link_name: "right_Link6", center: [-0.002, 0.000, 0.011], radii: [0.020, 0.020, 0.030]}
+        - {link_name: "right_Link1", center: [0.004, 0.000, 0.037], radii: [0.036, 0.033, 0.025], debug_name: "ellipsoid_right_Link1_0"}
+        - {link_name: "right_Link1", center: [0.004, 0.000, 0.088], radii: [0.037, 0.033, 0.025], debug_name: "ellipsoid_right_Link1_1"}
+        - {link_name: "right_Link2", center: [0.000, 0.004, 0.000], radii: [0.035, 0.048, 0.049], debug_name: "ellipsoid_right_Link2_0"}
+        - {link_name: "right_Link2", center: [0.000, 0.099, 0.001], radii: [0.035, 0.048, 0.040], debug_name: "ellipsoid_right_Link2_1"}
+        - {link_name: "right_Link2", center: [0.000, 0.200, 0.000], radii: [0.027, 0.048, 0.033], debug_name: "ellipsoid_right_Link2_2"}
+        - {link_name: "right_Link2", center: [0.000, 0.292, 0.001], radii: [0.032, 0.048, 0.043], debug_name: "ellipsoid_right_Link2_3"}
+        - {link_name: "right_Link3", center: [0.000, -0.137, 0.000], radii: [0.022, 0.025, 0.022], debug_name: "ellipsoid_right_Link3_0"}
+        - {link_name: "right_Link3", center: [0.000, -0.087, 0.001], radii: [0.026, 0.025, 0.027], debug_name: "ellipsoid_right_Link3_1"}
+        - {link_name: "right_Link3", center: [0.000, -0.036, 0.006], radii: [0.030, 0.025, 0.042], debug_name: "ellipsoid_right_Link3_2"}
+        - {link_name: "right_Link3", center: [0.000, 0.015, 0.040], radii: [0.033, 0.025, 0.010], debug_name: "ellipsoid_right_Link3_3"}
+        - {link_name: "right_Link4", center: [0.002, 0.000, 0.024], radii: [0.034, 0.024, 0.023], debug_name: "ellipsoid_right_Link4_0"}
+        - {link_name: "right_Link4", center: [0.002, 0.000, 0.070], radii: [0.035, 0.024, 0.023], debug_name: "ellipsoid_right_Link4_1"}
+        - {link_name: "right_Link5", center: [0.006, 0.004, 0.000], radii: [0.038, 0.033, 0.026], debug_name: "ellipsoid_right_Link5_0"}
+        - {link_name: "right_Link5", center: [0.006, 0.070, 0.000], radii: [0.031, 0.033, 0.025], debug_name: "ellipsoid_right_Link5_1"}
+        - {link_name: "right_Link6", center: [0.000, 0.000, 0.011], radii: [0.033, 0.033, 0.010], debug_name: "ellipsoid_right_Link6_0"}
 
   # left_gripper:
   #     robot_type: "dual_arm_with_omnipicker_humanoid"

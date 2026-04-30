@@ -9,6 +9,10 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <exec_depend>arm_controller</exec_depend>
+  <exec_depend>camera_driver</exec_depend>
+  <exec_depend>trajectory_planning_bringup</exec_depend>
+
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 

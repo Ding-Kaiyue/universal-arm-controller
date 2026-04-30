@@ -12,6 +12,7 @@
 
 #include <Eigen/Core>
 #include <geometry_msgs/msg/pose.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 #include "algorithm/neo/joint_preference_loader.hpp"
 #include "algorithm/neo/manipulability_gradient.hpp"
@@ -20,6 +21,8 @@
 #include "algorithm/neo/reactive_qp_solver.hpp"
 #include "algorithm/neo/task_velocity_generator.hpp"
 #include "algorithm/cartesian_path_planner/core/cartesian_path_planner.hpp"
+#include "algorithm/cartesian_path_planner/map/camera_driver_esdf_map_client.hpp"
+#include "algorithm/cartesian_path_planner/map/camera_driver_pointcloud_map_adapter.hpp"
 #include "algorithm/cartesian_path_planner/replanning/replanner_manager.hpp"
 #include "algorithm/cartesian_path_planner/map/distance_field_interface.hpp"
 #include "arm_controller/kinematics/forward_kinematics.hpp"
@@ -45,11 +48,19 @@ public:
         arm_controller::algorithm::cartesian_path_planner::AStarConfig planner_astar;
         arm_controller::algorithm::cartesian_path_planner::SmoothingConfig planner_smoothing;
         double request_safe_distance{0.03};
+        double request_hard_clearance{0.0};
         double request_goal_tolerance{0.03};
         Eigen::Vector3d map_margin_xyz{0.60, 0.60, 0.60};
+        std::string map_source{"dummy"};
+        arm_controller::algorithm::cartesian_path_planner::CameraDriverPointcloudMapAdapter::Config
+            camera_driver_pointcloud;
+        arm_controller::algorithm::cartesian_path_planner::CameraDriverEsdfMapClient::Config
+            camera_driver_esdf;
         bool whole_body_postcheck_non_blocking{false};
         int whole_body_postcheck_max_attempts{5};
         double whole_body_retry_forbidden_radius{0.045};
+        double whole_body_retry_pushout_distance{0.02};
+        double whole_body_segment_check_step_m{0.10};
         bool enable_dummy_obstacle{false};
         double dummy_obstacle_radius{0.035};
         Eigen::Vector3d dummy_obstacle_center_left_arm{0.25, -0.52, 0.60};
@@ -95,6 +106,7 @@ private:
 
     bool loadReactiveConfig();
     bool initializeMappingContext(const std::string& mapping, std::string* error);
+    void ensureCameraDriverDistanceFieldInitialized();
 
     std::shared_ptr<arm_controller::algorithm::cartesian_path_planner::CartesianPathPlanner>
     buildPlanner(
@@ -102,6 +114,17 @@ private:
         const Eigen::Vector3d& map_min) const;
 
     bool send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities) const;
+    void publishWholeBodyPostcheckFailureMarker(
+        const std::string& mapping,
+        const arm_controller::algorithm::cartesian_path_planner::PathPlanningInput::WholeBodyPostcheckFailureEvent& event,
+        const std::shared_ptr<const arm_controller::algorithm::cartesian_path_planner::DistanceFieldInterface>& map,
+        const MappingContext& ctx);
+    void clearWholeBodyPostcheckFailureMarker(const std::string& mapping);
+    void publishCollisionEllipsoidMarkers(
+        const std::string& mapping,
+        const Eigen::VectorXd& q_current,
+        const MappingContext& ctx);
+    void clearCollisionEllipsoidMarkers(const std::string& mapping);
 
 private:
     std::shared_ptr<HardwareManager> hardware_manager_;
@@ -113,6 +136,18 @@ private:
     bool reactive_cfg_loaded_{false};
     ControllerRuntimeConfig runtime_cfg_;
 
+    std::mutex live_distance_field_mutex_;
+    std::shared_ptr<arm_controller::algorithm::cartesian_path_planner::CameraDriverPointcloudMapAdapter>
+        camera_driver_pointcloud_map_;
+    std::shared_ptr<arm_controller::algorithm::cartesian_path_planner::CameraDriverEsdfMapClient>
+        camera_driver_esdf_map_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+        whole_body_postcheck_marker_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+        collision_ellipsoid_marker_pub_;
+    std::mutex collision_ellipsoid_marker_mutex_;
+    std::map<std::string, std::size_t> collision_ellipsoid_marker_counts_;
+
     std::map<std::string, bool> last_execution_success_;
 
     std::unique_ptr<std::thread> queue_consumer_;
@@ -123,4 +158,5 @@ private:
     std::queue<PlanningTask> planning_queue_;
     std::mutex planning_queue_mutex_;
     std::condition_variable planning_queue_cv_;
+    rclcpp::TimerBase::SharedPtr collision_ellipsoid_marker_timer_;
 };

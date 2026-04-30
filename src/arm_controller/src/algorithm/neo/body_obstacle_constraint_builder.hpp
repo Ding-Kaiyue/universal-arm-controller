@@ -3,7 +3,6 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
-#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -40,12 +39,6 @@ class BodyObstacleConstraintBuilder {
 public:
     using DistanceFieldInterface =
         arm_controller::algorithm::cartesian_path_planner::DistanceFieldInterface;
-    using DistanceQueryFn = std::function<DistanceQueryResult(const Eigen::Vector3d&)>;
-
-    // Adapter: reuse cartesian_path_planner distance field (ESDF-like API)
-    // as the obstacle query source for NEO whole-body sphere constraints.
-    static DistanceQueryFn makeDistanceQueryFromField(
-        std::shared_ptr<const DistanceFieldInterface> distance_field);
 
     // Build obstacle CBF inputs for all link spheres:
     //   h_i(q) = d_esdf(p_i(q)) - r_i - safety_distance >= 0
@@ -58,7 +51,7 @@ public:
         const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
         const std::vector<LinkCollisionSphere>& link_spheres,
         const arm_controller::kinematics::JacobianProvider& jacobian_provider,
-        const DistanceQueryFn& distance_query,
+        std::shared_ptr<const DistanceFieldInterface> distance_field,
         std::vector<ObstacleConstraintInput>& out_constraints,
         std::string* error = nullptr);
 
@@ -72,7 +65,7 @@ public:
         const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
         const std::vector<LinkCollisionEllipsoid>& link_ellipsoids,
         const arm_controller::kinematics::JacobianProvider& jacobian_provider,
-        const DistanceQueryFn& distance_query,
+        std::shared_ptr<const DistanceFieldInterface> distance_field,
         std::vector<ObstacleConstraintInput>& out_constraints,
         std::string* error = nullptr);
 };

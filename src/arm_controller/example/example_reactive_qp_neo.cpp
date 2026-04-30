@@ -449,15 +449,13 @@ int main(int argc, char** argv) {
             rclcpp::shutdown();
             return 1;
         }
-        const auto distance_query =
-            rq::BodyObstacleConstraintBuilder::makeDistanceQueryFromField(distance_field);
         std::string obstacle_error;
         const int generated = rq::BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
             q_current,
             fk_out.link_poses,
             link_ellipsoids,
             *jacobian_provider,
-            distance_query,
+            distance_field,
             qp_input.obstacle_constraints,
             &obstacle_error);
 

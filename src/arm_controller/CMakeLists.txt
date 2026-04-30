@@ -59,6 +59,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(control_msgs REQUIRED)
@@ -138,6 +139,8 @@ add_library(arm_controller_lib
   src/algorithm/cartesian_path_planner/core/cartesian_path_planner.cpp
   src/algorithm/cartesian_path_planner/core/trajectory_parameterizer.cpp
   src/algorithm/cartesian_path_planner/map/dummy_distance_field.cpp
+  src/algorithm/cartesian_path_planner/map/camera_driver_pointcloud_map_adapter.cpp
+  src/algorithm/cartesian_path_planner/map/camera_driver_esdf_map_client.cpp
   src/algorithm/cartesian_path_planner/replanning/replanner_manager.cpp
   src/algorithm/cartesian_path_planner/smoothing/shortcut_smoother.cpp
   src/algorithm/cartesian_path_planner/sampling/reference_sampler.cpp
@@ -208,6 +211,7 @@ ament_target_dependencies(arm_controller_lib
   rclcpp_action
   std_msgs
   sensor_msgs
+  visualization_msgs
   trajectory_msgs
   control_msgs
   geometry_msgs

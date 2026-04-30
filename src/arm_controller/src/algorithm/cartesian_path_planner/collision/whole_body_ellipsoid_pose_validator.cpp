@@ -3,11 +3,20 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iostream>
 #include <limits>
+#include <sstream>
 
 namespace arm_controller::algorithm::cartesian_path_planner {
 
 namespace {
+
+constexpr double kGradientNormEps = 1e-9;
+constexpr double kJointSegmentStepRad = 0.10;
+
+Eigen::Vector3d rotationToRpyDeg(const Eigen::Matrix3d& R) {
+    return R.eulerAngles(0, 1, 2) * (180.0 / M_PI);
+}
 
 double effectiveEllipsoidRadiusAlongNormal(
     const Eigen::Matrix3d& R_world_link,
@@ -19,6 +28,10 @@ double effectiveEllipsoidRadiusAlongNormal(
     const double z = radii_link.z() * n_link.z();
     const double v = x * x + y * y + z * z;
     return (v > 0.0) ? std::sqrt(v) : 0.0;
+}
+
+double conservativeEllipsoidRadius(const Eigen::Vector3d& radii_link) {
+    return radii_link.maxCoeff();
 }
 
 }  // namespace
@@ -62,8 +75,9 @@ bool WholeBodyEllipsoidPoseValidator::validatePose(
     const double safe_distance,
     const std::optional<Eigen::VectorXd>& q_seed,
     Eigen::VectorXd& q_solution) const {
+    const bool use_cache = shouldUseSeedAgnosticCache(q_seed);
     const PoseCacheKey cache_key = makePoseCacheKey(p_target, R_target, safe_distance);
-    if (lookupPoseCache(cache_key, q_solution)) {
+    if (use_cache && lookupPoseCache(cache_key, q_solution)) {
         return true;
     }
     if (!solveIk(p_target, R_target, q_seed, q_solution)) {
@@ -72,7 +86,9 @@ bool WholeBodyEllipsoidPoseValidator::validatePose(
     if (!isWholeBodyCollisionFree(q_solution, safe_distance)) {
         return false;
     }
-    storePoseCache(cache_key, q_solution);
+    if (use_cache) {
+        storePoseCache(cache_key, q_solution);
+    }
     return true;
 }
 
@@ -81,34 +97,145 @@ bool WholeBodyEllipsoidPoseValidator::validateSegment(
     const CartesianWaypoint& to,
     const double safe_distance,
     const std::optional<Eigen::VectorXd>& q_seed,
-    Eigen::VectorXd& q_end) const {
+    Eigen::VectorXd& q_end,
+    PoseDiagnostic* failed_diag) const {
+    const bool use_cache = shouldUseSeedAgnosticCache(q_seed);
     const SegmentCacheKey cache_key = makeSegmentCacheKey(from, to, safe_distance);
-    if (lookupSegmentCache(cache_key, q_end)) {
+    if (use_cache && lookupSegmentCache(cache_key, q_end)) {
         return true;
     }
 
-    const double dist = (to.position - from.position).norm();
-    const int steps =
-        std::max(cfg_.segment_substeps_min, static_cast<int>(std::ceil(dist / 0.03)));
-    std::optional<Eigen::VectorXd> q_prev = q_seed;
-
-    const Eigen::Quaterniond q0(from.orientation);
-    const Eigen::Quaterniond q1(to.orientation);
-    for (int i = 1; i <= steps; ++i) {
-        const double t = static_cast<double>(i) / static_cast<double>(steps);
-        const Eigen::Vector3d p = (1.0 - t) * from.position + t * to.position;
-        const Eigen::Matrix3d R = q0.slerp(t, q1).normalized().toRotationMatrix();
-        Eigen::VectorXd q_i;
-        if (!validatePose(p, R, safe_distance, q_prev, q_i)) {
-            return false;
+    const Eigen::Quaterniond R_from_q(from.orientation);
+    const Eigen::Quaterniond R_to_q(to.orientation);
+    auto interpolatePose = [&](const double t) {
+        CartesianWaypoint pose;
+        pose.position = (1.0 - t) * from.position + t * to.position;
+        pose.orientation = R_from_q.slerp(t, R_to_q).normalized().toRotationMatrix();
+        return pose;
+    };
+    auto failSegment = [&](PoseDiagnostic diag,
+                           const int step_index,
+                           const int total_steps,
+                           const double t,
+                           const CartesianWaypoint& fallback_pose) {
+        diag.has_failed_pose = true;
+        diag.failed_on_segment_sample = true;
+        diag.failed_segment_t = t;
+        if (!diag.failed_pose_world.allFinite()) {
+            diag.failed_pose_world = fallback_pose.position;
         }
-        q_prev = q_i;
-    }
-    if (!q_prev.has_value()) {
+        if (!diag.failed_pose_orientation.allFinite()) {
+            diag.failed_pose_orientation = fallback_pose.orientation;
+        }
+        if (failed_diag != nullptr) {
+            *failed_diag = diag;
+        }
+
+        const bool has_actual_pose =
+            diag.reason != "invalid_q" && diag.reason != "invalid_validator" &&
+            diag.reason != "fk_fail" && diag.failed_pose_world.allFinite() &&
+            diag.failed_pose_orientation.allFinite();
+        const Eigen::Vector3d pose =
+            has_actual_pose ? diag.failed_pose_world : fallback_pose.position;
+        const Eigen::Matrix3d orientation =
+            has_actual_pose ? diag.failed_pose_orientation : fallback_pose.orientation;
+        const Eigen::Vector3d rpy_deg = rotationToRpyDeg(orientation);
+        std::ostringstream oss;
+        oss << "[segment_validator] step " << step_index << " / " << total_steps
+            << " t=" << t
+            << " pose=(" << pose.x() << ", " << pose.y() << ", " << pose.z() << ")"
+            << " rpy_deg=(" << rpy_deg.x() << ", " << rpy_deg.y() << ", " << rpy_deg.z() << ")";
+        if (!diag.ik_ok) {
+            oss << " reason=ik_fail";
+        } else if (!diag.collision_free) {
+            oss << " reason=" << (diag.reason.empty() ? "collision_fail" : diag.reason)
+                << " min_margin=" << diag.min_margin;
+            if (!diag.worst_link_name.empty()) {
+                oss << " worst_link=" << diag.worst_link_name;
+            }
+            oss << " worst_point=("
+                << diag.worst_point_world.x() << ", "
+                << diag.worst_point_world.y() << ", "
+                << diag.worst_point_world.z() << ")"
+                << " worst_distance=" << diag.worst_distance
+                << " r_eff=" << diag.worst_effective_radius
+                << " safe_distance=" << diag.safe_distance_used
+                << " required_clearance=" << diag.required_clearance
+                << " worst_gradient_norm=" << diag.worst_gradient_norm;
+        } else {
+            oss << " reason=segment_fail";
+        }
+        std::cout << oss.str() << std::endl;
         return false;
+    };
+
+    Eigen::VectorXd q_from;
+    if (q_seed.has_value() && q_seed->size() > 0) {
+        q_from = *q_seed;
+        PoseDiagnostic start_diag = diagnoseConfiguration(q_from, safe_distance);
+        if (!start_diag.collision_free) {
+            start_diag.failed_pose_world = from.position;
+            start_diag.failed_pose_orientation = from.orientation;
+            return failSegment(start_diag, 0, 1, 0.0, from);
+        }
+    } else {
+        PoseDiagnostic start_diag =
+            diagnosePose(from.position, from.orientation, safe_distance, q_seed);
+        if (!start_diag.ik_ok || !start_diag.collision_free) {
+            start_diag.failed_pose_world = from.position;
+            start_diag.failed_pose_orientation = from.orientation;
+            return failSegment(start_diag, 0, 1, 0.0, from);
+        }
+        q_from = start_diag.q_solution;
     }
-    q_end = *q_prev;
-    storeSegmentCache(cache_key, q_end);
+
+    IkSolveDiagnostic ik_diag;
+    Eigen::VectorXd q_to;
+    if (!solveIk(to.position, to.orientation, q_from, q_to, &ik_diag)) {
+        PoseDiagnostic diag;
+        diag.ik_ok = false;
+        diag.external_ik_ok = ik_diag.external_ik_ok;
+        diag.fallback_ik_used = ik_diag.fallback_ik_used;
+        diag.collision_free = false;
+        diag.min_margin = -1.0;
+        diag.reason = "ik_fail";
+        diag.failed_pose_world = to.position;
+        diag.failed_pose_orientation = to.orientation;
+        return failSegment(diag, 1, 1, 1.0, to);
+    }
+
+    PoseDiagnostic goal_diag = diagnoseConfiguration(q_to, safe_distance);
+    goal_diag.ik_ok = true;
+    goal_diag.external_ik_ok = ik_diag.external_ik_ok;
+    goal_diag.fallback_ik_used = ik_diag.fallback_ik_used;
+    goal_diag.q_solution = q_to;
+    if (!goal_diag.collision_free) {
+        return failSegment(goal_diag, 1, 1, 1.0, to);
+    }
+
+    const double cartesian_dist = (to.position - from.position).norm();
+    const double check_step_m = std::max(1e-3, cfg_.segment_check_step_m);
+    const int cartesian_steps =
+        std::max(cfg_.segment_substeps_min, static_cast<int>(std::ceil(cartesian_dist / check_step_m)));
+    const double max_joint_delta =
+        (q_to.size() == q_from.size()) ? (q_to - q_from).cwiseAbs().maxCoeff() : 0.0;
+    const int joint_steps = std::max(1, static_cast<int>(std::ceil(max_joint_delta / kJointSegmentStepRad)));
+    const int steps = std::max(cartesian_steps, joint_steps);
+
+    for (int i = 1; i < steps; ++i) {
+        const double t = static_cast<double>(i) / static_cast<double>(steps);
+        const Eigen::VectorXd q_interp = (1.0 - t) * q_from + t * q_to;
+        PoseDiagnostic diag = diagnoseConfiguration(q_interp, safe_distance);
+        diag.q_solution = q_interp;
+        if (!diag.collision_free) {
+            return failSegment(diag, i, steps, t, interpolatePose(t));
+        }
+    }
+
+    q_end = q_to;
+    if (use_cache) {
+        storeSegmentCache(cache_key, q_end);
+    }
     return true;
 }
 
@@ -134,77 +261,37 @@ WholeBodyEllipsoidPoseValidator::diagnosePose(
     diag.ik_ok = true;
     diag.external_ik_ok = ik_diag.external_ik_ok;
     diag.fallback_ik_used = ik_diag.fallback_ik_used;
+    PoseDiagnostic q_diag = diagnoseConfiguration(diag.q_solution, safe_distance);
+    q_diag.ik_ok = true;
+    q_diag.external_ik_ok = ik_diag.external_ik_ok;
+    q_diag.fallback_ik_used = ik_diag.fallback_ik_used;
+    q_diag.q_solution = diag.q_solution;
+    return q_diag;
+}
 
-    if (!distance_field_ || !fk_provider_) {
-        diag.collision_free = false;
-        diag.min_margin = -1.0;
-        diag.reason = "invalid_validator";
-        return diag;
-    }
-
-    arm_controller::kinematics::ForwardKinematicsOutput fk_out;
-    if (!fk_provider_->compute(diag.q_solution, fk_out)) {
-        diag.collision_free = false;
-        diag.min_margin = -1.0;
-        diag.reason = "fk_fail";
-        return diag;
-    }
-
-    diag.collision_free = true;
-    diag.min_margin = std::numeric_limits<double>::infinity();
-    diag.reason = "ok";
-    for (const auto& e : link_ellipsoids_) {
-        const auto it = fk_out.link_poses.find(e.link_name);
-        if (it == fk_out.link_poses.end()) {
-            continue;
-        }
-        const Eigen::Isometry3d& T_world_link = it->second;
-        const Eigen::Vector3d p_world = T_world_link * e.center_in_link;
-        if (!distance_field_->isInsideMap(p_world)) {
-            diag.collision_free = false;
-            diag.min_margin = -1.0;
-            diag.reason = "out_of_map";
-            diag.worst_link_name = e.debug_name.empty() ? e.link_name : e.debug_name;
-            return diag;
-        }
-        const double d = distance_field_->getDistance(p_world);
-        Eigen::Vector3d n_world = distance_field_->getGradient(p_world);
-        if (!std::isfinite(d) || !n_world.allFinite()) {
-            diag.collision_free = false;
-            diag.min_margin = -1.0;
-            diag.reason = "invalid_distance_field";
-            diag.worst_link_name = e.debug_name.empty() ? e.link_name : e.debug_name;
-            return diag;
-        }
-        const double gn = n_world.norm();
-        if (gn < 1e-9) {
-            diag.collision_free = false;
-            diag.min_margin = -1.0;
-            diag.reason = "invalid_gradient";
-            diag.worst_link_name = e.debug_name.empty() ? e.link_name : e.debug_name;
-            return diag;
-        }
-        n_world /= gn;
-        const double r_eff =
-            effectiveEllipsoidRadiusAlongNormal(T_world_link.linear(), e.radii, n_world);
-        const double margin = d - (safe_distance + r_eff);
-        if (margin < diag.min_margin) {
-            diag.min_margin = margin;
-            diag.worst_link_name = e.debug_name.empty() ? e.link_name : e.debug_name;
-        }
-        if (margin < cfg_.collision_blocking_margin_m) {
-            diag.collision_free = false;
-            diag.reason = "collision_fail";
-        }
-    }
-
-    if (!std::isfinite(diag.min_margin)) {
-        diag.min_margin = -1.0;
-        if (diag.reason == "ok") {
-            diag.reason = "no_ellipsoids";
-        }
-    }
-    return diag;
+void WholeBodyEllipsoidPoseValidator::fillPlanningDiagnostic(
+    const PoseDiagnostic& in,
+    PathPlanningInput::WholeBodyPoseDiagnostic& out) {
+    out.ik_ok = in.ik_ok;
+    out.external_ik_ok = in.external_ik_ok;
+    out.fallback_ik_used = in.fallback_ik_used;
+    out.collision_free = in.collision_free;
+    out.min_margin = in.min_margin;
+    out.reason = in.reason;
+    out.worst_link_name = in.worst_link_name;
+    out.worst_point_world = in.worst_point_world;
+    out.worst_distance = in.worst_distance;
+    out.worst_effective_radius = in.worst_effective_radius;
+    out.required_clearance = in.required_clearance;
+    out.safe_distance_used = in.safe_distance_used;
+    out.worst_gradient_norm = in.worst_gradient_norm;
+    out.worst_gradient_world = in.worst_gradient_world;
+    out.has_failed_pose = in.has_failed_pose;
+    out.failed_on_segment_sample = in.failed_on_segment_sample;
+    out.failed_segment_t = in.failed_segment_t;
+    out.failed_pose_world = in.failed_pose_world;
+    out.failed_pose_orientation = in.failed_pose_orientation;
+    out.q_solution = in.q_solution;
 }
 
 PathPlanningInput::WholeBodyPoseValidatorFn
@@ -226,8 +313,15 @@ WholeBodyEllipsoidPoseValidator::makeSegmentValidatorFn() const {
                const CartesianWaypoint& to,
                const double safe_distance,
                const std::optional<Eigen::VectorXd>& q_seed,
-               Eigen::VectorXd& q_end) {
-        return this->validateSegment(from, to, safe_distance, q_seed, q_end);
+               Eigen::VectorXd& q_end,
+               PathPlanningInput::WholeBodyPoseDiagnostic* failed_diag) {
+        PoseDiagnostic diag;
+        const bool ok = this->validateSegment(
+            from, to, safe_distance, q_seed, q_end, failed_diag != nullptr ? &diag : nullptr);
+        if (!ok && failed_diag != nullptr) {
+            fillPlanningDiagnostic(diag, *failed_diag);
+        }
+        return ok;
     };
 }
 
@@ -240,14 +334,7 @@ WholeBodyEllipsoidPoseValidator::makePoseDiagnosticFn() const {
                const std::optional<Eigen::VectorXd>& q_seed) {
         const PoseDiagnostic diag = this->diagnosePose(p, R, safe_distance, q_seed);
         PathPlanningInput::WholeBodyPoseDiagnostic out;
-        out.ik_ok = diag.ik_ok;
-        out.external_ik_ok = diag.external_ik_ok;
-        out.fallback_ik_used = diag.fallback_ik_used;
-        out.collision_free = diag.collision_free;
-        out.min_margin = diag.min_margin;
-        out.reason = diag.reason;
-        out.worst_link_name = diag.worst_link_name;
-        out.q_solution = diag.q_solution;
+        fillPlanningDiagnostic(diag, out);
         return out;
     };
 }
@@ -274,16 +361,49 @@ bool WholeBodyEllipsoidPoseValidator::solveIk(
     return false;
 }
 
-bool WholeBodyEllipsoidPoseValidator::isWholeBodyCollisionFree(
+WholeBodyEllipsoidPoseValidator::PoseDiagnostic
+WholeBodyEllipsoidPoseValidator::diagnoseConfiguration(
     const Eigen::VectorXd& q,
     const double safe_distance) const {
-    if (!distance_field_ || !fk_provider_) {
-        return false;
+    PoseDiagnostic diag;
+    diag.ik_ok = true;
+    diag.external_ik_ok = true;
+    diag.collision_free = true;
+    diag.min_margin = std::numeric_limits<double>::infinity();
+    diag.safe_distance_used = safe_distance;
+    diag.reason = "ok";
+    diag.q_solution = q;
+
+    if (q.size() == 0 || !q.allFinite()) {
+        diag.collision_free = false;
+        diag.min_margin = -1.0;
+        diag.reason = "invalid_q";
+        return diag;
     }
+    if (!distance_field_ || !fk_provider_) {
+        diag.collision_free = false;
+        diag.min_margin = -1.0;
+        diag.reason = "invalid_validator";
+        return diag;
+    }
+
     arm_controller::kinematics::ForwardKinematicsOutput fk_out;
     if (!fk_provider_->compute(q, fk_out)) {
-        return false;
+        diag.collision_free = false;
+        diag.min_margin = -1.0;
+        diag.reason = "fk_fail";
+        return diag;
     }
+
+    diag.failed_pose_world = fk_out.ee_position;
+    diag.failed_pose_orientation = fk_out.ee_rotation;
+
+    std::vector<Eigen::Vector3d> query_points;
+    std::vector<const LinkCollisionEllipsoid*> query_ellipsoids;
+    std::vector<const Eigen::Isometry3d*> query_link_poses;
+    query_points.reserve(link_ellipsoids_.size());
+    query_ellipsoids.reserve(link_ellipsoids_.size());
+    query_link_poses.reserve(link_ellipsoids_.size());
 
     for (const auto& e : link_ellipsoids_) {
         const auto it = fk_out.link_poses.find(e.link_name);
@@ -291,27 +411,81 @@ bool WholeBodyEllipsoidPoseValidator::isWholeBodyCollisionFree(
             continue;
         }
         const Eigen::Isometry3d& T_world_link = it->second;
-        const Eigen::Vector3d p_world = T_world_link * e.center_in_link;
-        if (!distance_field_->isInsideMap(p_world)) {
-            return false;
+        query_points.push_back(T_world_link * e.center_in_link);
+        query_ellipsoids.push_back(&e);
+        query_link_poses.push_back(&T_world_link);
+    }
+
+    const std::vector<DistanceFieldQueryResult> queries =
+        distance_field_->queryDistanceAndGradientBatch(query_points);
+    for (std::size_t i = 0; i < query_ellipsoids.size(); ++i) {
+        const auto& e = *query_ellipsoids[i];
+        const Eigen::Isometry3d& T_world_link = *query_link_poses[i];
+        const Eigen::Vector3d& p_world = query_points[i];
+        const DistanceFieldQueryResult& query = queries[i];
+        if (!query.observed) {
+            continue;
         }
-        const double d = distance_field_->getDistance(p_world);
-        Eigen::Vector3d n_world = distance_field_->getGradient(p_world);
-        if (!std::isfinite(d) || !n_world.allFinite()) {
-            return false;
+
+        const double d = query.distance;
+        const Eigen::Vector3d raw_gradient =
+            query.gradient_valid ? query.gradient : Eigen::Vector3d::Zero();
+        const double gn = raw_gradient.norm();
+        if (!query.distance_valid || !std::isfinite(d)) {
+            diag.collision_free = false;
+            diag.min_margin = -1.0;
+            diag.reason = "invalid_distance_field";
+            diag.worst_link_name = e.debug_name.empty() ? e.link_name : e.debug_name;
+            diag.worst_point_world = p_world;
+            diag.worst_distance = d;
+            diag.worst_gradient_norm = gn;
+            diag.worst_gradient_world = raw_gradient;
+            return diag;
         }
-        const double gn = n_world.norm();
-        if (gn < 1e-9) {
-            return false;
+
+        double r_eff = conservativeEllipsoidRadius(e.radii);
+        if (query.gradient_valid && gn >= kGradientNormEps) {
+            const Eigen::Vector3d n_world = raw_gradient / gn;
+            r_eff = effectiveEllipsoidRadiusAlongNormal(
+                T_world_link.linear(), e.radii, n_world);
         }
-        n_world /= gn;
-        const double r_eff = effectiveEllipsoidRadiusAlongNormal(
-            T_world_link.linear(), e.radii, n_world);
-        if (!((d - (safe_distance + r_eff)) >= cfg_.collision_blocking_margin_m)) {
-            return false;
+
+        const double margin = d - (safe_distance + r_eff);
+        if (margin < diag.min_margin) {
+            diag.min_margin = margin;
+            diag.worst_link_name = e.debug_name.empty() ? e.link_name : e.debug_name;
+            diag.worst_point_world = p_world;
+            diag.worst_distance = d;
+            diag.worst_effective_radius = r_eff;
+            diag.required_clearance = safe_distance + r_eff;
+            diag.safe_distance_used = safe_distance;
+            diag.worst_gradient_norm = gn;
+            diag.worst_gradient_world = raw_gradient;
+        }
+        if (margin < cfg_.collision_blocking_margin_m) {
+            diag.collision_free = false;
+            diag.reason = "collision_fail";
         }
     }
-    return true;
+
+    if (!std::isfinite(diag.min_margin)) {
+        diag.min_margin = -1.0;
+        if (diag.reason == "ok") {
+            diag.reason = "no_ellipsoids";
+        }
+    }
+    return diag;
+}
+
+bool WholeBodyEllipsoidPoseValidator::isWholeBodyCollisionFree(
+    const Eigen::VectorXd& q,
+    const double safe_distance) const {
+    return diagnoseConfiguration(q, safe_distance).collision_free;
+}
+
+bool WholeBodyEllipsoidPoseValidator::shouldUseSeedAgnosticCache(
+    const std::optional<Eigen::VectorXd>& q_seed) const {
+    return !q_seed.has_value() || q_seed->size() == 0;
 }
 
 WholeBodyEllipsoidPoseValidator::PoseCacheKey

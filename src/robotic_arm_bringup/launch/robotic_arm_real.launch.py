@@ -94,10 +94,19 @@ def generate_launch_description():
     )
 
     # Get package directories
+    camera_driver_pkg = get_package_share_directory('camera_driver')
     trajectory_planning_bringup_pkg = get_package_share_directory('trajectory_planning_bringup')
+    camera_driver_config = os.path.join(camera_driver_pkg, 'config', 'esdf_param.yaml')
 
     # 使用OpaqueFunction延迟节点创建，以便能够访问launch context获取robot_model_name
     arm_controller_node = OpaqueFunction(function=create_arm_controller_node)
+
+    camera_driver_node = Node(
+        package='camera_driver',
+        executable='camera_driver_node',
+        output='screen',
+        arguments=[camera_driver_config],
+    )
 
     # 包含trajectory planning launch - 只启动robot_description和MoveIt组件
     trajectory_planning_launch = IncludeLaunchDescription(
@@ -114,6 +123,9 @@ def generate_launch_description():
     return LaunchDescription([
         # 参数声明
         robot_model_arg,
+
+        # 相机与环境感知节点
+        camera_driver_node,
 
         # 主控制器节点（合并后的controller_manager + trajectory_controller）
         arm_controller_node,

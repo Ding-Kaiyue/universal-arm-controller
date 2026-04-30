@@ -1,0 +1,10 @@
+geometry_msgs/Point[] positions
+---
+bool success
+bool map_ready
+string message
+bool[] observed
+bool[] distance_valid
+bool[] gradient_valid
+float64[] distances
+geometry_msgs/Vector3[] gradients

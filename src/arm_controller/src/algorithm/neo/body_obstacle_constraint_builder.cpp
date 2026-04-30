@@ -19,83 +19,18 @@ double effectiveEllipsoidRadiusAlongNormal(
     return (v > 0.0) ? std::sqrt(v) : 0.0;
 }
 
-}  // namespace
+struct PreparedEllipsoidQuery {
+    const LinkCollisionEllipsoid* ellipsoid{nullptr};
+    const Eigen::Isometry3d* link_pose_world{nullptr};
+    Eigen::Vector3d point_world{Eigen::Vector3d::Zero()};
+    std::size_t original_index{0};
+};
 
-BodyObstacleConstraintBuilder::DistanceQueryFn
-BodyObstacleConstraintBuilder::makeDistanceQueryFromField(
-    std::shared_ptr<const DistanceFieldInterface> distance_field) {
-    return [distance_field = std::move(distance_field)](const Eigen::Vector3d& p) {
-        DistanceQueryResult out;
-        if (!distance_field) {
-            return out;
-        }
-        if (!distance_field->isInsideMap(p)) {
-            return out;
-        }
-        const double d = distance_field->getDistance(p);
-        const Eigen::Vector3d g = distance_field->getGradient(p);
-        if (!std::isfinite(d) || !g.allFinite()) {
-            return out;
-        }
-        out.valid = true;
-        out.distance = d;
-        out.gradient = g;
-        return out;
-    };
-}
-
-int BodyObstacleConstraintBuilder::appendLinkSphereConstraints(
-    const Eigen::VectorXd& q_current,
+std::vector<PreparedEllipsoidQuery> prepareEllipsoidQueries(
     const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
-    const std::vector<LinkCollisionSphere>& link_spheres,
-    const arm_controller::kinematics::JacobianProvider& jacobian_provider,
-    const DistanceQueryFn& distance_query,
-    std::vector<ObstacleConstraintInput>& out_constraints,
-    std::string* error) {
-    std::vector<LinkCollisionEllipsoid> ellipsoids;
-    ellipsoids.reserve(link_spheres.size());
-    for (const auto& s : link_spheres) {
-        LinkCollisionEllipsoid e;
-        e.link_name = s.link_name;
-        e.center_in_link = s.center_in_link;
-        e.radii = Eigen::Vector3d::Constant(s.radius);
-        e.debug_name = s.debug_name;
-        ellipsoids.push_back(std::move(e));
-    }
-    return appendLinkEllipsoidConstraints(
-        q_current,
-        link_poses_world,
-        ellipsoids,
-        jacobian_provider,
-        distance_query,
-        out_constraints,
-        error);
-}
-
-int BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
-    const Eigen::VectorXd& q_current,
-    const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
-    const std::vector<LinkCollisionEllipsoid>& link_ellipsoids,
-    const arm_controller::kinematics::JacobianProvider& jacobian_provider,
-    const DistanceQueryFn& distance_query,
-    std::vector<ObstacleConstraintInput>& out_constraints,
-    std::string* error) {
-    if (q_current.size() <= 0) {
-        if (error != nullptr) {
-            *error = "q_current is empty.";
-        }
-        return 0;
-    }
-    if (!distance_query) {
-        if (error != nullptr) {
-            *error = "distance_query callback is empty.";
-        }
-        return 0;
-    }
-
-    int appended = 0;
-    const int dof = static_cast<int>(q_current.size());
-
+    const std::vector<LinkCollisionEllipsoid>& link_ellipsoids) {
+    std::vector<PreparedEllipsoidQuery> prepared;
+    prepared.reserve(link_ellipsoids.size());
     for (std::size_t i = 0; i < link_ellipsoids.size(); ++i) {
         const auto& e = link_ellipsoids[i];
         if (!(e.radii.x() > 0.0) || !(e.radii.y() > 0.0) || !(e.radii.z() > 0.0) ||
@@ -107,11 +42,34 @@ int BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
         if (it == link_poses_world.end()) {
             continue;
         }
-        const Eigen::Isometry3d& T_world_link = it->second;
-        const Eigen::Vector3d p_world = T_world_link * e.center_in_link;
 
-        const DistanceQueryResult dq = distance_query(p_world);
-        if (!dq.valid || !std::isfinite(dq.distance) || !dq.gradient.allFinite()) {
+        PreparedEllipsoidQuery entry;
+        entry.ellipsoid = &e;
+        entry.link_pose_world = &it->second;
+        entry.point_world = it->second * e.center_in_link;
+        entry.original_index = i;
+        prepared.push_back(entry);
+    }
+    return prepared;
+}
+
+int appendPreparedEllipsoidConstraints(
+    const Eigen::VectorXd& q_current,
+    const std::vector<PreparedEllipsoidQuery>& prepared_queries,
+    const std::vector<DistanceQueryResult>& distance_queries,
+    const arm_controller::kinematics::JacobianProvider& jacobian_provider,
+    std::vector<ObstacleConstraintInput>& out_constraints) {
+    const int dof = static_cast<int>(q_current.size());
+    int appended = 0;
+
+    const std::size_t query_count = std::min(prepared_queries.size(), distance_queries.size());
+    for (std::size_t i = 0; i < query_count; ++i) {
+        const PreparedEllipsoidQuery& prepared = prepared_queries[i];
+        const LinkCollisionEllipsoid& e = *prepared.ellipsoid;
+        const Eigen::Isometry3d& T_world_link = *prepared.link_pose_world;
+        const DistanceQueryResult& dq = distance_queries[i];
+
+        if (!dq.valid || !std::isfinite(dq.distance)) {
             continue;
         }
 
@@ -138,7 +96,8 @@ int BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
         c.normal_jacobian = n_world.transpose() * J_point.topRows(3);
         c.distance = dq.distance - r_eff;
         c.debug_name = e.debug_name.empty()
-                           ? ("link_ellipsoid_" + e.link_name + "_" + std::to_string(i))
+                           ? ("link_ellipsoid_" + e.link_name + "_" +
+                              std::to_string(prepared.original_index))
                            : e.debug_name;
 
         if (!std::isfinite(c.distance) || !c.normal_jacobian.allFinite()) {
@@ -148,6 +107,94 @@ int BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
         ++appended;
     }
 
+    return appended;
+}
+
+}  // namespace
+
+int BodyObstacleConstraintBuilder::appendLinkSphereConstraints(
+    const Eigen::VectorXd& q_current,
+    const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
+    const std::vector<LinkCollisionSphere>& link_spheres,
+    const arm_controller::kinematics::JacobianProvider& jacobian_provider,
+    std::shared_ptr<const DistanceFieldInterface> distance_field,
+    std::vector<ObstacleConstraintInput>& out_constraints,
+    std::string* error) {
+    std::vector<LinkCollisionEllipsoid> ellipsoids;
+    ellipsoids.reserve(link_spheres.size());
+    for (const auto& s : link_spheres) {
+        LinkCollisionEllipsoid e;
+        e.link_name = s.link_name;
+        e.center_in_link = s.center_in_link;
+        e.radii = Eigen::Vector3d::Constant(s.radius);
+        e.debug_name = s.debug_name;
+        ellipsoids.push_back(std::move(e));
+    }
+    return appendLinkEllipsoidConstraints(
+        q_current,
+        link_poses_world,
+        ellipsoids,
+        jacobian_provider,
+        std::move(distance_field),
+        out_constraints,
+        error);
+}
+
+int BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
+    const Eigen::VectorXd& q_current,
+    const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
+    const std::vector<LinkCollisionEllipsoid>& link_ellipsoids,
+    const arm_controller::kinematics::JacobianProvider& jacobian_provider,
+    std::shared_ptr<const DistanceFieldInterface> distance_field,
+    std::vector<ObstacleConstraintInput>& out_constraints,
+    std::string* error) {
+    if (q_current.size() <= 0) {
+        if (error != nullptr) {
+            *error = "q_current is empty.";
+        }
+        return 0;
+    }
+    if (!distance_field) {
+        if (error != nullptr) {
+            *error = "distance_field is empty.";
+        }
+        return 0;
+    }
+
+    const std::vector<PreparedEllipsoidQuery> prepared_queries =
+        prepareEllipsoidQueries(link_poses_world, link_ellipsoids);
+    if (prepared_queries.empty()) {
+        if (error != nullptr) {
+            *error = "No valid link ellipsoids were available for distance queries.";
+        }
+        return 0;
+    }
+
+    std::vector<Eigen::Vector3d> query_points;
+    query_points.reserve(prepared_queries.size());
+    for (const auto& prepared : prepared_queries) {
+        query_points.push_back(prepared.point_world);
+    }
+
+    const std::vector<cartesian_path_planner::DistanceFieldQueryResult> field_queries =
+        distance_field->queryDistanceAndGradientBatch(query_points);
+
+    std::vector<DistanceQueryResult> distance_queries;
+    distance_queries.reserve(prepared_queries.size());
+    for (const auto& query : field_queries) {
+        DistanceQueryResult out;
+        if (query.observed && query.distance_valid) {
+            out.valid = true;
+            out.distance = query.distance;
+            if (query.gradient_valid) {
+                out.gradient = query.gradient;
+            }
+        }
+        distance_queries.push_back(std::move(out));
+    }
+
+    const int appended = appendPreparedEllipsoidConstraints(
+        q_current, prepared_queries, distance_queries, jacobian_provider, out_constraints);
     if (appended == 0 && error != nullptr) {
         *error = "No valid link-ellipsoid obstacle constraints were generated.";
     }

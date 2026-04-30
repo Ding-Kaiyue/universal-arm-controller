@@ -39,7 +39,7 @@ CartesianPath ShortcutSmoother::smooth(
         const auto& p1 = out.waypoints[j].position;
 
         if (!collision_checker_.isSegmentValid(
-                p0, p1, input.safe_distance, cfg_.collision_check_step, input.forbidden_spheres)) {
+                p0, p1, input.hard_clearance, cfg_.collision_check_step, input.forbidden_spheres)) {
             continue;
         }
         std::vector<CartesianWaypoint> new_wps;
@@ -67,13 +67,13 @@ CartesianPath ShortcutSmoother::smooth(
             const Eigen::Vector3d p_new = p_cur + alpha * (p_mid - p_cur);
 
             if (!collision_checker_.isStateValid(
-                    p_new, input.safe_distance, input.forbidden_spheres)) {
+                    p_new, input.hard_clearance, input.forbidden_spheres)) {
                 continue;
             }
             if (!collision_checker_.isSegmentValid(
                     p_prev,
                     p_new,
-                    input.safe_distance,
+                    input.hard_clearance,
                     cfg_.collision_check_step,
                     input.forbidden_spheres)) {
                 continue;
@@ -81,7 +81,7 @@ CartesianPath ShortcutSmoother::smooth(
             if (!collision_checker_.isSegmentValid(
                     p_new,
                     p_next,
-                    input.safe_distance,
+                    input.hard_clearance,
                     cfg_.collision_check_step,
                     input.forbidden_spheres)) {
                 continue;

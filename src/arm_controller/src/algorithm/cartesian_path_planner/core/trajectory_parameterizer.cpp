@@ -10,6 +10,16 @@
 
 namespace arm_controller::algorithm::cartesian_path_planner {
 
+namespace {
+
+constexpr double kTimeEpsilon = 1e-8;
+
+bool nearlyEqualTime(const double a, const double b) {
+    return std::abs(a - b) < kTimeEpsilon;
+}
+
+}  // namespace
+
 TrajectoryParameterizer::TrajectoryParameterizer(
     const PlannerCommonConfig& cfg,
     std::shared_ptr<const DistanceFieldInterface> distance_field)
@@ -19,7 +29,7 @@ TimedCartesianTrajectory TrajectoryParameterizer::parameterize(
     const CartesianPath& path,
     const Eigen::Matrix3d& R_start,
     const Eigen::Matrix3d& R_goal,
-    const double safe_distance) const {
+    const double hard_clearance) const {
     TimedCartesianTrajectory traj;
     if (path.waypoints.size() < 2) {
         return traj;
@@ -42,15 +52,25 @@ TimedCartesianTrajectory TrajectoryParameterizer::parameterize(
     traj.total_duration = t_sum;
     traj.waypoints.front().orientation = R_start;
     traj.waypoints.back().orientation = R_goal;
-    if (!cfg_.enable_interpolator_smoothing) {
+
+    if (cfg_.enable_minimum_snap_optimization) {
+        if (const auto snap_traj = tryMinimumSnapOptimization(traj, traj, hard_clearance)) {
+            return *snap_traj;
+        }
+        if (cfg_.enable_interpolator_smoothing) {
+            return smoothWithInterpolator(traj, hard_clearance);
+        }
         return traj;
     }
-    return smoothWithInterpolator(traj, safe_distance);
+    if (cfg_.enable_interpolator_smoothing) {
+        return smoothWithInterpolator(traj, hard_clearance);
+    }
+    return traj;
 }
 
 TimedCartesianTrajectory TrajectoryParameterizer::smoothWithInterpolator(
     const TimedCartesianTrajectory& in_traj,
-    const double safe_distance) const {
+    const double hard_clearance) const {
     TimedCartesianTrajectory out = in_traj;
     if (in_traj.waypoints.size() < 3 || in_traj.total_duration <= 1e-9) {
         return out;
@@ -185,15 +205,193 @@ TimedCartesianTrajectory TrajectoryParameterizer::smoothWithInterpolator(
     }
     candidate.total_duration = std::max(0.0, candidate.cumulative_times.back());
 
-    if (!isTrajectoryCollisionFree(candidate, safe_distance)) {
+    if (!isTrajectoryCollisionFree(candidate, hard_clearance)) {
         return out;
     }
     return candidate;
 }
 
+std::optional<TimedCartesianTrajectory> TrajectoryParameterizer::tryMinimumSnapOptimization(
+    const TimedCartesianTrajectory& in_traj,
+    const TimedCartesianTrajectory& anchor_traj,
+    const double hard_clearance) const {
+    if (in_traj.waypoints.size() < 5 || anchor_traj.waypoints.size() < 2) {
+        return std::nullopt;
+    }
+    if (cfg_.minimum_snap_iterations <= 0 || cfg_.minimum_snap_weight <= 0.0) {
+        return std::nullopt;
+    }
+
+    TimedCartesianTrajectory candidate = buildResampledTrajectory(in_traj, anchor_traj);
+    if (candidate.waypoints.size() < 5) {
+        return std::nullopt;
+    }
+
+    std::vector<Eigen::Vector3d> reference_positions;
+    reference_positions.reserve(candidate.waypoints.size());
+    std::vector<bool> anchor_mask(candidate.waypoints.size(), false);
+    for (size_t i = 0; i < candidate.waypoints.size(); ++i) {
+        reference_positions.push_back(candidate.waypoints[i].position);
+        for (double anchor_time : anchor_traj.cumulative_times) {
+            if (nearlyEqualTime(candidate.cumulative_times[i], anchor_time)) {
+                anchor_mask[i] = true;
+                break;
+            }
+        }
+    }
+
+    const double data_weight = std::max(0.0, cfg_.minimum_snap_data_weight);
+    const double snap_weight = std::max(0.0, cfg_.minimum_snap_weight);
+    const double relaxation = std::clamp(cfg_.minimum_snap_relaxation, 1e-3, 1.0);
+    if (data_weight <= 0.0 && snap_weight <= 0.0) {
+        return std::nullopt;
+    }
+
+    std::vector<Eigen::Vector3d> updated_positions(reference_positions.size());
+    for (int iter = 0; iter < cfg_.minimum_snap_iterations; ++iter) {
+        for (size_t i = 0; i < candidate.waypoints.size(); ++i) {
+            if (i < 2 || i + 2 >= candidate.waypoints.size() || anchor_mask[i]) {
+                updated_positions[i] = candidate.waypoints[i].position;
+                continue;
+            }
+            // Minimize the squared fourth-order finite difference
+            // p[i-2] - 4 p[i-1] + 6 p[i] - 4 p[i+1] + p[i+2].
+            const Eigen::Vector3d snap_neighbors =
+                candidate.waypoints[i - 2].position -
+                4.0 * candidate.waypoints[i - 1].position -
+                4.0 * candidate.waypoints[i + 1].position +
+                candidate.waypoints[i + 2].position;
+            const double denom = data_weight + 36.0 * snap_weight;
+            if (denom <= 1e-12) {
+                updated_positions[i] = candidate.waypoints[i].position;
+                continue;
+            }
+
+            const Eigen::Vector3d snap_optimum =
+                (data_weight * reference_positions[i] - 6.0 * snap_weight * snap_neighbors) / denom;
+            updated_positions[i] =
+                (1.0 - relaxation) * candidate.waypoints[i].position +
+                relaxation * snap_optimum;
+        }
+        for (size_t i = 2; i + 2 < candidate.waypoints.size(); ++i) {
+            if (!anchor_mask[i]) {
+                candidate.waypoints[i].position = updated_positions[i];
+            }
+        }
+    }
+
+    if (!isTrajectoryCollisionFree(candidate, hard_clearance)) {
+        return std::nullopt;
+    }
+    return candidate;
+}
+
+TimedCartesianTrajectory TrajectoryParameterizer::buildResampledTrajectory(
+    const TimedCartesianTrajectory& source_traj,
+    const TimedCartesianTrajectory& anchor_traj) const {
+    TimedCartesianTrajectory candidate;
+    if (source_traj.waypoints.size() < 2 || anchor_traj.waypoints.size() < 2) {
+        return candidate;
+    }
+
+    const double target_dt = std::max(1e-3, cfg_.interpolator_target_dt);
+    std::vector<double> sample_times;
+    sample_times.reserve(
+        static_cast<size_t>(std::ceil(source_traj.total_duration / target_dt)) +
+        anchor_traj.cumulative_times.size() + 2);
+    sample_times.push_back(0.0);
+    for (double t = target_dt; t < source_traj.total_duration; t += target_dt) {
+        sample_times.push_back(t);
+    }
+    sample_times.push_back(source_traj.total_duration);
+    for (double t : anchor_traj.cumulative_times) {
+        sample_times.push_back(std::clamp(t, 0.0, source_traj.total_duration));
+    }
+    std::sort(sample_times.begin(), sample_times.end());
+    sample_times.erase(
+        std::unique(
+            sample_times.begin(),
+            sample_times.end(),
+            [](const double a, const double b) { return nearlyEqualTime(a, b); }),
+        sample_times.end());
+
+    candidate.waypoints.reserve(sample_times.size());
+    candidate.cumulative_times.reserve(sample_times.size());
+    candidate.segment_durations.reserve(sample_times.size() - 1);
+
+    size_t anchor_idx = 0;
+    for (size_t i = 0; i < sample_times.size(); ++i) {
+        const double t = sample_times[i];
+        CartesianWaypoint wp;
+        const bool use_anchor =
+            (anchor_idx < anchor_traj.cumulative_times.size() &&
+             nearlyEqualTime(t, anchor_traj.cumulative_times[anchor_idx]));
+        if (use_anchor) {
+            wp = anchor_traj.waypoints[anchor_idx];
+            ++anchor_idx;
+        } else {
+            wp = sampleWaypointAtTime(source_traj, t);
+        }
+        candidate.waypoints.push_back(wp);
+        candidate.cumulative_times.push_back(t);
+        if (i > 0) {
+            candidate.segment_durations.push_back(std::max(1e-6, t - sample_times[i - 1]));
+        }
+    }
+    candidate.total_duration = std::max(0.0, candidate.cumulative_times.back());
+    return candidate;
+}
+
+CartesianWaypoint TrajectoryParameterizer::sampleWaypointAtTime(
+    const TimedCartesianTrajectory& traj,
+    const double time_from_start) const {
+    CartesianWaypoint wp;
+    if (traj.waypoints.empty()) {
+        return wp;
+    }
+    if (time_from_start <= 0.0 || traj.waypoints.size() == 1) {
+        return traj.waypoints.front();
+    }
+    if (time_from_start >= traj.total_duration) {
+        return traj.waypoints.back();
+    }
+
+    const auto upper = std::lower_bound(
+        traj.cumulative_times.begin(),
+        traj.cumulative_times.end(),
+        time_from_start);
+    if (upper == traj.cumulative_times.begin()) {
+        return traj.waypoints.front();
+    }
+    if (upper == traj.cumulative_times.end()) {
+        return traj.waypoints.back();
+    }
+
+    const size_t next_idx = static_cast<size_t>(std::distance(traj.cumulative_times.begin(), upper));
+    if (nearlyEqualTime(*upper, time_from_start)) {
+        return traj.waypoints[next_idx];
+    }
+    const size_t prev_idx = next_idx - 1;
+    const double t0 = traj.cumulative_times[prev_idx];
+    const double t1 = traj.cumulative_times[next_idx];
+    const double s =
+        (t1 > t0 + kTimeEpsilon) ? std::clamp((time_from_start - t0) / (t1 - t0), 0.0, 1.0) : 0.0;
+
+    wp.position =
+        (1.0 - s) * traj.waypoints[prev_idx].position +
+        s * traj.waypoints[next_idx].position;
+
+    Eigen::Quaterniond q0(traj.waypoints[prev_idx].orientation);
+    Eigen::Quaterniond q1(traj.waypoints[next_idx].orientation);
+    q0.normalize();
+    q1.normalize();
+    wp.orientation = q0.slerp(s, q1).toRotationMatrix();
+    return wp;
+}
+
 bool TrajectoryParameterizer::isTrajectoryCollisionFree(
     const TimedCartesianTrajectory& traj,
-    const double safe_distance) const {
+    const double hard_clearance) const {
     if (!distance_field_) {
         return true;
     }
@@ -201,7 +399,7 @@ bool TrajectoryParameterizer::isTrajectoryCollisionFree(
     const double check_step = std::max(0.001, cfg_.path_resolution * 0.5);
 
     for (const auto& wp : traj.waypoints) {
-        if (!checker.isStateValid(wp.position, safe_distance)) {
+        if (!checker.isStateValid(wp.position, hard_clearance)) {
             return false;
         }
     }
@@ -209,8 +407,9 @@ bool TrajectoryParameterizer::isTrajectoryCollisionFree(
         if (!checker.isSegmentValid(
                 traj.waypoints[i].position,
                 traj.waypoints[i + 1].position,
-                safe_distance,
-                check_step)) {
+                hard_clearance,
+                check_step,
+                {})) {
             return false;
         }
     }

@@ -15,13 +15,13 @@ neo_example:
 
   # QP build/tuning parameters.
   qp_build:
-    enable_joint_limit_damper: false # true
-    enable_obstacle_damper: false # true
+    enable_joint_limit_damper: true # true
+    enable_obstacle_damper: true # true
     slack_abs_bound: 1.0
 
     hessian:
       task_tracking_weight: 2.0
-      joint_velocity_weight:  0.005 # 5.0e-3
+      joint_velocity_weight:  0.002 # 5.0e-3
       slack_weight: 100.0
       posture_weight: 0.008  # 0.01
       manipulability_weight: 0.0002 # 0.01
@@ -33,8 +33,8 @@ neo_example:
       cbf_gain_upper: 2.0
 
     obstacle_damper:
-      safety_distance: 0.04
-      influence_distance: 0.10
+      safety_distance: 0.025
+      influence_distance: 0.06
       cbf_gain: 2.0
 
   manipulability:
@@ -78,22 +78,42 @@ reactive_task_controller:
   goal_orientation_tolerance_rad: 0.10
 
   request:
-    safe_distance: 0.03
+    safe_distance: 0.05 # desired clearance shell for A*
+    hard_clearance: 0.0 # true collision threshold used by safety checks
     goal_tolerance: 0.03
     map_margin_xyz: [0.60, 0.60, 0.60]
     whole_body_postcheck_non_blocking: false
     whole_body_postcheck_max_attempts: 5
     whole_body_retry_forbidden_radius: 0.045
+    whole_body_retry_pushout_distance: 0.02
+    whole_body_segment_check_step_m: 0.10
+
+  map_source: camera_driver_esdf
+
+  camera_driver_pointcloud:
+    pointcloud_topic: /camera_driver/obstacle_pointcloud
+    pointcloud_queue_depth: 2
+    voxel_size_m: 0.05
+    max_distance_m: 0.60
+    observation_margin_m: 0.15
+    isolated_min_neighbor_count: 4
+    isolated_neighbor_radius_cells: 1
+
+  camera_driver_esdf:
+    service_name: /camera_driver/query_distance_field
+    request_timeout_ms: 200
+    startup_wait_timeout_ms: 1000
+    cache_max_entries: 8192
 
   dummy_obstacle:
-    enable: true
+    enable: false
     radius: 0.035
     center_left_arm: [0.25, -0.52, 0.60]
     center_right_arm: [0.07, 0.52, 0.72]
 
   replanner:
     segment_sample_step_m: 0.04
-    replan_every_control_ticks: 40
+    replan_every_control_ticks: 1000000 # 40
     control_cycle_sec: 0.10
     prediction_horizon_ticks: 10
     planning_latency_sec: 0.06
@@ -105,16 +125,27 @@ reactive_task_controller:
       enable_interpolator_smoothing: true
       interpolator_continuity_order: 2
       interpolator_target_dt: 0.01
+      enable_minimum_snap_optimization: true
+      minimum_snap_iterations: 100
+      minimum_snap_data_weight: 0.20
+      minimum_snap_weight: 0.05
+      minimum_snap_relaxation: 0.50
     astar:
       voxel_resolution: 0.015
       neighbor_mode: 18
       use_se3_search: true
       orientation_bin_size_rad: 0.7853981634
       orientation_goal_tolerance_rad: 1.20
-      enable_inplace_rotation_neighbors: false
+      enable_inplace_rotation_neighbors: true # false
+      goal_orientation_only: true
+      goal_orientation_blend_distance: 0.15
       force_axis_translation_neighbors_in_se3: true
       obstacle_penalty_weight: 1.2
       corridor_deviation_weight: 3.0
+      whole_body_penalty_weight: 3.0
+      whole_body_penalty_margin: 0.06
+      whole_body_hard_reject_margin: -0.08
+      whole_body_reject_on_ik_fail: false
       goal_shortcut_clearance_margin: 0.02
       orientation_cost_weight: 0.08
       orientation_heuristic_weight: 0.20

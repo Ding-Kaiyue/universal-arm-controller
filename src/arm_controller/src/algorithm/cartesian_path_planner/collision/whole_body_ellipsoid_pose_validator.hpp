@@ -34,6 +34,7 @@ public:
         double ik_damping{0.05};
         double ik_step_scale{0.6};
         int segment_substeps_min{1};
+        double segment_check_step_m{0.10};
         double seed_pose_accept_pos_tolerance_m{0.02};
         double seed_pose_accept_rot_tolerance_rad{0.20};
         // Block only when margin falls below this threshold.
@@ -62,6 +63,18 @@ public:
         double min_margin{0.0};
         std::string reason;
         std::string worst_link_name;
+        Eigen::Vector3d worst_point_world{Eigen::Vector3d::Zero()};
+        double worst_distance{0.0};
+        double worst_effective_radius{0.0};
+        double required_clearance{0.0};
+        double safe_distance_used{0.0};
+        double worst_gradient_norm{0.0};
+        Eigen::Vector3d worst_gradient_world{Eigen::Vector3d::Zero()};
+        bool has_failed_pose{false};
+        bool failed_on_segment_sample{false};
+        double failed_segment_t{0.0};
+        Eigen::Vector3d failed_pose_world{Eigen::Vector3d::Zero()};
+        Eigen::Matrix3d failed_pose_orientation{Eigen::Matrix3d::Identity()};
         Eigen::VectorXd q_solution;
     };
 
@@ -84,7 +97,8 @@ public:
         const CartesianWaypoint& to,
         double safe_distance,
         const std::optional<Eigen::VectorXd>& q_seed,
-        Eigen::VectorXd& q_end) const;
+        Eigen::VectorXd& q_end,
+        PoseDiagnostic* failed_diag = nullptr) const;
 
     PoseDiagnostic diagnosePose(
         const Eigen::Vector3d& p_target,
@@ -97,6 +111,10 @@ public:
     PathPlanningInput::WholeBodyPoseDiagnosticFn makePoseDiagnosticFn() const;
 
 private:
+    static void fillPlanningDiagnostic(
+        const PoseDiagnostic& in,
+        PathPlanningInput::WholeBodyPoseDiagnostic& out);
+
     struct IkSolveDiagnostic {
         bool final_ok{false};
         bool external_ik_ok{false};
@@ -110,9 +128,16 @@ private:
         Eigen::VectorXd& q_solution,
         IkSolveDiagnostic* ik_diag = nullptr) const;
 
+    PoseDiagnostic diagnoseConfiguration(
+        const Eigen::VectorXd& q,
+        double safe_distance) const;
+
     bool isWholeBodyCollisionFree(
         const Eigen::VectorXd& q,
         double safe_distance) const;
+
+    bool shouldUseSeedAgnosticCache(
+        const std::optional<Eigen::VectorXd>& q_seed) const;
 
     struct PoseCacheKey {
         int px{0};

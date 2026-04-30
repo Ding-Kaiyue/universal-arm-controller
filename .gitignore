@@ -7,6 +7,8 @@ src/hardware_driver/
 src/trajectory_interpolator/
 src/trajectory_planning/
 src/csaps/
+src/voxblox/
+src/camera_driver/
 install/
 build/
 log/

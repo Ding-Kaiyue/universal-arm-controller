@@ -45,6 +45,8 @@ struct PathPlanningInput {
         double radius{0.0};
     };
 
+    struct WholeBodyPoseDiagnostic;
+
     using WholeBodyPoseValidatorFn = std::function<bool(
         const Eigen::Vector3d& /*p*/,
         const Eigen::Matrix3d& /*R*/,
@@ -57,7 +59,8 @@ struct PathPlanningInput {
         const CartesianWaypoint& /*to*/,
         double /*safe_distance*/,
         const std::optional<Eigen::VectorXd>& /*q_seed*/,
-        Eigen::VectorXd& /*q_end*/)>;
+        Eigen::VectorXd& /*q_end*/,
+        WholeBodyPoseDiagnostic* /*failed_diag*/)>;
 
     struct WholeBodyPoseDiagnostic {
         bool ik_ok{false};
@@ -67,6 +70,18 @@ struct PathPlanningInput {
         double min_margin{0.0};
         std::string reason;
         std::string worst_link_name;
+        Eigen::Vector3d worst_point_world{Eigen::Vector3d::Zero()};
+        double worst_distance{0.0};
+        double worst_effective_radius{0.0};
+        double required_clearance{0.0};
+        double safe_distance_used{0.0};
+        double worst_gradient_norm{0.0};
+        Eigen::Vector3d worst_gradient_world{Eigen::Vector3d::Zero()};
+        bool has_failed_pose{false};
+        bool failed_on_segment_sample{false};
+        double failed_segment_t{0.0};
+        Eigen::Vector3d failed_pose_world{Eigen::Vector3d::Zero()};
+        Eigen::Matrix3d failed_pose_orientation{Eigen::Matrix3d::Identity()};
         Eigen::VectorXd q_solution;
     };
 
@@ -96,10 +111,12 @@ struct PathPlanningInput {
     std::optional<Eigen::VectorXd> q_start_seed;
 
     double safe_distance{0.05};
+    double hard_clearance{0.0};
     double goal_tolerance{0.02};
     bool whole_body_postcheck_non_blocking{false};
     int whole_body_postcheck_max_attempts{1};
     double whole_body_retry_forbidden_radius{0.04};
+    double whole_body_retry_pushout_distance{0.02};
     double whole_body_retry_penalty_margin{0.05};
     double whole_body_retry_penalty_weight{2.5};
     std::vector<ForbiddenSphere> forbidden_spheres;

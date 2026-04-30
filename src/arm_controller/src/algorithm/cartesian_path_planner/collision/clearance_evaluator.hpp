@@ -13,7 +13,7 @@ public:
     explicit ClearanceEvaluator(
         std::shared_ptr<const DistanceFieldInterface> distance_field);
 
-    double obstaclePenalty(const Eigen::Vector3d& p, double safe_distance) const;
+    double obstaclePenalty(const Eigen::Vector3d& p, double desired_clearance) const;
 
 private:
     std::shared_ptr<const DistanceFieldInterface> distance_field_;

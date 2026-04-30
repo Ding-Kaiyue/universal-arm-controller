@@ -8,6 +8,7 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <future>
@@ -18,8 +19,12 @@
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <pinocchio/parsers/urdf.hpp>
+#include <visualization_msgs/msg/marker.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 #include <yaml-cpp/yaml.h>
 #include "algorithm/cartesian_path_planner/map/dummy_distance_field.hpp"
+#include "algorithm/cartesian_path_planner/map/camera_driver_esdf_map_client.hpp"
+#include "algorithm/cartesian_path_planner/map/camera_driver_pointcloud_map_adapter.hpp"
 #include "algorithm/cartesian_path_planner/collision/whole_body_ellipsoid_pose_validator.hpp"
 #include "algorithm/sphere_model/link_sphere_model.hpp"
 
@@ -31,6 +36,91 @@ double orientationErrorRad(const Eigen::Matrix3d& r_current, const Eigen::Matrix
     const Eigen::Matrix3d r_err = r_current.transpose() * r_target;
     Eigen::AngleAxisd aa(r_err);
     return std::abs(aa.angle());
+}
+
+Eigen::Matrix3d slerpRotation(
+    const Eigen::Matrix3d& r_from,
+    const Eigen::Matrix3d& r_to,
+    const double alpha) {
+    const Eigen::Quaterniond q_from(r_from);
+    const Eigen::Quaterniond q_to(r_to);
+    return q_from.slerp(std::clamp(alpha, 0.0, 1.0), q_to).normalized().toRotationMatrix();
+}
+
+Eigen::Matrix3d rotateByRpyOffsetRad(
+    const Eigen::Matrix3d& base_rotation,
+    const Eigen::Vector3d& rpy_offset_rad) {
+    const Eigen::AngleAxisd roll(rpy_offset_rad.x(), Eigen::Vector3d::UnitX());
+    const Eigen::AngleAxisd pitch(rpy_offset_rad.y(), Eigen::Vector3d::UnitY());
+    const Eigen::AngleAxisd yaw(rpy_offset_rad.z(), Eigen::Vector3d::UnitZ());
+    return base_rotation * (yaw * pitch * roll).toRotationMatrix();
+}
+
+void appendOrientationCandidate(
+    const Eigen::Matrix3d& candidate,
+    std::vector<Eigen::Matrix3d>& out,
+    const double duplicate_threshold_rad = 0.10) {
+    for (const Eigen::Matrix3d& existing : out) {
+        if (orientationErrorRad(existing, candidate) <= duplicate_threshold_rad) {
+            return;
+        }
+    }
+    out.push_back(candidate);
+}
+
+std::vector<Eigen::Matrix3d> buildIntermediateOrientationCandidates(
+    const Eigen::Matrix3d& fk_seed_rotation,
+    const Eigen::Matrix3d& goal_rotation,
+    const Eigen::Matrix3d& fallback_target_rotation,
+    const double blend_alpha,
+    const double dist_to_goal,
+    const double blend_distance) {
+    std::vector<Eigen::Matrix3d> candidates;
+    candidates.reserve(16);
+
+    const Eigen::Matrix3d blended_rotation =
+        slerpRotation(fk_seed_rotation, goal_rotation, blend_alpha);
+    const double near_goal_ratio = std::clamp(
+        blend_distance > 1e-6 ? (1.0 - dist_to_goal / blend_distance) : 1.0,
+        0.0,
+        1.0);
+
+    appendOrientationCandidate(fk_seed_rotation, candidates);
+    appendOrientationCandidate(blended_rotation, candidates);
+    appendOrientationCandidate(
+        slerpRotation(fk_seed_rotation, goal_rotation, std::max(blend_alpha, 0.35)),
+        candidates);
+    appendOrientationCandidate(
+        slerpRotation(fk_seed_rotation, goal_rotation, std::max(blend_alpha, 0.65)),
+        candidates);
+    if (near_goal_ratio > 0.35) {
+        appendOrientationCandidate(goal_rotation, candidates);
+    }
+    appendOrientationCandidate(fallback_target_rotation, candidates);
+
+    const std::vector<Eigen::Vector3d> perturbations = {
+        {0.0, 0.0, 0.0},
+        {0.0, 0.35, 0.0},
+        {0.0, -0.35, 0.0},
+        {0.0, 0.0, 0.35},
+        {0.0, 0.0, -0.35},
+        {0.25, 0.0, 0.0},
+        {-0.25, 0.0, 0.0},
+        {0.0, 0.60, 0.0},
+        {0.0, -0.60, 0.0},
+    };
+
+    const std::size_t base_count = candidates.size();
+    for (std::size_t i = 0; i < base_count; ++i) {
+        const Eigen::Matrix3d base = candidates[i];
+        for (const Eigen::Vector3d& offset : perturbations) {
+            appendOrientationCandidate(rotateByRpyOffsetRad(base, offset), candidates);
+            if (candidates.size() >= 18) {
+                return candidates;
+            }
+        }
+    }
+    return candidates;
 }
 
 Eigen::Isometry3d poseMsgToIso(const geometry_msgs::msg::Pose& pose) {
@@ -85,6 +175,10 @@ geometry_msgs::msg::Pose toPoseMsg(const Eigen::Vector3d& p, const Eigen::Matrix
     return pose;
 }
 
+int markerBaseIdForMapping(const std::string& mapping) {
+    return (mapping == "right_arm") ? 100 : 0;
+}
+
 bool loadRuntimeConfigFromYaml(
     const YAML::Node& root,
     ReactiveTaskController::ControllerRuntimeConfig& cfg,
@@ -128,6 +222,9 @@ bool loadRuntimeConfigFromYaml(
             return false;
         }
         cfg.request_safe_distance = std::max(0.0, req["safe_distance"].as<double>());
+        if (req["hard_clearance"]) {
+            cfg.request_hard_clearance = std::max(0.0, req["hard_clearance"].as<double>());
+        }
         if (!req["goal_tolerance"]) {
             setError("Missing required key: reactive_task_controller.request.goal_tolerance");
             return false;
@@ -155,8 +252,31 @@ bool loadRuntimeConfigFromYaml(
             cfg.whole_body_retry_forbidden_radius =
                 std::max(0.0, req["whole_body_retry_forbidden_radius"].as<double>());
         }
+        if (req["whole_body_retry_pushout_distance"]) {
+            cfg.whole_body_retry_pushout_distance =
+                std::max(0.0, req["whole_body_retry_pushout_distance"].as<double>());
+        }
+        if (req["whole_body_segment_check_step_m"]) {
+            cfg.whole_body_segment_check_step_m =
+                std::max(1e-3, req["whole_body_segment_check_step_m"].as<double>());
+        }
     } else {
         setError("Missing required map: reactive_task_controller.request");
+        return false;
+    }
+
+    if (rtc["map_source"]) {
+        cfg.map_source = rtc["map_source"].as<std::string>();
+        std::transform(cfg.map_source.begin(), cfg.map_source.end(), cfg.map_source.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+    }
+    if (cfg.map_source != "dummy" &&
+        cfg.map_source != "camera_driver_pointcloud" &&
+        cfg.map_source != "camera_driver_esdf") {
+        setError(
+            "Invalid reactive_task_controller.map_source, expected "
+            "'dummy', 'camera_driver_pointcloud', or 'camera_driver_esdf'");
         return false;
     }
 
@@ -177,6 +297,63 @@ bool loadRuntimeConfigFromYaml(
         }
     } else {
         setError("Missing required map: reactive_task_controller.dummy_obstacle");
+        return false;
+    }
+
+    if (const YAML::Node live = rtc["camera_driver_pointcloud"]; live && live.IsMap()) {
+        if (live["pointcloud_topic"]) {
+            cfg.camera_driver_pointcloud.pointcloud_topic =
+                live["pointcloud_topic"].as<std::string>();
+        }
+        if (live["pointcloud_queue_depth"]) {
+            cfg.camera_driver_pointcloud.pointcloud_queue_depth =
+                std::max(1, live["pointcloud_queue_depth"].as<int>());
+        }
+        if (live["voxel_size_m"]) {
+            cfg.camera_driver_pointcloud.voxel_size_m =
+                std::max(1e-3, live["voxel_size_m"].as<double>());
+        }
+        if (live["max_distance_m"]) {
+            cfg.camera_driver_pointcloud.max_distance_m =
+                std::max(
+                    cfg.camera_driver_pointcloud.voxel_size_m,
+                    live["max_distance_m"].as<double>());
+        }
+        if (live["observation_margin_m"]) {
+            cfg.camera_driver_pointcloud.observation_margin_m =
+                std::max(0.0, live["observation_margin_m"].as<double>());
+        }
+        if (live["isolated_min_neighbor_count"]) {
+            cfg.camera_driver_pointcloud.isolated_min_neighbor_count =
+                std::max(0, live["isolated_min_neighbor_count"].as<int>());
+        }
+        if (live["isolated_neighbor_radius_cells"]) {
+            cfg.camera_driver_pointcloud.isolated_neighbor_radius_cells =
+                std::max(1, live["isolated_neighbor_radius_cells"].as<int>());
+        }
+    } else if (cfg.map_source == "camera_driver_pointcloud") {
+        setError("Missing required map: reactive_task_controller.camera_driver_pointcloud");
+        return false;
+    }
+
+    if (const YAML::Node live = rtc["camera_driver_esdf"]; live && live.IsMap()) {
+        if (live["service_name"]) {
+            cfg.camera_driver_esdf.service_name = live["service_name"].as<std::string>();
+        }
+        if (live["request_timeout_ms"]) {
+            cfg.camera_driver_esdf.request_timeout_ms =
+                std::max(1, live["request_timeout_ms"].as<int>());
+        }
+        if (live["startup_wait_timeout_ms"]) {
+            cfg.camera_driver_esdf.startup_wait_timeout_ms =
+                std::max(1, live["startup_wait_timeout_ms"].as<int>());
+        }
+        if (live["cache_max_entries"]) {
+            cfg.camera_driver_esdf.cache_max_entries =
+                std::max<std::size_t>(1u, live["cache_max_entries"].as<std::size_t>());
+        }
+    } else if (cfg.map_source == "camera_driver_esdf") {
+        setError("Missing required map: reactive_task_controller.camera_driver_esdf");
         return false;
     }
 
@@ -211,6 +388,26 @@ bool loadRuntimeConfigFromYaml(
             cfg.planner_common.interpolator_continuity_order =
                 common["interpolator_continuity_order"].as<int>();
             cfg.planner_common.interpolator_target_dt = common["interpolator_target_dt"].as<double>();
+            if (common["enable_minimum_snap_optimization"]) {
+                cfg.planner_common.enable_minimum_snap_optimization =
+                    common["enable_minimum_snap_optimization"].as<bool>();
+            }
+            if (common["minimum_snap_iterations"]) {
+                cfg.planner_common.minimum_snap_iterations =
+                    std::max(0, common["minimum_snap_iterations"].as<int>());
+            }
+            if (common["minimum_snap_data_weight"]) {
+                cfg.planner_common.minimum_snap_data_weight =
+                    std::max(0.0, common["minimum_snap_data_weight"].as<double>());
+            }
+            if (common["minimum_snap_weight"]) {
+                cfg.planner_common.minimum_snap_weight =
+                    std::max(0.0, common["minimum_snap_weight"].as<double>());
+            }
+            if (common["minimum_snap_relaxation"]) {
+                cfg.planner_common.minimum_snap_relaxation =
+                    std::clamp(common["minimum_snap_relaxation"].as<double>(), 1e-3, 1.0);
+            }
         } else {
             setError("Missing required map: reactive_task_controller.planner.common");
             return false;
@@ -221,6 +418,8 @@ bool loadRuntimeConfigFromYaml(
                 !astar["enable_inplace_rotation_neighbors"] ||
                 !astar["force_axis_translation_neighbors_in_se3"] ||
                 !astar["obstacle_penalty_weight"] || !astar["corridor_deviation_weight"] ||
+                !astar["whole_body_penalty_weight"] || !astar["whole_body_penalty_margin"] ||
+                !astar["whole_body_hard_reject_margin"] || !astar["whole_body_reject_on_ik_fail"] ||
                 !astar["goal_shortcut_clearance_margin"] || !astar["orientation_cost_weight"] ||
                 !astar["orientation_heuristic_weight"] || !astar["max_iterations"] ||
                 !astar["max_planning_time_sec"] || !astar["edge_check_step"]) {
@@ -235,10 +434,21 @@ bool loadRuntimeConfigFromYaml(
                 astar["orientation_goal_tolerance_rad"].as<double>();
             cfg.planner_astar.enable_inplace_rotation_neighbors =
                 astar["enable_inplace_rotation_neighbors"].as<bool>();
+            if (astar["goal_orientation_only"]) {
+                cfg.planner_astar.goal_orientation_only = astar["goal_orientation_only"].as<bool>();
+            }
+            if (astar["goal_orientation_blend_distance"]) {
+                cfg.planner_astar.goal_orientation_blend_distance =
+                    std::max(0.0, astar["goal_orientation_blend_distance"].as<double>());
+            }
             cfg.planner_astar.force_axis_translation_neighbors_in_se3 =
                 astar["force_axis_translation_neighbors_in_se3"].as<bool>();
             cfg.planner_astar.obstacle_penalty_weight = astar["obstacle_penalty_weight"].as<double>();
             cfg.planner_astar.corridor_deviation_weight = astar["corridor_deviation_weight"].as<double>();
+            cfg.planner_astar.whole_body_penalty_weight = astar["whole_body_penalty_weight"].as<double>();
+            cfg.planner_astar.whole_body_penalty_margin = astar["whole_body_penalty_margin"].as<double>();
+            cfg.planner_astar.whole_body_hard_reject_margin = astar["whole_body_hard_reject_margin"].as<double>();
+            cfg.planner_astar.whole_body_reject_on_ik_fail = astar["whole_body_reject_on_ik_fail"].as<bool>();
             cfg.planner_astar.goal_shortcut_clearance_margin =
                 astar["goal_shortcut_clearance_margin"].as<double>();
             cfg.planner_astar.orientation_cost_weight = astar["orientation_cost_weight"].as<double>();
@@ -292,6 +502,55 @@ ReactiveTaskController::ReactiveTaskController(const rclcpp::Node::SharedPtr& no
     : TrajectoryControllerImpl<geometry_msgs::msg::Pose>("ReactiveTask", node) {
     hardware_manager_ = HardwareManager::getInstance();
     reactive_cfg_loaded_ = loadReactiveConfig();
+    ensureCameraDriverDistanceFieldInitialized();
+    const auto marker_qos =
+        rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+    whole_body_postcheck_marker_pub_ =
+        node_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/reactive_task/postcheck_failure_markers",
+            marker_qos);
+    collision_ellipsoid_marker_pub_ =
+        node_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/reactive_task/collision_ellipsoid_markers",
+            marker_qos);
+    collision_ellipsoid_marker_timer_ = node_->create_wall_timer(
+        std::chrono::milliseconds(100),
+        [this]() {
+            if (!hardware_manager_) {
+                return;
+            }
+
+            const std::vector<std::string> mappings = hardware_manager_->get_all_mappings();
+            for (const std::string& mapping : mappings) {
+                std::string init_error;
+                if (!initializeMappingContext(mapping, &init_error)) {
+                    continue;
+                }
+
+                MappingContext* ctx = nullptr;
+                {
+                    std::lock_guard<std::mutex> lock(mapping_contexts_mutex_);
+                    auto it = mapping_contexts_.find(mapping);
+                    if (it == mapping_contexts_.end() || !it->second.initialized) {
+                        continue;
+                    }
+                    ctx = &it->second;
+                }
+                if (ctx == nullptr) {
+                    continue;
+                }
+
+                const std::vector<double> q_current_vec =
+                    hardware_manager_->get_current_joint_positions_lockfree(mapping);
+                if (q_current_vec.size() != ctx->joint_names.size()) {
+                    continue;
+                }
+                const Eigen::VectorXd q_current = Eigen::Map<const Eigen::VectorXd>(
+                    q_current_vec.data(),
+                    static_cast<Eigen::Index>(q_current_vec.size()));
+                publishCollisionEllipsoidMarkers(mapping, q_current, *ctx);
+            }
+        });
 
     planning_worker_running_ = true;
     planning_worker_ = std::make_unique<std::thread>(&ReactiveTaskController::planning_worker_thread, this);
@@ -346,6 +605,39 @@ bool ReactiveTaskController::loadReactiveConfig() {
     }
 }
 
+void ReactiveTaskController::ensureCameraDriverDistanceFieldInitialized() {
+    if (!reactive_cfg_loaded_) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(live_distance_field_mutex_);
+    if (runtime_cfg_.map_source == "camera_driver_pointcloud") {
+        if (camera_driver_pointcloud_map_) {
+            return;
+        }
+        camera_driver_pointcloud_map_ =
+            std::make_shared<cp::CameraDriverPointcloudMapAdapter>(
+                runtime_cfg_.camera_driver_pointcloud,
+                node_);
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "[ReactiveTask] Pre-initialized camera_driver pointcloud adapter before controller activation.");
+        return;
+    }
+    if (runtime_cfg_.map_source == "camera_driver_esdf") {
+        if (camera_driver_esdf_map_) {
+            return;
+        }
+        camera_driver_esdf_map_ =
+            std::make_shared<cp::CameraDriverEsdfMapClient>(
+                runtime_cfg_.camera_driver_esdf,
+                node_);
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "[ReactiveTask] Pre-initialized camera_driver ESDF client before controller activation.");
+    }
+}
+
 void ReactiveTaskController::start(const std::string& mapping) {
     if (!reactive_cfg_loaded_) {
         throw std::runtime_error(
@@ -363,9 +655,27 @@ void ReactiveTaskController::start(const std::string& mapping) {
         init_subscriptions(mapping);
     }
 
+    ensureCameraDriverDistanceFieldInitialized();
+
     std::string error;
     if (!initializeMappingContext(mapping, &error)) {
         throw std::runtime_error("ReactiveTask context init failed for '" + mapping + "': " + error);
+    }
+
+    clearWholeBodyPostcheckFailureMarker(mapping);
+    {
+        std::lock_guard<std::mutex> lock(mapping_contexts_mutex_);
+        auto it = mapping_contexts_.find(mapping);
+        if (it != mapping_contexts_.end() && it->second.initialized) {
+            const std::vector<double> q_current_vec =
+                hardware_manager_->get_current_joint_positions_lockfree(mapping);
+            if (q_current_vec.size() == it->second.joint_names.size()) {
+                const Eigen::VectorXd q_current = Eigen::Map<const Eigen::VectorXd>(
+                    q_current_vec.data(),
+                    static_cast<Eigen::Index>(q_current_vec.size()));
+                publishCollisionEllipsoidMarkers(mapping, q_current, it->second);
+            }
+        }
     }
 
     RCLCPP_INFO(node_->get_logger(), "[%s] ReactiveTaskController activated", mapping.c_str());
@@ -374,6 +684,8 @@ void ReactiveTaskController::start(const std::string& mapping) {
 bool ReactiveTaskController::stop(const std::string& mapping) {
     TrajectoryControllerImpl::stop(mapping);
     cleanup_subscriptions(mapping);
+    clearWholeBodyPostcheckFailureMarker(mapping);
+    clearCollisionEllipsoidMarkers(mapping);
     RCLCPP_INFO(node_->get_logger(), "[%s] ReactiveTaskController deactivated", mapping.c_str());
     return true;
 }
@@ -547,9 +859,17 @@ bool ReactiveTaskController::initializeMappingContext(const std::string& mapping
 std::shared_ptr<cp::CartesianPathPlanner> ReactiveTaskController::buildPlanner(
     const std::shared_ptr<const cp::DistanceFieldInterface>& map,
     const Eigen::Vector3d& map_min) const {
+    cp::AStarConfig effective_astar = runtime_cfg_.planner_astar;
+    if (effective_astar.goal_orientation_only) {
+        effective_astar.use_se3_search = false;
+        effective_astar.enable_inplace_rotation_neighbors = false;
+        effective_astar.force_axis_translation_neighbors_in_se3 = false;
+        effective_astar.orientation_cost_weight = 0.0;
+        effective_astar.orientation_heuristic_weight = 0.0;
+    }
     return std::make_shared<cp::CartesianPathPlanner>(
         runtime_cfg_.planner_common,
-        runtime_cfg_.planner_astar,
+        effective_astar,
         runtime_cfg_.planner_smoothing,
         map,
         map_min);
@@ -633,6 +953,7 @@ void ReactiveTaskController::plan_and_execute(
     request.R_goal = T_goal.linear();
     request.q_start_seed = q_start;
     request.safe_distance = runtime_cfg_.request_safe_distance;
+    request.hard_clearance = runtime_cfg_.request_hard_clearance;
     request.goal_tolerance = runtime_cfg_.request_goal_tolerance;
     request.whole_body_postcheck_non_blocking =
         runtime_cfg_.whole_body_postcheck_non_blocking;
@@ -640,6 +961,8 @@ void ReactiveTaskController::plan_and_execute(
         runtime_cfg_.whole_body_postcheck_max_attempts;
     request.whole_body_retry_forbidden_radius =
         runtime_cfg_.whole_body_retry_forbidden_radius;
+    request.whole_body_retry_pushout_distance =
+        runtime_cfg_.whole_body_retry_pushout_distance;
 
     const Eigen::Vector3d min_corner = request.p_start.cwiseMin(request.p_goal);
     const Eigen::Vector3d max_corner = request.p_start.cwiseMax(request.p_goal);
@@ -647,20 +970,66 @@ void ReactiveTaskController::plan_and_execute(
     const Eigen::Vector3d map_min = min_corner - map_margin;
     const Eigen::Vector3d map_max = max_corner + map_margin;
 
-    auto map = std::make_shared<cp::DummyDistanceField>(map_min, map_max);
-    if (runtime_cfg_.enable_dummy_obstacle && runtime_cfg_.dummy_obstacle_radius > 0.0) {
-        cp::SphereObstacle obstacle;
-        if (mapping == "right_arm") {
-            obstacle.center = runtime_cfg_.dummy_obstacle_center_right_arm;
+    std::shared_ptr<cp::DistanceFieldInterface> map_mutable;
+    if (runtime_cfg_.map_source == "camera_driver_pointcloud" ||
+        runtime_cfg_.map_source == "camera_driver_esdf") {
+        ensureCameraDriverDistanceFieldInitialized();
+        std::lock_guard<std::mutex> lock(live_distance_field_mutex_);
+        if (runtime_cfg_.map_source == "camera_driver_pointcloud") {
+            map_mutable = camera_driver_pointcloud_map_;
         } else {
-            obstacle.center = runtime_cfg_.dummy_obstacle_center_left_arm;
+            map_mutable = camera_driver_esdf_map_;
         }
-        obstacle.radius = runtime_cfg_.dummy_obstacle_radius;
-        map->addSphere(obstacle);
+    } else {
+        auto dummy_map = std::make_shared<cp::DummyDistanceField>(map_min, map_max);
+        if (runtime_cfg_.enable_dummy_obstacle && runtime_cfg_.dummy_obstacle_radius > 0.0) {
+            cp::SphereObstacle obstacle;
+            if (mapping == "right_arm") {
+                obstacle.center = runtime_cfg_.dummy_obstacle_center_right_arm;
+            } else {
+                obstacle.center = runtime_cfg_.dummy_obstacle_center_left_arm;
+            }
+            obstacle.radius = runtime_cfg_.dummy_obstacle_radius;
+            dummy_map->addSphere(obstacle);
+        }
+        map_mutable = dummy_map;
     }
+
+    const std::shared_ptr<const cp::DistanceFieldInterface> map = map_mutable;
+
+    auto logMapProbe = [&](const char* tag, const Eigen::Vector3d& p) {
+        const auto query = map->queryDistanceAndGradient(p);
+        const Eigen::Vector3d gradient =
+            query.gradient_valid ? query.gradient : Eigen::Vector3d::Zero();
+        const double distance = query.distance_valid ? query.distance : -1.0;
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "[%s] map_probe[%s]: p=(%.4f, %.4f, %.4f) inside=%s distance=%.5f gradient=(%.4f, %.4f, %.4f)",
+            mapping.c_str(),
+            tag,
+            p.x(),
+            p.y(),
+            p.z(),
+            query.observed ? "true" : "false",
+            distance,
+            gradient.x(),
+            gradient.y(),
+            gradient.z());
+    };
+
+    if (runtime_cfg_.map_source != "dummy") {
+        logMapProbe("start", request.p_start);
+        logMapProbe("goal", request.p_goal);
+    }
+    clearWholeBodyPostcheckFailureMarker(mapping);
+    publishCollisionEllipsoidMarkers(mapping, q_start, *ctx);
+
     auto planner = buildPlanner(map, map_min);
-    const auto obstacle_distance_query =
-        rq::BodyObstacleConstraintBuilder::makeDistanceQueryFromField(map);
+    const bool enable_obstacle_constraints =
+        reactive_cfg_.qp_build.enable_obstacle_damper &&
+        ((runtime_cfg_.map_source == "camera_driver_pointcloud") ||
+         (runtime_cfg_.map_source == "camera_driver_esdf") ||
+         (runtime_cfg_.map_source == "dummy" && runtime_cfg_.enable_dummy_obstacle));
 
     std::optional<cp::WholeBodyEllipsoidPoseValidator> whole_body_validator;
     if (ctx->tracik_ready && ctx->tracik_adapter && ctx->moveit_adapter && !ctx->collision_ellipsoids.empty()) {
@@ -671,9 +1040,20 @@ void ReactiveTaskController::plan_and_execute(
         wb_cfg.ik_damping = 0.05;
         wb_cfg.ik_step_scale = 0.6;
         wb_cfg.segment_substeps_min = 1;
+        wb_cfg.segment_check_step_m = runtime_cfg_.whole_body_segment_check_step_m;
+        wb_cfg.collision_blocking_margin_m =
+            request.hard_clearance - request.safe_distance;
         wb_cfg.default_q_seed = q_start;
         wb_cfg.ik_solver_fn =
-            [moveit = ctx->moveit_adapter, tracik = ctx->tracik_adapter, seed_default = q_current_vec](
+            [moveit = ctx->moveit_adapter,
+             tracik = ctx->tracik_adapter,
+             fk_provider = ctx->fk_provider,
+             seed_default = q_current_vec,
+             goal_position = request.p_goal,
+             goal_orientation = request.R_goal,
+             goal_tolerance = request.goal_tolerance,
+             goal_orientation_only = runtime_cfg_.planner_astar.goal_orientation_only,
+             goal_orientation_blend_distance = runtime_cfg_.planner_astar.goal_orientation_blend_distance](
                 const Eigen::Vector3d& p_target,
                 const Eigen::Matrix3d& R_target,
                 const std::optional<Eigen::VectorXd>& q_seed,
@@ -690,21 +1070,57 @@ void ReactiveTaskController::plan_and_execute(
                     return false;
                 }
 
-                const geometry_msgs::msg::Pose pose_world = toPoseMsg(p_target, R_target);
-                const geometry_msgs::msg::Pose pose_base =
-                    moveit->worldPoseToBaseLinkPose(pose_world);
+                const double dist_to_goal = (p_target - goal_position).norm();
+                const bool strict_goal_orientation =
+                    !goal_orientation_only || (dist_to_goal <= goal_tolerance + 1e-6) ||
+                    (orientationErrorRad(R_target, goal_orientation) <= 1e-3);
+                std::vector<Eigen::Matrix3d> orientation_candidates;
+                if (strict_goal_orientation) {
+                    orientation_candidates.push_back(goal_orientation);
+                    appendOrientationCandidate(R_target, orientation_candidates);
+                } else {
+                    arm_controller::kinematics::ForwardKinematicsOutput fk_seed;
+                    if (fk_provider && q_seed.has_value() && q_seed->size() > 0 &&
+                        fk_provider->compute(*q_seed, fk_seed)) {
+                        const double blend_distance = std::max(
+                            goal_tolerance + 1e-6,
+                            goal_orientation_blend_distance);
+                        const double alpha = std::clamp(
+                            1.0 - dist_to_goal / blend_distance,
+                            0.0,
+                            1.0);
+                        orientation_candidates = buildIntermediateOrientationCandidates(
+                            fk_seed.ee_rotation,
+                            goal_orientation,
+                            R_target,
+                            alpha,
+                            dist_to_goal,
+                            blend_distance);
+                    } else {
+                        orientation_candidates.push_back(R_target);
+                        appendOrientationCandidate(goal_orientation, orientation_candidates);
+                    }
+                }
 
-                std::vector<double> q_solution_vec;
-                if (!tracik->computeIKClosest(pose_base, seed, q_solution_vec, 5, false)) {
-                    return false;
+                for (const Eigen::Matrix3d& desired_orientation : orientation_candidates) {
+                    const geometry_msgs::msg::Pose pose_world =
+                        toPoseMsg(p_target, desired_orientation);
+                    const geometry_msgs::msg::Pose pose_base =
+                        moveit->worldPoseToBaseLinkPose(pose_world);
+
+                    std::vector<double> q_solution_vec;
+                    if (!tracik->computeIKClosest(pose_base, seed, q_solution_vec, 5, false)) {
+                        continue;
+                    }
+                    if (q_solution_vec.empty()) {
+                        continue;
+                    }
+                    q_solution = Eigen::Map<const Eigen::VectorXd>(
+                        q_solution_vec.data(),
+                        static_cast<Eigen::Index>(q_solution_vec.size()));
+                    return true;
                 }
-                if (q_solution_vec.empty()) {
-                    return false;
-                }
-                q_solution = Eigen::Map<const Eigen::VectorXd>(
-                    q_solution_vec.data(),
-                    static_cast<Eigen::Index>(q_solution_vec.size()));
-                return true;
+                return false;
             };
 
         whole_body_validator.emplace(
@@ -776,13 +1192,15 @@ void ReactiveTaskController::plan_and_execute(
         mapping.c_str());
     RCLCPP_INFO(
         node_->get_logger(),
-        "[%s] safety_config: neo_dt=%.4f s, planner_dt=%.4f s, replan_every=%d ticks, max_ticks=%d, safe_distance=%.3f, pos_tol=%.4f, ori_tol=%.4f",
+        "[%s] safety_config: neo_dt=%.4f s, planner_dt=%.4f s, replan_every=%d ticks, max_ticks=%d, desired_clearance=%.3f, hard_clearance=%.3f, goal_orientation_only=%s, pos_tol=%.4f, ori_tol=%.4f",
         mapping.c_str(),
         neo_tick_sec,
         planner_tick_sec,
         replanner_cfg.replan_every_control_ticks,
         runtime_cfg_.max_control_ticks,
         request.safe_distance,
+        request.hard_clearance,
+        runtime_cfg_.planner_astar.goal_orientation_only ? "true" : "false",
         runtime_cfg_.goal_position_tolerance,
         runtime_cfg_.goal_orientation_tolerance_rad);
     RCLCPP_INFO(
@@ -796,7 +1214,51 @@ void ReactiveTaskController::plan_and_execute(
         request.p_goal.y(),
         request.p_goal.z(),
         vecToStr(q_start).c_str());
-    if (runtime_cfg_.enable_dummy_obstacle) {
+    if (runtime_cfg_.map_source == "camera_driver_pointcloud") {
+        int processed_frames = 0;
+        std::size_t active_cells = 0u;
+        {
+            std::lock_guard<std::mutex> lock(live_distance_field_mutex_);
+            if (camera_driver_pointcloud_map_) {
+                processed_frames = camera_driver_pointcloud_map_->processedFrames();
+                active_cells = camera_driver_pointcloud_map_->activeCellCount();
+            }
+        }
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "[%s] map_source=camera_driver_pointcloud: cloud_topic=%s voxel=%.3f max_dist=%.3f margin=%.3f isolated_neighbors>=%d radius=%d processed_frames=%d active_cells=%zu",
+            mapping.c_str(),
+            runtime_cfg_.camera_driver_pointcloud.pointcloud_topic.c_str(),
+            runtime_cfg_.camera_driver_pointcloud.voxel_size_m,
+            runtime_cfg_.camera_driver_pointcloud.max_distance_m,
+            runtime_cfg_.camera_driver_pointcloud.observation_margin_m,
+            runtime_cfg_.camera_driver_pointcloud.isolated_min_neighbor_count,
+            runtime_cfg_.camera_driver_pointcloud.isolated_neighbor_radius_cells,
+            processed_frames,
+            active_cells);
+    } else if (runtime_cfg_.map_source == "camera_driver_esdf") {
+        std::size_t successful_queries = 0u;
+        std::size_t failed_queries = 0u;
+        bool service_ready = false;
+        {
+            std::lock_guard<std::mutex> lock(live_distance_field_mutex_);
+            if (camera_driver_esdf_map_) {
+                successful_queries = camera_driver_esdf_map_->successfulQueries();
+                failed_queries = camera_driver_esdf_map_->failedQueries();
+                service_ready = camera_driver_esdf_map_->isServiceReady();
+            }
+        }
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "[%s] map_source=camera_driver_esdf: service=%s request_timeout_ms=%d startup_wait_timeout_ms=%d service_ready=%s successful_queries=%zu failed_queries=%zu",
+            mapping.c_str(),
+            runtime_cfg_.camera_driver_esdf.service_name.c_str(),
+            runtime_cfg_.camera_driver_esdf.request_timeout_ms,
+            runtime_cfg_.camera_driver_esdf.startup_wait_timeout_ms,
+            service_ready ? "true" : "false",
+            successful_queries,
+            failed_queries);
+    } else if (runtime_cfg_.enable_dummy_obstacle) {
         const Eigen::Vector3d center = (mapping == "right_arm")
                                            ? runtime_cfg_.dummy_obstacle_center_right_arm
                                            : runtime_cfg_.dummy_obstacle_center_left_arm;
@@ -907,6 +1369,9 @@ void ReactiveTaskController::plan_and_execute(
         if (!ctx->fk_provider->compute(q_now, fk_now)) {
             break;
         }
+        if ((neo_iter % safety_log_stride) == 0) {
+            publishCollisionEllipsoidMarkers(mapping, q_now, *ctx);
+        }
 
         rq::TaskVelocityInput task_in;
         task_in.T_current = fk_now.ee_pose;
@@ -988,24 +1453,26 @@ void ReactiveTaskController::plan_and_execute(
         qp_input.qd_max = ctx->qd_max;
         qp_input.joint_limits.q_min = q_min_task;
         qp_input.joint_limits.q_max = q_max_task;
-        if (reactive_cfg_.qp_build.enable_obstacle_damper && runtime_cfg_.enable_dummy_obstacle) {
+        if (enable_obstacle_constraints) {
             std::string obstacle_error;
             const int generated = rq::BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
                 q_now,
                 fk_now.link_poses,
                 ctx->collision_ellipsoids,
                 *ctx->jacobian_provider,
-                obstacle_distance_query,
+                map,
                 qp_input.obstacle_constraints,
                 &obstacle_error);
             if (generated <= 0) {
-                RCLCPP_WARN(
+                qp_input.obstacle_constraints.clear();
+                RCLCPP_WARN_THROTTLE(
                     node_->get_logger(),
-                    "[%s] ReactiveTask obstacle constraints unavailable at planner tick %d: %s",
+                    *node_->get_clock(),
+                    2000,
+                    "[%s] ReactiveTask obstacle constraints skipped at planner tick %d; proceeding without obstacle damper for this tick: %s",
                     mapping.c_str(),
                     planner_tick,
                     obstacle_error.c_str());
-                break;
             }
         }
 
@@ -1107,17 +1574,22 @@ void ReactiveTaskController::plan_and_execute(
         }
 
         if ((neo_iter % safety_log_stride) == 0) {
-            double dummy_clearance = std::numeric_limits<double>::quiet_NaN();
-            if (runtime_cfg_.enable_dummy_obstacle && runtime_cfg_.dummy_obstacle_radius > 0.0) {
+            double map_clearance = std::numeric_limits<double>::quiet_NaN();
+            if (runtime_cfg_.map_source != "dummy") {
+                const auto query = map->queryDistanceAndGradient(fk_now.ee_position);
+                if (query.observed && query.distance_valid) {
+                    map_clearance = query.distance - request.safe_distance;
+                }
+            } else if (runtime_cfg_.enable_dummy_obstacle && runtime_cfg_.dummy_obstacle_radius > 0.0) {
                 const Eigen::Vector3d center = (mapping == "right_arm")
                                                    ? runtime_cfg_.dummy_obstacle_center_right_arm
                                                    : runtime_cfg_.dummy_obstacle_center_left_arm;
-                dummy_clearance = (fk_now.ee_position - center).norm() -
-                                  runtime_cfg_.dummy_obstacle_radius - request.safe_distance;
+                map_clearance = (fk_now.ee_position - center).norm() -
+                                runtime_cfg_.dummy_obstacle_radius - request.safe_distance;
             }
             RCLCPP_INFO(
                 node_->get_logger(),
-                "[%s] safety_tick: planner_tick=%d neo_iter=%d pos_err=%.5f ori_err=%.5f qdot_norm=%.5f qdot_max=%.5f qdot_limit_violation=%s joint_margin_min=%.5f task_residual_norm=%.6f dummy_clearance=%.5f",
+                "[%s] safety_tick: planner_tick=%d neo_iter=%d pos_err=%.5f ori_err=%.5f qdot_norm=%.5f qdot_max=%.5f qdot_limit_violation=%s joint_margin_min=%.5f task_residual_norm=%.6f map_clearance=%.5f",
                 mapping.c_str(),
                 planner_tick,
                 neo_iter,
@@ -1128,7 +1600,7 @@ void ReactiveTaskController::plan_and_execute(
                 qdot_limit_violation ? "true" : "false",
                 joint_limit_margin_min,
                 task_residual_norm,
-                dummy_clearance);
+                map_clearance);
             RCLCPP_INFO(
                 node_->get_logger(),
                 "[%s] safety_vectors: q_now=%s qdot=%s v_des=%s task_pred=%s task_residual=%s",
@@ -1311,6 +1783,284 @@ bool ReactiveTaskController::send_joint_velocities(
     } catch (const std::exception& e) {
         RCLCPP_ERROR(node_->get_logger(), "[%s] ReactiveTask send velocity exception: %s", mapping.c_str(), e.what());
         return false;
+    }
+}
+
+void ReactiveTaskController::publishWholeBodyPostcheckFailureMarker(
+    const std::string& mapping,
+    const cp::PathPlanningInput::WholeBodyPostcheckFailureEvent& event,
+    const std::shared_ptr<const cp::DistanceFieldInterface>& map,
+    const MappingContext& ctx) {
+    if (!whole_body_postcheck_marker_pub_) {
+        return;
+    }
+
+    const int base_id = markerBaseIdForMapping(mapping);
+    const Eigen::Vector3d p = event.diagnostic.worst_point_world.allFinite() &&
+                                      event.diagnostic.worst_point_world.norm() > 1e-9
+                                  ? event.diagnostic.worst_point_world
+                                  : event.position;
+
+    visualization_msgs::msg::MarkerArray array_msg;
+
+    visualization_msgs::msg::Marker sphere;
+    sphere.header.frame_id = "world";
+    sphere.header.stamp = node_->now();
+    sphere.ns = "reactive_task_postcheck_failure";
+    sphere.id = base_id + 0;
+    sphere.type = visualization_msgs::msg::Marker::SPHERE;
+    sphere.action = visualization_msgs::msg::Marker::ADD;
+    sphere.pose.position.x = p.x();
+    sphere.pose.position.y = p.y();
+    sphere.pose.position.z = p.z();
+    sphere.pose.orientation.w = 1.0;
+    sphere.scale.x = 0.04;
+    sphere.scale.y = 0.04;
+    sphere.scale.z = 0.04;
+    sphere.color.r = 1.0f;
+    sphere.color.g = 0.1f;
+    sphere.color.b = 0.1f;
+    sphere.color.a = 0.95f;
+    array_msg.markers.push_back(sphere);
+
+    visualization_msgs::msg::Marker text;
+    text.header = sphere.header;
+    text.ns = "reactive_task_postcheck_failure_text";
+    text.id = base_id + 1;
+    text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+    text.action = visualization_msgs::msg::Marker::ADD;
+    text.pose.position.x = p.x();
+    text.pose.position.y = p.y();
+    text.pose.position.z = p.z() + 0.06;
+    text.pose.orientation.w = 1.0;
+    text.scale.z = 0.03;
+    text.color.r = 1.0f;
+    text.color.g = 1.0f;
+    text.color.b = 1.0f;
+    text.color.a = 0.95f;
+    std::ostringstream oss;
+    oss.setf(std::ios::fixed);
+    oss.precision(3);
+    oss << mapping << " "
+        << (event.diagnostic.reason.empty() ? "segment_fail" : event.diagnostic.reason)
+        << " d=" << event.diagnostic.worst_distance
+        << " r=" << event.diagnostic.worst_effective_radius
+        << " sd=" << event.diagnostic.safe_distance_used
+        << " req=" << event.diagnostic.required_clearance
+        << " m=" << event.diagnostic.min_margin;
+    if (!event.diagnostic.worst_link_name.empty()) {
+        oss << " " << event.diagnostic.worst_link_name;
+    }
+    text.text = oss.str();
+    array_msg.markers.push_back(text);
+
+    if (map) {
+        const cp::DistanceFieldQueryResult query = map->queryDistanceAndGradient(p);
+        if (query.gradient_valid) {
+            const double grad_norm = query.gradient.norm();
+            if (std::isfinite(grad_norm) && grad_norm > 1e-6) {
+                const Eigen::Vector3d dir = query.gradient / grad_norm;
+                visualization_msgs::msg::Marker arrow;
+                arrow.header = sphere.header;
+                arrow.ns = "reactive_task_postcheck_failure_gradient";
+                arrow.id = base_id + 2;
+                arrow.type = visualization_msgs::msg::Marker::ARROW;
+                arrow.action = visualization_msgs::msg::Marker::ADD;
+                geometry_msgs::msg::Point p0;
+                p0.x = p.x();
+                p0.y = p.y();
+                p0.z = p.z();
+                geometry_msgs::msg::Point p1;
+                const Eigen::Vector3d q = p + 0.12 * dir;
+                p1.x = q.x();
+                p1.y = q.y();
+                p1.z = q.z();
+                arrow.points.push_back(p0);
+                arrow.points.push_back(p1);
+                arrow.scale.x = 0.008;
+                arrow.scale.y = 0.016;
+                arrow.scale.z = 0.02;
+                arrow.color.r = 0.1f;
+                arrow.color.g = 1.0f;
+                arrow.color.b = 0.1f;
+                arrow.color.a = 0.95f;
+                array_msg.markers.push_back(arrow);
+            }
+        }
+    }
+
+    if (!ctx.collision_ellipsoids.empty() && event.diagnostic.q_solution.size() > 0 &&
+        ctx.fk_provider) {
+        arm_controller::kinematics::ForwardKinematicsOutput fk_out;
+        if (ctx.fk_provider->compute(event.diagnostic.q_solution, fk_out)) {
+            for (const auto& ellipsoid : ctx.collision_ellipsoids) {
+                const std::string debug_name =
+                    ellipsoid.debug_name.empty() ? ("ellipsoid_" + ellipsoid.link_name) : ellipsoid.debug_name;
+                if (debug_name != event.diagnostic.worst_link_name) {
+                    continue;
+                }
+                const auto it = fk_out.link_poses.find(ellipsoid.link_name);
+                if (it == fk_out.link_poses.end()) {
+                    break;
+                }
+
+                const Eigen::Isometry3d& T_world_link = it->second;
+                const Eigen::Vector3d center_world = T_world_link * ellipsoid.center_in_link;
+                const Eigen::Quaterniond q_world(T_world_link.linear());
+
+                visualization_msgs::msg::Marker ellipsoid_marker;
+                ellipsoid_marker.header = sphere.header;
+                ellipsoid_marker.ns = "reactive_task_postcheck_failure_ellipsoid";
+                ellipsoid_marker.id = base_id + 3;
+                ellipsoid_marker.type = visualization_msgs::msg::Marker::SPHERE;
+                ellipsoid_marker.action = visualization_msgs::msg::Marker::ADD;
+                ellipsoid_marker.pose.position.x = center_world.x();
+                ellipsoid_marker.pose.position.y = center_world.y();
+                ellipsoid_marker.pose.position.z = center_world.z();
+                ellipsoid_marker.pose.orientation.x = q_world.x();
+                ellipsoid_marker.pose.orientation.y = q_world.y();
+                ellipsoid_marker.pose.orientation.z = q_world.z();
+                ellipsoid_marker.pose.orientation.w = q_world.w();
+                ellipsoid_marker.scale.x = 2.0 * ellipsoid.radii.x();
+                ellipsoid_marker.scale.y = 2.0 * ellipsoid.radii.y();
+                ellipsoid_marker.scale.z = 2.0 * ellipsoid.radii.z();
+                ellipsoid_marker.color.r = 1.0f;
+                ellipsoid_marker.color.g = 0.6f;
+                ellipsoid_marker.color.b = 0.1f;
+                ellipsoid_marker.color.a = 0.25f;
+                array_msg.markers.push_back(ellipsoid_marker);
+                break;
+            }
+        }
+    }
+
+    whole_body_postcheck_marker_pub_->publish(array_msg);
+}
+
+void ReactiveTaskController::clearWholeBodyPostcheckFailureMarker(
+    const std::string& mapping) {
+    if (!whole_body_postcheck_marker_pub_) {
+        return;
+    }
+
+    visualization_msgs::msg::MarkerArray array_msg;
+    for (const auto& ns : {
+             std::string("reactive_task_postcheck_failure"),
+             std::string("reactive_task_postcheck_failure_text"),
+             std::string("reactive_task_postcheck_failure_gradient"),
+             std::string("reactive_task_postcheck_failure_ellipsoid")}) {
+        for (int offset = 0; offset <= 3; ++offset) {
+            visualization_msgs::msg::Marker marker;
+            marker.header.frame_id = "world";
+            marker.header.stamp = node_->now();
+            marker.ns = ns;
+            marker.id = markerBaseIdForMapping(mapping) + offset;
+            marker.action = visualization_msgs::msg::Marker::DELETE;
+            array_msg.markers.push_back(marker);
+        }
+    }
+    whole_body_postcheck_marker_pub_->publish(array_msg);
+}
+
+void ReactiveTaskController::publishCollisionEllipsoidMarkers(
+    const std::string& mapping,
+    const Eigen::VectorXd& q_current,
+    const MappingContext& ctx) {
+    if (!collision_ellipsoid_marker_pub_ || !ctx.fk_provider ||
+        ctx.collision_ellipsoids.empty() || q_current.size() <= 0) {
+        return;
+    }
+
+    arm_controller::kinematics::ForwardKinematicsOutput fk_out;
+    if (!ctx.fk_provider->compute(q_current, fk_out)) {
+        return;
+    }
+
+    visualization_msgs::msg::MarkerArray array_msg;
+    const int base_id = markerBaseIdForMapping(mapping) + 1000;
+    std::size_t marker_count = 0u;
+
+    for (const auto& ellipsoid : ctx.collision_ellipsoids) {
+        const auto it = fk_out.link_poses.find(ellipsoid.link_name);
+        if (it == fk_out.link_poses.end()) {
+            continue;
+        }
+
+        const Eigen::Isometry3d& T_world_link = it->second;
+        const Eigen::Vector3d center_world = T_world_link * ellipsoid.center_in_link;
+        const Eigen::Quaterniond q_world(T_world_link.linear());
+
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = "world";
+        marker.header.stamp = node_->now();
+        marker.ns = "reactive_task_collision_ellipsoids";
+        marker.id = base_id + static_cast<int>(marker_count);
+        marker.type = visualization_msgs::msg::Marker::SPHERE;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.pose.position.x = center_world.x();
+        marker.pose.position.y = center_world.y();
+        marker.pose.position.z = center_world.z();
+        marker.pose.orientation.x = q_world.x();
+        marker.pose.orientation.y = q_world.y();
+        marker.pose.orientation.z = q_world.z();
+        marker.pose.orientation.w = q_world.w();
+        marker.scale.x = 2.0 * ellipsoid.radii.x();
+        marker.scale.y = 2.0 * ellipsoid.radii.y();
+        marker.scale.z = 2.0 * ellipsoid.radii.z();
+        marker.color.r = 1.0f;
+        marker.color.g = 0.1f;
+        marker.color.b = 0.1f;
+        marker.color.a = 0.65f;
+        array_msg.markers.push_back(marker);
+        ++marker_count;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(collision_ellipsoid_marker_mutex_);
+        const std::size_t previous_count = collision_ellipsoid_marker_counts_[mapping];
+        for (std::size_t i = marker_count; i < previous_count; ++i) {
+            visualization_msgs::msg::Marker marker;
+            marker.header.frame_id = "world";
+            marker.header.stamp = node_->now();
+            marker.ns = "reactive_task_collision_ellipsoids";
+            marker.id = base_id + static_cast<int>(i);
+            marker.action = visualization_msgs::msg::Marker::DELETE;
+            array_msg.markers.push_back(marker);
+        }
+        collision_ellipsoid_marker_counts_[mapping] = marker_count;
+    }
+
+    collision_ellipsoid_marker_pub_->publish(array_msg);
+}
+
+void ReactiveTaskController::clearCollisionEllipsoidMarkers(
+    const std::string& mapping) {
+    if (!collision_ellipsoid_marker_pub_) {
+        return;
+    }
+
+    visualization_msgs::msg::MarkerArray array_msg;
+    const int base_id = markerBaseIdForMapping(mapping) + 1000;
+    std::size_t previous_count = 0u;
+    {
+        std::lock_guard<std::mutex> lock(collision_ellipsoid_marker_mutex_);
+        const auto it = collision_ellipsoid_marker_counts_.find(mapping);
+        if (it != collision_ellipsoid_marker_counts_.end()) {
+            previous_count = it->second;
+            collision_ellipsoid_marker_counts_.erase(it);
+        }
+    }
+    for (std::size_t i = 0; i < previous_count; ++i) {
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = "world";
+        marker.header.stamp = node_->now();
+        marker.ns = "reactive_task_collision_ellipsoids";
+        marker.id = base_id + static_cast<int>(i);
+        marker.action = visualization_msgs::msg::Marker::DELETE;
+        array_msg.markers.push_back(marker);
+    }
+    if (!array_msg.markers.empty()) {
+        collision_ellipsoid_marker_pub_->publish(array_msg);
     }
 }
 

@@ -17,12 +17,18 @@ struct AStarConfig {
     double orientation_goal_tolerance_rad{0.35};
     // Add in-place orientation neighbors (+/-1 bin per axis) in 6D mode.
     bool enable_inplace_rotation_neighbors{true};
+    bool goal_orientation_only{false};  // only enforce target orientation at final waypoint
+    double goal_orientation_blend_distance{0.15};  // start blending toward goal orientation within this distance
     // Limit translational branching in 6D mode by forcing axis neighbors.
     // 6D search can still explode; this is a strong guard.
     bool force_axis_translation_neighbors_in_se3{false};
 
     double obstacle_penalty_weight{0.2};  // 靠近障碍物的路径惩罚权重，越大越远离障碍物
     double corridor_deviation_weight{0.0};  // 偏离 start->goal 走廊的代价权重
+    double whole_body_penalty_weight{3.0};  // whole-body 间隙不足时的软代价
+    double whole_body_penalty_margin{0.06};  // 小于该间隙开始增加 whole-body 代价
+    double whole_body_hard_reject_margin{-0.08};  // 小于该间隙直接拒绝该 EE pose
+    bool whole_body_reject_on_ik_fail{false};  // IK 失败的 whole-body 节点是否直接拒绝
     // Extra geometric clearance required for the direct-to-goal shortcut.
     // Shortcut is allowed only when sampled distance >= safe_distance + this margin.
     double goal_shortcut_clearance_margin{0.03};
