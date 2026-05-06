@@ -18,6 +18,9 @@ TimedCartesianSample ReferenceSampler::sample(
         std::clamp(t_query, 0.0, std::max(0.0, traj.total_duration));
     out.time_from_start = t;
 
+    const bool at_trajectory_end =
+        t >= std::max(0.0, traj.total_duration) - 1e-9;
+
     size_t seg = 0;
     while (seg + 1 < traj.cumulative_times.size() &&
            traj.cumulative_times[seg + 1] < t) {
@@ -54,11 +57,13 @@ TimedCartesianSample ReferenceSampler::sample(
     out.T_target.translation() = p;
 
     out.target_twist.setZero();
-    out.target_twist.head<3>() = v;
+    if (!at_trajectory_end) {
+        out.target_twist.head<3>() = v;
+    }
     // Angular feedforward from segment rotation change.
     // Use body-fixed rotation vector over this segment and map it to world frame
     // at the sampled orientation to align with geometric Jacobian convention.
-    if (dt > 1e-9) {
+    if (!at_trajectory_end && dt > 1e-9) {
         const Eigen::Matrix3d R_rel = wp0.orientation.transpose() * wp1.orientation;
         const Eigen::AngleAxisd aa_rel(R_rel);
         if (std::isfinite(aa_rel.angle()) && std::abs(aa_rel.angle()) > 1e-12) {

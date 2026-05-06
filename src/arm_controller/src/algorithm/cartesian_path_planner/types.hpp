@@ -40,11 +40,6 @@ struct TimedCartesianTrajectory {
 };
 
 struct PathPlanningInput {
-    struct ForbiddenSphere {
-        Eigen::Vector3d center{Eigen::Vector3d::Zero()};
-        double radius{0.0};
-    };
-
     struct WholeBodyPoseDiagnostic;
 
     using WholeBodyPoseValidatorFn = std::function<bool(
@@ -85,23 +80,26 @@ struct PathPlanningInput {
         Eigen::VectorXd q_solution;
     };
 
-    struct WholeBodyPostcheckFailureEvent {
-        int attempt_index{1};
-        int max_attempts{1};
-        int waypoint_index{-1};
-        Eigen::Vector3d position{Eigen::Vector3d::Zero()};
-        Eigen::Matrix3d orientation{Eigen::Matrix3d::Identity()};
-        WholeBodyPoseDiagnostic diagnostic;
-    };
-
     using WholeBodyPoseDiagnosticFn = std::function<WholeBodyPoseDiagnostic(
         const Eigen::Vector3d& /*p*/,
         const Eigen::Matrix3d& /*R*/,
         double /*safe_distance*/,
         const std::optional<Eigen::VectorXd>& /*q_seed*/)>;
 
-    using WholeBodyPostcheckFailureCallback = std::function<void(
-        const WholeBodyPostcheckFailureEvent&)>;
+    using JointStateValidatorFn = std::function<bool(
+        const Eigen::VectorXd& /*q*/,
+        double /*safe_distance*/,
+        WholeBodyPoseDiagnostic* /*diag*/)>;
+
+    using JointSegmentValidatorFn = std::function<bool(
+        const Eigen::VectorXd& /*q_from*/,
+        const Eigen::VectorXd& /*q_to*/,
+        double /*safe_distance*/,
+        WholeBodyPoseDiagnostic* /*diag*/)>;
+
+    using JointToPoseFn = std::function<bool(
+        const Eigen::VectorXd& /*q*/,
+        CartesianWaypoint& /*wp*/)>;
 
     Eigen::Vector3d p_start{Eigen::Vector3d::Zero()};
     Eigen::Vector3d p_goal{Eigen::Vector3d::Zero()};
@@ -109,17 +107,13 @@ struct PathPlanningInput {
     Eigen::Matrix3d R_start{Eigen::Matrix3d::Identity()};
     Eigen::Matrix3d R_goal{Eigen::Matrix3d::Identity()};
     std::optional<Eigen::VectorXd> q_start_seed;
+    std::vector<Eigen::VectorXd> q_goal_candidates;
+    Eigen::VectorXd q_min;
+    Eigen::VectorXd q_max;
 
     double safe_distance{0.05};
     double hard_clearance{0.0};
     double goal_tolerance{0.02};
-    bool whole_body_postcheck_non_blocking{false};
-    int whole_body_postcheck_max_attempts{1};
-    double whole_body_retry_forbidden_radius{0.04};
-    double whole_body_retry_pushout_distance{0.02};
-    double whole_body_retry_penalty_margin{0.05};
-    double whole_body_retry_penalty_weight{2.5};
-    std::vector<ForbiddenSphere> forbidden_spheres;
 
     // Optional full-body validation:
     // - pose validator: IK + full-body collision check for one pose
@@ -130,12 +124,15 @@ struct PathPlanningInput {
     WholeBodyPoseValidatorFn whole_body_pose_validator;
     WholeBodySegmentValidatorFn whole_body_segment_validator;
     WholeBodyPoseDiagnosticFn whole_body_pose_diagnostic;
-    WholeBodyPostcheckFailureCallback whole_body_postcheck_failure_callback;
+    JointStateValidatorFn joint_state_validator;
+    JointSegmentValidatorFn joint_segment_validator;
+    JointToPoseFn joint_to_pose_fn;
 };
 
 struct PathPlanningOutput {
     bool success{false};
     CartesianPath path;
+    std::vector<Eigen::VectorXd> joint_waypoints;
 };
 
 }  // namespace arm_controller::algorithm::cartesian_path_planner

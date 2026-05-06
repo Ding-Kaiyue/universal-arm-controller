@@ -72,20 +72,23 @@ neo_joint_preference:
     joint6:       { enable_range_clamp: false, preferred_min: -2.967, preferred_max: 2.967, preferred_center: 0.000, posture_weight: 0.000 }
 
 reactive_task_controller:
-  max_control_ticks: 120
+  max_control_ticks: 240
   neo_control_cycle_sec: 0.01
   goal_position_tolerance: 0.01
   goal_orientation_tolerance_rad: 0.10
+  terminal_goal_capture_enable: true
+  terminal_goal_capture_pos_err_threshold_m: 0.30
+  terminal_goal_capture_ori_err_threshold_rad: 0.30
+  terminal_goal_capture_no_progress_cycles: 60
+  terminal_goal_capture_suppress_replanning: true
+  terminal_goal_capture_relax_obstacle_damper_when_far: true
+  terminal_goal_capture_obstacle_near_distance_m: 0.10
 
   request:
-    safe_distance: 0.05 # desired clearance shell for A*
+    safe_distance: 0.05 # desired ellipsoid-obstacle clearance
     hard_clearance: 0.0 # true collision threshold used by safety checks
     goal_tolerance: 0.03
     map_margin_xyz: [0.60, 0.60, 0.60]
-    whole_body_postcheck_non_blocking: false
-    whole_body_postcheck_max_attempts: 5
-    whole_body_retry_forbidden_radius: 0.045
-    whole_body_retry_pushout_distance: 0.02
     whole_body_segment_check_step_m: 0.10
 
   map_source: camera_driver_esdf
@@ -112,8 +115,8 @@ reactive_task_controller:
     center_right_arm: [0.07, 0.52, 0.72]
 
   replanner:
-    segment_sample_step_m: 0.04
-    replan_every_control_ticks: 1000000 # 40
+    segment_sample_step_m: 0.02
+    replan_every_control_ticks: 40 # 40
     control_cycle_sec: 0.10
     prediction_horizon_ticks: 10
     planning_latency_sec: 0.06
@@ -121,7 +124,31 @@ reactive_task_controller:
 
   planner:
     common:
-      default_segment_speed: 0.20
+      default_segment_speed: 0.15
+      use_joint_space_sampling: true
+      joint_space_sampling_max_iterations: 6000
+      joint_space_sampling_step_rad: 0.12
+      joint_space_sampling_goal_bias: 0.25
+      joint_space_sampling_connect_threshold_rad: 0.18
+      joint_space_sampling_local_window_rad: 0.35
+      joint_space_sampling_search_stages: 2
+      joint_space_sampling_window_scale: 1.5
+      joint_space_sampling_allow_full_joint_limit_fallback: false
+      joint_space_shortcut_trials: 150
+      joint_space_sampling_solution_pool_size: 8
+      prefer_clearance_shell: true
+      preferred_clearance_shell_margin_m: 0.0
+      preferred_clearance_shell_weight: 12.0
+      joint_space_path_length_weight: 1.0
+      joint_space_joint_motion_weight: 0.10
+      enable_joint_trajectory_post_optimization: true
+      joint_trajectory_postopt_iterations: 2
+      joint_trajectory_postopt_samples_per_waypoint: 12
+      joint_trajectory_postopt_perturbation_rad: 0.05
+      joint_trajectory_shell_weight: 8.0
+      joint_trajectory_orientation_weight: 3.0
+      joint_trajectory_smoothness_weight: 0.25
+      joint_trajectory_position_weight: 1.0
       enable_interpolator_smoothing: true
       interpolator_continuity_order: 2
       interpolator_target_dt: 0.01
@@ -130,28 +157,6 @@ reactive_task_controller:
       minimum_snap_data_weight: 0.20
       minimum_snap_weight: 0.05
       minimum_snap_relaxation: 0.50
-    astar:
-      voxel_resolution: 0.015
-      neighbor_mode: 18
-      use_se3_search: true
-      orientation_bin_size_rad: 0.7853981634
-      orientation_goal_tolerance_rad: 1.20
-      enable_inplace_rotation_neighbors: true # false
-      goal_orientation_only: true
-      goal_orientation_blend_distance: 0.15
-      force_axis_translation_neighbors_in_se3: true
-      obstacle_penalty_weight: 1.2
-      corridor_deviation_weight: 3.0
-      whole_body_penalty_weight: 3.0
-      whole_body_penalty_margin: 0.06
-      whole_body_hard_reject_margin: -0.08
-      whole_body_reject_on_ik_fail: false
-      goal_shortcut_clearance_margin: 0.02
-      orientation_cost_weight: 0.08
-      orientation_heuristic_weight: 0.20
-      max_iterations: 3000000
-      max_planning_time_sec: 12.0
-      edge_check_step: 0.005
     smoothing:
       max_shortcut_trials: 50
       collision_check_step: 0.005

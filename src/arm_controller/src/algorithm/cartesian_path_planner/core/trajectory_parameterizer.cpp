@@ -408,8 +408,7 @@ bool TrajectoryParameterizer::isTrajectoryCollisionFree(
                 traj.waypoints[i].position,
                 traj.waypoints[i + 1].position,
                 hard_clearance,
-                check_step,
-                {})) {
+                check_step)) {
             return false;
         }
     }

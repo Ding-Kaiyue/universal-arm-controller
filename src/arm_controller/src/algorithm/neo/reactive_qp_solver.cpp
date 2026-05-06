@@ -80,8 +80,29 @@ bool ReactiveQpSolver::solve(
         }
         return false;
     }
+    const auto status = solver_.getStatus();
+    if (status != OsqpEigen::Status::Solved &&
+        status != OsqpEigen::Status::SolvedInaccurate) {
+        if (error != nullptr) {
+            *error = "OSQP returned non-solved status.";
+        }
+        return false;
+    }
     out_solution = solver_.getSolution();
-    return out_solution.size() == problem.numVariables() && out_solution.allFinite();
+    if (out_solution.size() != problem.numVariables() || !out_solution.allFinite()) {
+        if (error != nullptr) {
+            *error = "OSQP returned non-finite solution.";
+        }
+        return false;
+    }
+    const double max_abs = out_solution.cwiseAbs().maxCoeff();
+    if (!std::isfinite(max_abs) || max_abs > 1e6) {
+        if (error != nullptr) {
+            *error = "OSQP returned implausibly large solution.";
+        }
+        return false;
+    }
+    return true;
 }
 
 }  // namespace arm_controller::algorithm::reactive_qp

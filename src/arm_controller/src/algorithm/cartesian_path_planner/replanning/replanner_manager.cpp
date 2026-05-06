@@ -369,6 +369,13 @@ TimedCartesianTrajectory ReplannerManager::toDistanceSampledSegment(
     if (n < 2) {
         return out;
     }
+
+    // Preserve planner-side smoothing whenever the trajectory is already sampled
+    // at least as densely as the replanner requires. Only densify sparse output.
+    if (raw_n >= n) {
+        return in_traj;
+    }
+
     const double total = std::max(1e-6, in_traj.total_duration);
 
     out.waypoints.reserve(static_cast<std::size_t>(n));
@@ -436,13 +443,14 @@ bool ReplannerManager::sampleFromTrajectory(
     const int point_index,
     TimedCartesianSample& out) const {
     const int n = static_cast<int>(traj.waypoints.size());
-    if (n < 2) {
+    if (n < 2 || traj.cumulative_times.size() != traj.waypoints.size()) {
         return false;
     }
     const int idx = std::clamp(point_index, 0, n - 1);
-    const double t_query =
-        (static_cast<double>(idx) / static_cast<double>(n - 1)) *
-        std::max(0.0, traj.total_duration);
+    const double t_query = std::clamp(
+        traj.cumulative_times[static_cast<std::size_t>(idx)],
+        0.0,
+        std::max(0.0, traj.total_duration));
     out = sampler_.sample(traj, t_query);
     return true;
 }
@@ -457,14 +465,28 @@ int ReplannerManager::pointIndexAtTime(const double elapsed_sec) const {
         active_traj = active_.traj;
     }
     const int n = static_cast<int>(active_traj.waypoints.size());
-    if (n <= 1) {
+    if (n <= 1 || active_traj.cumulative_times.size() != active_traj.waypoints.size()) {
         return 0;
     }
     const double total = std::max(1e-6, active_traj.total_duration);
     const double clamped_t = std::clamp(elapsed_sec, 0.0, total);
-    const double alpha = clamped_t / total;
-    const int idx = static_cast<int>(std::round(alpha * static_cast<double>(n - 1)));
-    return std::clamp(idx, 0, n - 1);
+    const auto it = std::lower_bound(
+        active_traj.cumulative_times.begin(),
+        active_traj.cumulative_times.end(),
+        clamped_t);
+    if (it == active_traj.cumulative_times.begin()) {
+        return 0;
+    }
+    if (it == active_traj.cumulative_times.end()) {
+        return n - 1;
+    }
+    const std::size_t upper_idx = static_cast<std::size_t>(it - active_traj.cumulative_times.begin());
+    const std::size_t lower_idx = upper_idx - 1;
+    const double t_lower = active_traj.cumulative_times[lower_idx];
+    const double t_upper = active_traj.cumulative_times[upper_idx];
+    return (clamped_t - t_lower <= t_upper - clamped_t)
+               ? static_cast<int>(lower_idx)
+               : static_cast<int>(upper_idx);
 }
 
 double ReplannerManager::activeSegmentTotalDurationSec() const {
@@ -491,7 +513,7 @@ int ReplannerManager::predictedPointIndex(
     const TimedCartesianTrajectory& traj,
     const int current_point_index) const {
     const int n = static_cast<int>(traj.waypoints.size());
-    if (n <= 1) {
+    if (n <= 1 || traj.cumulative_times.size() != traj.waypoints.size()) {
         return 0;
     }
     ReplannerConfig cfg;
@@ -503,12 +525,23 @@ int ReplannerManager::predictedPointIndex(
         static_cast<double>(cfg.prediction_horizon_ticks) * cfg.control_cycle_sec;
     const double total_predict_sec = control_predict_sec + cfg.planning_latency_sec;
 
-    const double total = std::max(1e-6, traj.total_duration);
-    const double dt_point = total / static_cast<double>(n - 1);
-    const int delta_points =
-        static_cast<int>(std::ceil(total_predict_sec / std::max(1e-6, dt_point)));
-
-    return std::clamp(current_point_index + std::max(0, delta_points), 0, n - 1);
+    const int idx = std::clamp(current_point_index, 0, n - 1);
+    const double start_t = std::clamp(
+        traj.cumulative_times[static_cast<std::size_t>(idx)],
+        0.0,
+        std::max(0.0, traj.total_duration));
+    const double target_t = std::clamp(
+        start_t + std::max(0.0, total_predict_sec),
+        0.0,
+        std::max(0.0, traj.total_duration));
+    const auto it = std::lower_bound(
+        traj.cumulative_times.begin(),
+        traj.cumulative_times.end(),
+        target_t);
+    if (it == traj.cumulative_times.end()) {
+        return n - 1;
+    }
+    return static_cast<int>(it - traj.cumulative_times.begin());
 }
 
 Eigen::Vector3d ReplannerManager::estimateTrajectoryVelocityAtPoint(

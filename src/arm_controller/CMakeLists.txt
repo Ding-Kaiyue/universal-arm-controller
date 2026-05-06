@@ -132,7 +132,6 @@ add_library(arm_controller_lib
   src/algorithm/neo/reactive_qp_solver.cpp
   src/algorithm/neo/reactive_qp_validator.cpp
   src/algorithm/neo/task_velocity_generator.cpp
-  src/algorithm/cartesian_path_planner/astar/astar_planner.cpp
   src/algorithm/cartesian_path_planner/collision/cartesian_collision_checker.cpp
   src/algorithm/cartesian_path_planner/collision/clearance_evaluator.cpp
   src/algorithm/cartesian_path_planner/collision/whole_body_ellipsoid_pose_validator.cpp

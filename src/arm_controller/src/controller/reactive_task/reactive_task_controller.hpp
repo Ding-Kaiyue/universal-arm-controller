@@ -45,7 +45,6 @@ public:
     struct ControllerRuntimeConfig {
         arm_controller::algorithm::cartesian_path_planner::ReplannerConfig replanner;
         arm_controller::algorithm::cartesian_path_planner::PlannerCommonConfig planner_common;
-        arm_controller::algorithm::cartesian_path_planner::AStarConfig planner_astar;
         arm_controller::algorithm::cartesian_path_planner::SmoothingConfig planner_smoothing;
         double request_safe_distance{0.03};
         double request_hard_clearance{0.0};
@@ -56,10 +55,6 @@ public:
             camera_driver_pointcloud;
         arm_controller::algorithm::cartesian_path_planner::CameraDriverEsdfMapClient::Config
             camera_driver_esdf;
-        bool whole_body_postcheck_non_blocking{false};
-        int whole_body_postcheck_max_attempts{5};
-        double whole_body_retry_forbidden_radius{0.045};
-        double whole_body_retry_pushout_distance{0.02};
         double whole_body_segment_check_step_m{0.10};
         bool enable_dummy_obstacle{false};
         double dummy_obstacle_radius{0.035};
@@ -69,6 +64,13 @@ public:
         double neo_control_cycle_sec{0.004};
         double goal_position_tolerance{0.01};
         double goal_orientation_tolerance_rad{0.08};
+        bool terminal_goal_capture_enable{true};
+        double terminal_goal_capture_pos_err_threshold_m{0.30};
+        double terminal_goal_capture_ori_err_threshold_rad{0.30};
+        int terminal_goal_capture_no_progress_cycles{80};
+        bool terminal_goal_capture_suppress_replanning{true};
+        bool terminal_goal_capture_relax_obstacle_damper_when_far{true};
+        double terminal_goal_capture_obstacle_near_distance_m{0.10};
         double mit_kp{0.0};
         double mit_kd{0.01};
         int mit_max_motors{6};
@@ -114,17 +116,17 @@ private:
         const Eigen::Vector3d& map_min) const;
 
     bool send_joint_velocities(const std::string& mapping, const std::vector<double>& joint_velocities) const;
-    void publishWholeBodyPostcheckFailureMarker(
-        const std::string& mapping,
-        const arm_controller::algorithm::cartesian_path_planner::PathPlanningInput::WholeBodyPostcheckFailureEvent& event,
-        const std::shared_ptr<const arm_controller::algorithm::cartesian_path_planner::DistanceFieldInterface>& map,
-        const MappingContext& ctx);
-    void clearWholeBodyPostcheckFailureMarker(const std::string& mapping);
     void publishCollisionEllipsoidMarkers(
         const std::string& mapping,
         const Eigen::VectorXd& q_current,
         const MappingContext& ctx);
     void clearCollisionEllipsoidMarkers(const std::string& mapping);
+    void publishTrajectoryMarkers(
+        const std::string& mapping,
+        const arm_controller::algorithm::cartesian_path_planner::ReplannerManager& replanner,
+        const arm_controller::algorithm::cartesian_path_planner::TimedCartesianSample& sample,
+        const Eigen::Vector3d& ee_position);
+    void clearTrajectoryMarkers(const std::string& mapping);
 
 private:
     std::shared_ptr<HardwareManager> hardware_manager_;
@@ -142,9 +144,9 @@ private:
     std::shared_ptr<arm_controller::algorithm::cartesian_path_planner::CameraDriverEsdfMapClient>
         camera_driver_esdf_map_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
-        whole_body_postcheck_marker_pub_;
-    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
         collision_ellipsoid_marker_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+        trajectory_marker_pub_;
     std::mutex collision_ellipsoid_marker_mutex_;
     std::map<std::string, std::size_t> collision_ellipsoid_marker_counts_;
 

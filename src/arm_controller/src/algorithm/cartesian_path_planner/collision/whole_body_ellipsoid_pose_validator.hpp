@@ -109,6 +109,11 @@ public:
     PathPlanningInput::WholeBodyPoseValidatorFn makePoseValidatorFn() const;
     PathPlanningInput::WholeBodySegmentValidatorFn makeSegmentValidatorFn() const;
     PathPlanningInput::WholeBodyPoseDiagnosticFn makePoseDiagnosticFn() const;
+    PathPlanningInput::JointStateValidatorFn makeJointStateValidatorFn() const;
+    PathPlanningInput::JointSegmentValidatorFn makeJointSegmentValidatorFn() const;
+    PoseDiagnostic diagnoseJointState(
+        const Eigen::VectorXd& q,
+        double safe_distance) const;
 
 private:
     static void fillPlanningDiagnostic(

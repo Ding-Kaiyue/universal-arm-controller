@@ -38,91 +38,6 @@ double orientationErrorRad(const Eigen::Matrix3d& r_current, const Eigen::Matrix
     return std::abs(aa.angle());
 }
 
-Eigen::Matrix3d slerpRotation(
-    const Eigen::Matrix3d& r_from,
-    const Eigen::Matrix3d& r_to,
-    const double alpha) {
-    const Eigen::Quaterniond q_from(r_from);
-    const Eigen::Quaterniond q_to(r_to);
-    return q_from.slerp(std::clamp(alpha, 0.0, 1.0), q_to).normalized().toRotationMatrix();
-}
-
-Eigen::Matrix3d rotateByRpyOffsetRad(
-    const Eigen::Matrix3d& base_rotation,
-    const Eigen::Vector3d& rpy_offset_rad) {
-    const Eigen::AngleAxisd roll(rpy_offset_rad.x(), Eigen::Vector3d::UnitX());
-    const Eigen::AngleAxisd pitch(rpy_offset_rad.y(), Eigen::Vector3d::UnitY());
-    const Eigen::AngleAxisd yaw(rpy_offset_rad.z(), Eigen::Vector3d::UnitZ());
-    return base_rotation * (yaw * pitch * roll).toRotationMatrix();
-}
-
-void appendOrientationCandidate(
-    const Eigen::Matrix3d& candidate,
-    std::vector<Eigen::Matrix3d>& out,
-    const double duplicate_threshold_rad = 0.10) {
-    for (const Eigen::Matrix3d& existing : out) {
-        if (orientationErrorRad(existing, candidate) <= duplicate_threshold_rad) {
-            return;
-        }
-    }
-    out.push_back(candidate);
-}
-
-std::vector<Eigen::Matrix3d> buildIntermediateOrientationCandidates(
-    const Eigen::Matrix3d& fk_seed_rotation,
-    const Eigen::Matrix3d& goal_rotation,
-    const Eigen::Matrix3d& fallback_target_rotation,
-    const double blend_alpha,
-    const double dist_to_goal,
-    const double blend_distance) {
-    std::vector<Eigen::Matrix3d> candidates;
-    candidates.reserve(16);
-
-    const Eigen::Matrix3d blended_rotation =
-        slerpRotation(fk_seed_rotation, goal_rotation, blend_alpha);
-    const double near_goal_ratio = std::clamp(
-        blend_distance > 1e-6 ? (1.0 - dist_to_goal / blend_distance) : 1.0,
-        0.0,
-        1.0);
-
-    appendOrientationCandidate(fk_seed_rotation, candidates);
-    appendOrientationCandidate(blended_rotation, candidates);
-    appendOrientationCandidate(
-        slerpRotation(fk_seed_rotation, goal_rotation, std::max(blend_alpha, 0.35)),
-        candidates);
-    appendOrientationCandidate(
-        slerpRotation(fk_seed_rotation, goal_rotation, std::max(blend_alpha, 0.65)),
-        candidates);
-    if (near_goal_ratio > 0.35) {
-        appendOrientationCandidate(goal_rotation, candidates);
-    }
-    appendOrientationCandidate(fallback_target_rotation, candidates);
-
-    const std::vector<Eigen::Vector3d> perturbations = {
-        {0.0, 0.0, 0.0},
-        {0.0, 0.35, 0.0},
-        {0.0, -0.35, 0.0},
-        {0.0, 0.0, 0.35},
-        {0.0, 0.0, -0.35},
-        {0.25, 0.0, 0.0},
-        {-0.25, 0.0, 0.0},
-        {0.0, 0.60, 0.0},
-        {0.0, -0.60, 0.0},
-    };
-
-    const std::size_t base_count = candidates.size();
-    for (std::size_t i = 0; i < base_count; ++i) {
-        const Eigen::Matrix3d base = candidates[i];
-        for (const Eigen::Vector3d& offset : perturbations) {
-            appendOrientationCandidate(rotateByRpyOffsetRad(base, offset), candidates);
-            if (candidates.size() >= 18) {
-                return candidates;
-            }
-        }
-    }
-    return candidates;
-}
-
 Eigen::Isometry3d poseMsgToIso(const geometry_msgs::msg::Pose& pose) {
     Eigen::Quaterniond q(
         pose.orientation.w,
@@ -175,6 +90,14 @@ geometry_msgs::msg::Pose toPoseMsg(const Eigen::Vector3d& p, const Eigen::Matrix
     return pose;
 }
 
+geometry_msgs::msg::Point toPointMsg(const Eigen::Vector3d& p) {
+    geometry_msgs::msg::Point point;
+    point.x = p.x();
+    point.y = p.y();
+    point.z = p.z();
+    return point;
+}
+
 int markerBaseIdForMapping(const std::string& mapping) {
     return (mapping == "right_arm") ? 100 : 0;
 }
@@ -215,6 +138,33 @@ bool loadRuntimeConfigFromYaml(
     }
     cfg.goal_orientation_tolerance_rad =
         std::max(1e-6, rtc["goal_orientation_tolerance_rad"].as<double>());
+    if (rtc["terminal_goal_capture_enable"]) {
+        cfg.terminal_goal_capture_enable = rtc["terminal_goal_capture_enable"].as<bool>();
+    }
+    if (rtc["terminal_goal_capture_pos_err_threshold_m"]) {
+        cfg.terminal_goal_capture_pos_err_threshold_m =
+            std::max(1e-6, rtc["terminal_goal_capture_pos_err_threshold_m"].as<double>());
+    }
+    if (rtc["terminal_goal_capture_ori_err_threshold_rad"]) {
+        cfg.terminal_goal_capture_ori_err_threshold_rad =
+            std::max(1e-6, rtc["terminal_goal_capture_ori_err_threshold_rad"].as<double>());
+    }
+    if (rtc["terminal_goal_capture_no_progress_cycles"]) {
+        cfg.terminal_goal_capture_no_progress_cycles =
+            std::max(1, rtc["terminal_goal_capture_no_progress_cycles"].as<int>());
+    }
+    if (rtc["terminal_goal_capture_suppress_replanning"]) {
+        cfg.terminal_goal_capture_suppress_replanning =
+            rtc["terminal_goal_capture_suppress_replanning"].as<bool>();
+    }
+    if (rtc["terminal_goal_capture_relax_obstacle_damper_when_far"]) {
+        cfg.terminal_goal_capture_relax_obstacle_damper_when_far =
+            rtc["terminal_goal_capture_relax_obstacle_damper_when_far"].as<bool>();
+    }
+    if (rtc["terminal_goal_capture_obstacle_near_distance_m"]) {
+        cfg.terminal_goal_capture_obstacle_near_distance_m =
+            std::max(0.0, rtc["terminal_goal_capture_obstacle_near_distance_m"].as<double>());
+    }
 
     if (const YAML::Node req = rtc["request"]; req && req.IsMap()) {
         if (!req["safe_distance"]) {
@@ -240,22 +190,6 @@ bool loadRuntimeConfigFromYaml(
             return false;
         }
         cfg.map_margin_xyz = margin.cwiseMax(Eigen::Vector3d::Zero());
-        if (req["whole_body_postcheck_non_blocking"]) {
-            cfg.whole_body_postcheck_non_blocking =
-                req["whole_body_postcheck_non_blocking"].as<bool>();
-        }
-        if (req["whole_body_postcheck_max_attempts"]) {
-            cfg.whole_body_postcheck_max_attempts =
-                std::max(1, req["whole_body_postcheck_max_attempts"].as<int>());
-        }
-        if (req["whole_body_retry_forbidden_radius"]) {
-            cfg.whole_body_retry_forbidden_radius =
-                std::max(0.0, req["whole_body_retry_forbidden_radius"].as<double>());
-        }
-        if (req["whole_body_retry_pushout_distance"]) {
-            cfg.whole_body_retry_pushout_distance =
-                std::max(0.0, req["whole_body_retry_pushout_distance"].as<double>());
-        }
         if (req["whole_body_segment_check_step_m"]) {
             cfg.whole_body_segment_check_step_m =
                 std::max(1e-3, req["whole_body_segment_check_step_m"].as<double>());
@@ -383,6 +317,102 @@ bool loadRuntimeConfigFromYaml(
                 return false;
             }
             cfg.planner_common.default_segment_speed = common["default_segment_speed"].as<double>();
+            if (common["use_joint_space_sampling"]) {
+                cfg.planner_common.use_joint_space_sampling =
+                    common["use_joint_space_sampling"].as<bool>();
+            }
+            if (common["joint_space_sampling_max_iterations"]) {
+                cfg.planner_common.joint_space_sampling_max_iterations =
+                    std::max(1, common["joint_space_sampling_max_iterations"].as<int>());
+            }
+            if (common["joint_space_sampling_step_rad"]) {
+                cfg.planner_common.joint_space_sampling_step_rad =
+                    std::max(1e-3, common["joint_space_sampling_step_rad"].as<double>());
+            }
+            if (common["joint_space_sampling_goal_bias"]) {
+                cfg.planner_common.joint_space_sampling_goal_bias =
+                    std::clamp(common["joint_space_sampling_goal_bias"].as<double>(), 0.0, 1.0);
+            }
+            if (common["joint_space_sampling_connect_threshold_rad"]) {
+                cfg.planner_common.joint_space_sampling_connect_threshold_rad =
+                    std::max(1e-3, common["joint_space_sampling_connect_threshold_rad"].as<double>());
+            }
+            if (common["joint_space_sampling_local_window_rad"]) {
+                cfg.planner_common.joint_space_sampling_local_window_rad =
+                    std::max(1e-3, common["joint_space_sampling_local_window_rad"].as<double>());
+            }
+            if (common["joint_space_sampling_search_stages"]) {
+                cfg.planner_common.joint_space_sampling_search_stages =
+                    std::max(1, common["joint_space_sampling_search_stages"].as<int>());
+            }
+            if (common["joint_space_sampling_window_scale"]) {
+                cfg.planner_common.joint_space_sampling_window_scale =
+                    std::max(1.0, common["joint_space_sampling_window_scale"].as<double>());
+            }
+            if (common["joint_space_sampling_allow_full_joint_limit_fallback"]) {
+                cfg.planner_common.joint_space_sampling_allow_full_joint_limit_fallback =
+                    common["joint_space_sampling_allow_full_joint_limit_fallback"].as<bool>();
+            }
+            if (common["joint_space_shortcut_trials"]) {
+                cfg.planner_common.joint_space_shortcut_trials =
+                    std::max(0, common["joint_space_shortcut_trials"].as<int>());
+            }
+            if (common["joint_space_sampling_solution_pool_size"]) {
+                cfg.planner_common.joint_space_sampling_solution_pool_size =
+                    std::max(1, common["joint_space_sampling_solution_pool_size"].as<int>());
+            }
+            if (common["prefer_clearance_shell"]) {
+                cfg.planner_common.prefer_clearance_shell =
+                    common["prefer_clearance_shell"].as<bool>();
+            }
+            if (common["preferred_clearance_shell_margin_m"]) {
+                cfg.planner_common.preferred_clearance_shell_margin_m =
+                    common["preferred_clearance_shell_margin_m"].as<double>();
+            }
+            if (common["preferred_clearance_shell_weight"]) {
+                cfg.planner_common.preferred_clearance_shell_weight =
+                    std::max(0.0, common["preferred_clearance_shell_weight"].as<double>());
+            }
+            if (common["joint_space_path_length_weight"]) {
+                cfg.planner_common.joint_space_path_length_weight =
+                    std::max(0.0, common["joint_space_path_length_weight"].as<double>());
+            }
+            if (common["joint_space_joint_motion_weight"]) {
+                cfg.planner_common.joint_space_joint_motion_weight =
+                    std::max(0.0, common["joint_space_joint_motion_weight"].as<double>());
+            }
+            if (common["enable_joint_trajectory_post_optimization"]) {
+                cfg.planner_common.enable_joint_trajectory_post_optimization =
+                    common["enable_joint_trajectory_post_optimization"].as<bool>();
+            }
+            if (common["joint_trajectory_postopt_iterations"]) {
+                cfg.planner_common.joint_trajectory_postopt_iterations =
+                    std::max(0, common["joint_trajectory_postopt_iterations"].as<int>());
+            }
+            if (common["joint_trajectory_postopt_samples_per_waypoint"]) {
+                cfg.planner_common.joint_trajectory_postopt_samples_per_waypoint =
+                    std::max(1, common["joint_trajectory_postopt_samples_per_waypoint"].as<int>());
+            }
+            if (common["joint_trajectory_postopt_perturbation_rad"]) {
+                cfg.planner_common.joint_trajectory_postopt_perturbation_rad =
+                    std::max(1e-4, common["joint_trajectory_postopt_perturbation_rad"].as<double>());
+            }
+            if (common["joint_trajectory_shell_weight"]) {
+                cfg.planner_common.joint_trajectory_shell_weight =
+                    std::max(0.0, common["joint_trajectory_shell_weight"].as<double>());
+            }
+            if (common["joint_trajectory_orientation_weight"]) {
+                cfg.planner_common.joint_trajectory_orientation_weight =
+                    std::max(0.0, common["joint_trajectory_orientation_weight"].as<double>());
+            }
+            if (common["joint_trajectory_smoothness_weight"]) {
+                cfg.planner_common.joint_trajectory_smoothness_weight =
+                    std::max(0.0, common["joint_trajectory_smoothness_weight"].as<double>());
+            }
+            if (common["joint_trajectory_position_weight"]) {
+                cfg.planner_common.joint_trajectory_position_weight =
+                    std::max(0.0, common["joint_trajectory_position_weight"].as<double>());
+            }
             cfg.planner_common.enable_interpolator_smoothing =
                 common["enable_interpolator_smoothing"].as<bool>();
             cfg.planner_common.interpolator_continuity_order =
@@ -410,55 +440,6 @@ bool loadRuntimeConfigFromYaml(
             }
         } else {
             setError("Missing required map: reactive_task_controller.planner.common");
-            return false;
-        }
-        if (const YAML::Node astar = planner["astar"]; astar && astar.IsMap()) {
-            if (!astar["voxel_resolution"] || !astar["neighbor_mode"] || !astar["use_se3_search"] ||
-                !astar["orientation_bin_size_rad"] || !astar["orientation_goal_tolerance_rad"] ||
-                !astar["enable_inplace_rotation_neighbors"] ||
-                !astar["force_axis_translation_neighbors_in_se3"] ||
-                !astar["obstacle_penalty_weight"] || !astar["corridor_deviation_weight"] ||
-                !astar["whole_body_penalty_weight"] || !astar["whole_body_penalty_margin"] ||
-                !astar["whole_body_hard_reject_margin"] || !astar["whole_body_reject_on_ik_fail"] ||
-                !astar["goal_shortcut_clearance_margin"] || !astar["orientation_cost_weight"] ||
-                !astar["orientation_heuristic_weight"] || !astar["max_iterations"] ||
-                !astar["max_planning_time_sec"] || !astar["edge_check_step"]) {
-                setError("Missing required keys under reactive_task_controller.planner.astar");
-                return false;
-            }
-            cfg.planner_astar.voxel_resolution = astar["voxel_resolution"].as<double>();
-            cfg.planner_astar.neighbor_mode = astar["neighbor_mode"].as<int>();
-            cfg.planner_astar.use_se3_search = astar["use_se3_search"].as<bool>();
-            cfg.planner_astar.orientation_bin_size_rad = astar["orientation_bin_size_rad"].as<double>();
-            cfg.planner_astar.orientation_goal_tolerance_rad =
-                astar["orientation_goal_tolerance_rad"].as<double>();
-            cfg.planner_astar.enable_inplace_rotation_neighbors =
-                astar["enable_inplace_rotation_neighbors"].as<bool>();
-            if (astar["goal_orientation_only"]) {
-                cfg.planner_astar.goal_orientation_only = astar["goal_orientation_only"].as<bool>();
-            }
-            if (astar["goal_orientation_blend_distance"]) {
-                cfg.planner_astar.goal_orientation_blend_distance =
-                    std::max(0.0, astar["goal_orientation_blend_distance"].as<double>());
-            }
-            cfg.planner_astar.force_axis_translation_neighbors_in_se3 =
-                astar["force_axis_translation_neighbors_in_se3"].as<bool>();
-            cfg.planner_astar.obstacle_penalty_weight = astar["obstacle_penalty_weight"].as<double>();
-            cfg.planner_astar.corridor_deviation_weight = astar["corridor_deviation_weight"].as<double>();
-            cfg.planner_astar.whole_body_penalty_weight = astar["whole_body_penalty_weight"].as<double>();
-            cfg.planner_astar.whole_body_penalty_margin = astar["whole_body_penalty_margin"].as<double>();
-            cfg.planner_astar.whole_body_hard_reject_margin = astar["whole_body_hard_reject_margin"].as<double>();
-            cfg.planner_astar.whole_body_reject_on_ik_fail = astar["whole_body_reject_on_ik_fail"].as<bool>();
-            cfg.planner_astar.goal_shortcut_clearance_margin =
-                astar["goal_shortcut_clearance_margin"].as<double>();
-            cfg.planner_astar.orientation_cost_weight = astar["orientation_cost_weight"].as<double>();
-            cfg.planner_astar.orientation_heuristic_weight =
-                astar["orientation_heuristic_weight"].as<double>();
-            cfg.planner_astar.max_iterations = astar["max_iterations"].as<int>();
-            cfg.planner_astar.max_planning_time_sec = astar["max_planning_time_sec"].as<double>();
-            cfg.planner_astar.edge_check_step = astar["edge_check_step"].as<double>();
-        } else {
-            setError("Missing required map: reactive_task_controller.planner.astar");
             return false;
         }
         if (const YAML::Node smoothing = planner["smoothing"]; smoothing && smoothing.IsMap()) {
@@ -505,13 +486,13 @@ ReactiveTaskController::ReactiveTaskController(const rclcpp::Node::SharedPtr& no
     ensureCameraDriverDistanceFieldInitialized();
     const auto marker_qos =
         rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
-    whole_body_postcheck_marker_pub_ =
-        node_->create_publisher<visualization_msgs::msg::MarkerArray>(
-            "/reactive_task/postcheck_failure_markers",
-            marker_qos);
     collision_ellipsoid_marker_pub_ =
         node_->create_publisher<visualization_msgs::msg::MarkerArray>(
             "/reactive_task/collision_ellipsoid_markers",
+            marker_qos);
+    trajectory_marker_pub_ =
+        node_->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/reactive_task/trajectory_markers",
             marker_qos);
     collision_ellipsoid_marker_timer_ = node_->create_wall_timer(
         std::chrono::milliseconds(100),
@@ -662,7 +643,6 @@ void ReactiveTaskController::start(const std::string& mapping) {
         throw std::runtime_error("ReactiveTask context init failed for '" + mapping + "': " + error);
     }
 
-    clearWholeBodyPostcheckFailureMarker(mapping);
     {
         std::lock_guard<std::mutex> lock(mapping_contexts_mutex_);
         auto it = mapping_contexts_.find(mapping);
@@ -684,8 +664,8 @@ void ReactiveTaskController::start(const std::string& mapping) {
 bool ReactiveTaskController::stop(const std::string& mapping) {
     TrajectoryControllerImpl::stop(mapping);
     cleanup_subscriptions(mapping);
-    clearWholeBodyPostcheckFailureMarker(mapping);
     clearCollisionEllipsoidMarkers(mapping);
+    clearTrajectoryMarkers(mapping);
     RCLCPP_INFO(node_->get_logger(), "[%s] ReactiveTaskController deactivated", mapping.c_str());
     return true;
 }
@@ -858,21 +838,11 @@ bool ReactiveTaskController::initializeMappingContext(const std::string& mapping
 
 std::shared_ptr<cp::CartesianPathPlanner> ReactiveTaskController::buildPlanner(
     const std::shared_ptr<const cp::DistanceFieldInterface>& map,
-    const Eigen::Vector3d& map_min) const {
-    cp::AStarConfig effective_astar = runtime_cfg_.planner_astar;
-    if (effective_astar.goal_orientation_only) {
-        effective_astar.use_se3_search = false;
-        effective_astar.enable_inplace_rotation_neighbors = false;
-        effective_astar.force_axis_translation_neighbors_in_se3 = false;
-        effective_astar.orientation_cost_weight = 0.0;
-        effective_astar.orientation_heuristic_weight = 0.0;
-    }
+    const Eigen::Vector3d& /*map_min*/) const {
     return std::make_shared<cp::CartesianPathPlanner>(
         runtime_cfg_.planner_common,
-        effective_astar,
         runtime_cfg_.planner_smoothing,
-        map,
-        map_min);
+        map);
 }
 
 void ReactiveTaskController::trajectory_callback(
@@ -952,18 +922,11 @@ void ReactiveTaskController::plan_and_execute(
     request.p_goal = T_goal.translation();
     request.R_goal = T_goal.linear();
     request.q_start_seed = q_start;
+    request.q_min = ctx->joint_limits.q_min;
+    request.q_max = ctx->joint_limits.q_max;
     request.safe_distance = runtime_cfg_.request_safe_distance;
     request.hard_clearance = runtime_cfg_.request_hard_clearance;
     request.goal_tolerance = runtime_cfg_.request_goal_tolerance;
-    request.whole_body_postcheck_non_blocking =
-        runtime_cfg_.whole_body_postcheck_non_blocking;
-    request.whole_body_postcheck_max_attempts =
-        runtime_cfg_.whole_body_postcheck_max_attempts;
-    request.whole_body_retry_forbidden_radius =
-        runtime_cfg_.whole_body_retry_forbidden_radius;
-    request.whole_body_retry_pushout_distance =
-        runtime_cfg_.whole_body_retry_pushout_distance;
-
     const Eigen::Vector3d min_corner = request.p_start.cwiseMin(request.p_goal);
     const Eigen::Vector3d max_corner = request.p_start.cwiseMax(request.p_goal);
     const Eigen::Vector3d map_margin = runtime_cfg_.map_margin_xyz;
@@ -1021,7 +984,6 @@ void ReactiveTaskController::plan_and_execute(
         logMapProbe("start", request.p_start);
         logMapProbe("goal", request.p_goal);
     }
-    clearWholeBodyPostcheckFailureMarker(mapping);
     publishCollisionEllipsoidMarkers(mapping, q_start, *ctx);
 
     auto planner = buildPlanner(map, map_min);
@@ -1051,9 +1013,7 @@ void ReactiveTaskController::plan_and_execute(
              seed_default = q_current_vec,
              goal_position = request.p_goal,
              goal_orientation = request.R_goal,
-             goal_tolerance = request.goal_tolerance,
-             goal_orientation_only = runtime_cfg_.planner_astar.goal_orientation_only,
-             goal_orientation_blend_distance = runtime_cfg_.planner_astar.goal_orientation_blend_distance](
+             goal_tolerance = request.goal_tolerance](
                 const Eigen::Vector3d& p_target,
                 const Eigen::Matrix3d& R_target,
                 const std::optional<Eigen::VectorXd>& q_seed,
@@ -1070,57 +1030,22 @@ void ReactiveTaskController::plan_and_execute(
                     return false;
                 }
 
-                const double dist_to_goal = (p_target - goal_position).norm();
-                const bool strict_goal_orientation =
-                    !goal_orientation_only || (dist_to_goal <= goal_tolerance + 1e-6) ||
-                    (orientationErrorRad(R_target, goal_orientation) <= 1e-3);
-                std::vector<Eigen::Matrix3d> orientation_candidates;
-                if (strict_goal_orientation) {
-                    orientation_candidates.push_back(goal_orientation);
-                    appendOrientationCandidate(R_target, orientation_candidates);
-                } else {
-                    arm_controller::kinematics::ForwardKinematicsOutput fk_seed;
-                    if (fk_provider && q_seed.has_value() && q_seed->size() > 0 &&
-                        fk_provider->compute(*q_seed, fk_seed)) {
-                        const double blend_distance = std::max(
-                            goal_tolerance + 1e-6,
-                            goal_orientation_blend_distance);
-                        const double alpha = std::clamp(
-                            1.0 - dist_to_goal / blend_distance,
-                            0.0,
-                            1.0);
-                        orientation_candidates = buildIntermediateOrientationCandidates(
-                            fk_seed.ee_rotation,
-                            goal_orientation,
-                            R_target,
-                            alpha,
-                            dist_to_goal,
-                            blend_distance);
-                    } else {
-                        orientation_candidates.push_back(R_target);
-                        appendOrientationCandidate(goal_orientation, orientation_candidates);
-                    }
-                }
+                const geometry_msgs::msg::Pose pose_world =
+                    toPoseMsg(p_target, R_target);
+                const geometry_msgs::msg::Pose pose_base =
+                    moveit->worldPoseToBaseLinkPose(pose_world);
 
-                for (const Eigen::Matrix3d& desired_orientation : orientation_candidates) {
-                    const geometry_msgs::msg::Pose pose_world =
-                        toPoseMsg(p_target, desired_orientation);
-                    const geometry_msgs::msg::Pose pose_base =
-                        moveit->worldPoseToBaseLinkPose(pose_world);
-
-                    std::vector<double> q_solution_vec;
-                    if (!tracik->computeIKClosest(pose_base, seed, q_solution_vec, 5, false)) {
-                        continue;
-                    }
-                    if (q_solution_vec.empty()) {
-                        continue;
-                    }
-                    q_solution = Eigen::Map<const Eigen::VectorXd>(
-                        q_solution_vec.data(),
-                        static_cast<Eigen::Index>(q_solution_vec.size()));
-                    return true;
+                std::vector<double> q_solution_vec;
+                if (!tracik->computeIKClosest(pose_base, seed, q_solution_vec, 8, false)) {
+                    return false;
                 }
-                return false;
+                if (q_solution_vec.empty()) {
+                    return false;
+                }
+                q_solution = Eigen::Map<const Eigen::VectorXd>(
+                    q_solution_vec.data(),
+                    static_cast<Eigen::Index>(q_solution_vec.size()));
+                return true;
             };
 
         whole_body_validator.emplace(
@@ -1132,6 +1057,56 @@ void ReactiveTaskController::plan_and_execute(
         request.whole_body_pose_validator = whole_body_validator->makePoseValidatorFn();
         request.whole_body_segment_validator = whole_body_validator->makeSegmentValidatorFn();
         request.whole_body_pose_diagnostic = whole_body_validator->makePoseDiagnosticFn();
+        request.joint_state_validator = whole_body_validator->makeJointStateValidatorFn();
+        request.joint_segment_validator = whole_body_validator->makeJointSegmentValidatorFn();
+        request.joint_to_pose_fn =
+            [fk = ctx->fk_provider](
+                const Eigen::VectorXd& q,
+                cp::CartesianWaypoint& wp) -> bool {
+                if (!fk) {
+                    return false;
+                }
+                arm_controller::kinematics::ForwardKinematicsOutput fk_out;
+                if (!fk->compute(q, fk_out)) {
+                    return false;
+                }
+                wp.position = fk_out.ee_position;
+                wp.orientation = fk_out.ee_rotation;
+                return true;
+            };
+
+        const geometry_msgs::msg::Pose pose_goal_world =
+            toPoseMsg(request.p_goal, request.R_goal);
+        const geometry_msgs::msg::Pose pose_goal_base =
+            ctx->moveit_adapter->worldPoseToBaseLinkPose(pose_goal_world);
+        std::vector<double> seed_goal = q_current_vec;
+        std::vector<double> q_goal_vec;
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            if (!ctx->tracik_adapter->computeIKClosest(
+                    pose_goal_base, seed_goal, q_goal_vec, 1, false) ||
+                q_goal_vec.size() != q_current_vec.size()) {
+                continue;
+            }
+            const Eigen::VectorXd q_goal = Eigen::Map<const Eigen::VectorXd>(
+                q_goal_vec.data(),
+                static_cast<Eigen::Index>(q_goal_vec.size()));
+            bool duplicate = false;
+            for (const auto& existing : request.q_goal_candidates) {
+                if (existing.size() == q_goal.size() &&
+                    (existing - q_goal).cwiseAbs().maxCoeff() < 1e-3) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                request.q_goal_candidates.push_back(q_goal);
+            }
+            seed_goal = q_goal_vec;
+            if (!seed_goal.empty()) {
+                const std::size_t idx = static_cast<std::size_t>(attempt % seed_goal.size());
+                seed_goal[idx] += ((attempt % 2) == 0 ? 0.15 : -0.15);
+            }
+        }
     } else {
         RCLCPP_WARN(
             node_->get_logger(),
@@ -1141,6 +1116,15 @@ void ReactiveTaskController::plan_and_execute(
             ctx->moveit_adapter ? "true" : "false",
             ctx->tracik_adapter ? "true" : "false",
             ctx->collision_ellipsoids.size());
+    }
+
+    if (request.q_goal_candidates.empty()) {
+        RCLCPP_ERROR(
+            node_->get_logger(),
+            "[%s] ReactiveTask planner start failed: no valid goal IK candidates.",
+            mapping.c_str());
+        last_execution_success_[mapping] = false;
+        return;
     }
 
     cp::ReplannerManager replanner(planner);
@@ -1192,7 +1176,7 @@ void ReactiveTaskController::plan_and_execute(
         mapping.c_str());
     RCLCPP_INFO(
         node_->get_logger(),
-        "[%s] safety_config: neo_dt=%.4f s, planner_dt=%.4f s, replan_every=%d ticks, max_ticks=%d, desired_clearance=%.3f, hard_clearance=%.3f, goal_orientation_only=%s, pos_tol=%.4f, ori_tol=%.4f",
+        "[%s] safety_config: neo_dt=%.4f s, planner_dt=%.4f s, replan_every=%d ticks, max_ticks=%d, desired_clearance=%.3f, hard_clearance=%.3f, joint_sampling=%s, pos_tol=%.4f, ori_tol=%.4f",
         mapping.c_str(),
         neo_tick_sec,
         planner_tick_sec,
@@ -1200,7 +1184,7 @@ void ReactiveTaskController::plan_and_execute(
         runtime_cfg_.max_control_ticks,
         request.safe_distance,
         request.hard_clearance,
-        runtime_cfg_.planner_astar.goal_orientation_only ? "true" : "false",
+        runtime_cfg_.planner_common.use_joint_space_sampling ? "true" : "false",
         runtime_cfg_.goal_position_tolerance,
         runtime_cfg_.goal_orientation_tolerance_rad);
     RCLCPP_INFO(
@@ -1277,6 +1261,25 @@ void ReactiveTaskController::plan_and_execute(
         RCLCPP_WARN(node_->get_logger(), "[%s] ReactiveTask initial sample failed", mapping.c_str());
         sample_ok = false;
     }
+    const double active_duration_sec = replanner.activeSegmentTotalDurationSec();
+    const int configured_max_planner_ticks = std::max(1, runtime_cfg_.max_control_ticks);
+    const int duration_limited_min_ticks = std::max(
+        1,
+        static_cast<int>(std::ceil((active_duration_sec + 1.0) / planner_tick_sec)));
+    const int effective_max_planner_ticks =
+        std::max(configured_max_planner_ticks, duration_limited_min_ticks);
+
+    if (sample_ok) {
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "[%s] active_trajectory: duration=%.3f s sampled_points=%d max_ticks(configured=%d effective=%d)",
+            mapping.c_str(),
+            active_duration_sec,
+            replanner.activeSegmentPointCount(),
+            configured_max_planner_ticks,
+            effective_max_planner_ticks);
+        publishTrajectoryMarkers(mapping, replanner, sample, fk_start.ee_position);
+    }
     Eigen::VectorXd ik_seed_q = q_start;
     bool ik_seed_valid = (ik_seed_q.size() == q_start.size()) && ik_seed_q.allFinite();
     const int chunk_ticks = std::max(1, replanner_cfg.replan_every_control_ticks);
@@ -1300,6 +1303,8 @@ void ReactiveTaskController::plan_and_execute(
     constexpr double kPosProgressEps = 1e-4;
     constexpr double kOriProgressEps = 1e-3;
     const double feedback_stale_threshold_sec = std::max(0.2, 5.0 * neo_tick_sec);
+    bool terminal_goal_capture_active = false;
+    bool terminal_goal_capture_logged = false;
 
     auto launch_pending_chunk_plan = [&]() {
         if (pending_plan_inflight) {
@@ -1343,7 +1348,7 @@ void ReactiveTaskController::plan_and_execute(
 
     launch_pending_chunk_plan();
 
-    while (rclcpp::ok() && sample_ok && planner_tick < runtime_cfg_.max_control_ticks) {
+    while (rclcpp::ok() && sample_ok && planner_tick < effective_max_planner_ticks) {
         if (!is_active(mapping)) {
             break;
         }
@@ -1369,18 +1374,101 @@ void ReactiveTaskController::plan_and_execute(
         if (!ctx->fk_provider->compute(q_now, fk_now)) {
             break;
         }
+        const double continuous_sample_time_sec =
+            std::min(
+                planner_time_sec + planner_tick_accumulator,
+                replanner.activeSegmentTotalDurationSec());
+        if (!replanner.sampleByElapsedTime(continuous_sample_time_sec, sample)) {
+            RCLCPP_WARN(
+                node_->get_logger(),
+                "[%s] ReactiveTask continuous sample failed at planner tick %d",
+                mapping.c_str(),
+                planner_tick);
+            sample_ok = false;
+            break;
+        }
+        const bool reference_finished =
+            continuous_sample_time_sec >=
+            std::max(0.0, replanner.activeSegmentTotalDurationSec() - 1e-6);
         if ((neo_iter % safety_log_stride) == 0) {
             publishCollisionEllipsoidMarkers(mapping, q_now, *ctx);
+        }
+
+        const double pos_err_now =
+            (sample.T_target.translation() - fk_now.ee_pose.translation()).norm();
+        const Eigen::Matrix3d R_err_now =
+            fk_now.ee_pose.rotation().transpose() * sample.T_target.rotation();
+        Eigen::AngleAxisd aa_err_now(R_err_now);
+        const double ori_err_now =
+            std::isfinite(aa_err_now.angle()) ? std::abs(aa_err_now.angle()) : 0.0;
+        const double pos_err_goal = (fk_now.ee_position - request.p_goal).norm();
+        const double ori_err_goal = orientationErrorRad(fk_now.ee_rotation, request.R_goal);
+
+        const bool should_enter_terminal_goal_capture =
+            runtime_cfg_.terminal_goal_capture_enable &&
+            !terminal_goal_capture_active &&
+            ((pos_err_goal <= runtime_cfg_.terminal_goal_capture_pos_err_threshold_m &&
+              ori_err_goal <= runtime_cfg_.terminal_goal_capture_ori_err_threshold_rad) ||
+             no_progress_cycles >= runtime_cfg_.terminal_goal_capture_no_progress_cycles ||
+             reference_finished);
+        if (should_enter_terminal_goal_capture) {
+            terminal_goal_capture_active = true;
+            if (!terminal_goal_capture_logged) {
+                RCLCPP_WARN(
+                    node_->get_logger(),
+                    "[%s] terminal_goal_capture: enabled at planner_tick=%d pos_err_goal=%.5f ori_err_goal=%.5f no_progress_cycles=%d reference_finished=%s",
+                    mapping.c_str(),
+                    planner_tick,
+                    pos_err_goal,
+                    ori_err_goal,
+                    no_progress_cycles,
+                    reference_finished ? "true" : "false");
+                terminal_goal_capture_logged = true;
+            }
+        }
+
+        const double terminal_position_release_tolerance =
+            3.0 * runtime_cfg_.goal_position_tolerance;
+        const double terminal_orientation_blend =
+            terminal_goal_capture_active
+                ? std::clamp(
+                      (terminal_position_release_tolerance - pos_err_goal) /
+                          std::max(1e-6,
+                                   terminal_position_release_tolerance -
+                                       runtime_cfg_.goal_position_tolerance),
+                      0.0,
+                      1.0)
+                : 1.0;
+        const bool terminal_position_priority =
+            terminal_goal_capture_active && terminal_orientation_blend < 0.999;
+
+        Eigen::Isometry3d commanded_target_pose = sample.T_target;
+        if (terminal_goal_capture_active) {
+            commanded_target_pose.translation() = request.p_goal;
+
+            Eigen::Quaterniond q_current_terminal(fk_now.ee_pose.linear());
+            Eigen::Quaterniond q_goal_terminal(request.R_goal);
+            q_current_terminal.normalize();
+            q_goal_terminal.normalize();
+            if (q_current_terminal.dot(q_goal_terminal) < 0.0) {
+                q_goal_terminal.coeffs() *= -1.0;
+            }
+            commanded_target_pose.linear() =
+                q_current_terminal
+                    .slerp(terminal_orientation_blend, q_goal_terminal)
+                    .normalized()
+                    .toRotationMatrix();
         }
 
         rq::TaskVelocityInput task_in;
         task_in.T_current = fk_now.ee_pose;
         task_in.has_target_pose = true;
-        task_in.T_target = sample.T_target;
-        // Disable feedforward twist for ReactiveTask temporarily and use
-        // pure pose-error feedback to rule out end-segment feedforward bias.
-        task_in.has_target_twist = false;
-        task_in.target_twist.setZero();
+        task_in.T_target = commanded_target_pose;
+        task_in.has_target_twist = !reference_finished && !terminal_goal_capture_active;
+        task_in.target_twist =
+            (reference_finished || terminal_goal_capture_active)
+                ? Eigen::Matrix<double, 6, 1>::Zero()
+                : sample.target_twist;
         const rq::TaskVelocityOutput task_out =
             task_velocity_generator.compute(task_in, reactive_cfg_.task_velocity);
 
@@ -1402,6 +1490,9 @@ void ReactiveTaskController::plan_and_execute(
                 manip_grad.setZero();
             }
         }
+        if (terminal_goal_capture_active) {
+            manip_grad *= terminal_orientation_blend;
+        }
 
         Eigen::VectorXd q_min_task = ctx->joint_limits.q_min;
         Eigen::VectorXd q_max_task = ctx->joint_limits.q_max;
@@ -1419,7 +1510,7 @@ void ReactiveTaskController::plan_and_execute(
             using_dynamic_tracik_posture = true;
         } else if (ctx->tracik_ready && ctx->tracik_adapter && ctx->moveit_adapter) {
             const geometry_msgs::msg::Pose pose_world =
-                toPoseMsg(sample.T_target.translation(), sample.T_target.linear());
+                toPoseMsg(commanded_target_pose.translation(), commanded_target_pose.linear());
             const geometry_msgs::msg::Pose pose_base =
                 ctx->moveit_adapter->worldPoseToBaseLinkPose(pose_world);
             const Eigen::VectorXd& seed_vec = (ik_seed_valid && ik_seed_q.size() == q_now.size())
@@ -1441,6 +1532,13 @@ void ReactiveTaskController::plan_and_execute(
         if (!using_dynamic_tracik_posture) {
             posture_qdot_ref.setZero();
         }
+        const bool allow_posture_tracking =
+            ((terminal_goal_capture_active && terminal_orientation_blend >= 0.95) ||
+             (!terminal_goal_capture_active &&
+              pos_err_now <= 0.05 && ori_err_now <= 0.10));
+        if (!allow_posture_tracking) {
+            posture_qdot_ref.setZero();
+        }
 
         rq::ReactiveQpBuildInput qp_input;
         qp_input.q_current = q_now;
@@ -1453,6 +1551,11 @@ void ReactiveTaskController::plan_and_execute(
         qp_input.qd_max = ctx->qd_max;
         qp_input.joint_limits.q_min = q_min_task;
         qp_input.joint_limits.q_max = q_max_task;
+        rq::ReactiveQpBuildConfig qp_build_cfg = reactive_cfg_.qp_build;
+        bool terminal_obstacle_relaxed = false;
+        double terminal_obstacle_min_distance = std::numeric_limits<double>::quiet_NaN();
+        double terminal_obstacle_release_distance =
+            runtime_cfg_.terminal_goal_capture_obstacle_near_distance_m;
         if (enable_obstacle_constraints) {
             std::string obstacle_error;
             const int generated = rq::BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
@@ -1474,10 +1577,34 @@ void ReactiveTaskController::plan_and_execute(
                     planner_tick,
                     obstacle_error.c_str());
             }
+            if (!qp_input.obstacle_constraints.empty()) {
+                terminal_obstacle_min_distance = std::numeric_limits<double>::infinity();
+                for (const auto& c : qp_input.obstacle_constraints) {
+                    if (std::isfinite(c.distance)) {
+                        terminal_obstacle_min_distance =
+                            std::min(terminal_obstacle_min_distance, c.distance);
+                    }
+                }
+                if (!std::isfinite(terminal_obstacle_min_distance)) {
+                    terminal_obstacle_min_distance = std::numeric_limits<double>::quiet_NaN();
+                }
+            }
+            if (terminal_goal_capture_active &&
+                runtime_cfg_.terminal_goal_capture_relax_obstacle_damper_when_far &&
+                std::isfinite(terminal_obstacle_min_distance)) {
+                terminal_obstacle_release_distance = std::max(
+                    0.0,
+                    request.hard_clearance + 1e-4);
+                if (terminal_obstacle_min_distance > terminal_obstacle_release_distance) {
+                    qp_build_cfg.obstacle_damper.safety_distance =
+                        std::max(0.0, request.hard_clearance);
+                    terminal_obstacle_relaxed = true;
+                }
+            }
         }
 
         rq::ReactiveQpProblem problem;
-        if (!rq::ReactiveQpBuilder::build(qp_input, reactive_cfg_.qp_build, problem, &error)) {
+        if (!rq::ReactiveQpBuilder::build(qp_input, qp_build_cfg, problem, &error)) {
             RCLCPP_WARN(
                 node_->get_logger(),
                 "[%s] ReactiveTask build QP failed at planner tick %d: %s",
@@ -1505,6 +1632,17 @@ void ReactiveTaskController::plan_and_execute(
             qdot_cmd[static_cast<std::size_t>(i)] = solution(i);
             qdot_eigen(i) = solution(i);
         }
+        if (!qdot_eigen.allFinite()) {
+            RCLCPP_ERROR(
+                node_->get_logger(),
+                "[%s] ReactiveTask abort: QP produced non-finite qdot.",
+                mapping.c_str());
+            break;
+        }
+        for (int i = 0; i < dof; ++i) {
+            qdot_eigen(i) = std::clamp(qdot_eigen(i), ctx->qd_min(i), ctx->qd_max(i));
+            qdot_cmd[static_cast<std::size_t>(i)] = qdot_eigen(i);
+        }
 
         const Eigen::VectorXd task_pred = J * qdot_eigen;
         const Eigen::VectorXd task_residual = task_pred - task_out.v_des;
@@ -1518,8 +1656,8 @@ void ReactiveTaskController::plan_and_execute(
         const double joint_limit_margin_min = (q_now - ctx->joint_limits.q_min)
                                                   .cwiseMin(ctx->joint_limits.q_max - q_now)
                                                   .minCoeff();
-        const double pos_err = (fk_now.ee_position - request.p_goal).norm();
-        const double ori_err = orientationErrorRad(fk_now.ee_rotation, request.R_goal);
+        const double pos_err = pos_err_goal;
+        const double ori_err = ori_err_goal;
 
         if (q_prev_feedback_valid && q_prev_feedback.size() == q_now.size()) {
             const double joint_delta_max = (q_now - q_prev_feedback).cwiseAbs().maxCoeff();
@@ -1574,22 +1712,32 @@ void ReactiveTaskController::plan_and_execute(
         }
 
         if ((neo_iter % safety_log_stride) == 0) {
-            double map_clearance = std::numeric_limits<double>::quiet_NaN();
+            double ee_clearance = std::numeric_limits<double>::quiet_NaN();
             if (runtime_cfg_.map_source != "dummy") {
                 const auto query = map->queryDistanceAndGradient(fk_now.ee_position);
                 if (query.observed && query.distance_valid) {
-                    map_clearance = query.distance - request.safe_distance;
+                    ee_clearance = query.distance - request.safe_distance;
                 }
             } else if (runtime_cfg_.enable_dummy_obstacle && runtime_cfg_.dummy_obstacle_radius > 0.0) {
                 const Eigen::Vector3d center = (mapping == "right_arm")
                                                    ? runtime_cfg_.dummy_obstacle_center_right_arm
                                                    : runtime_cfg_.dummy_obstacle_center_left_arm;
-                map_clearance = (fk_now.ee_position - center).norm() -
-                                runtime_cfg_.dummy_obstacle_radius - request.safe_distance;
+                ee_clearance = (fk_now.ee_position - center).norm() -
+                               runtime_cfg_.dummy_obstacle_radius - request.safe_distance;
             }
+            double whole_body_min_margin = std::numeric_limits<double>::quiet_NaN();
+            bool whole_body_collision_free = false;
+            std::string whole_body_state = "validator_unavailable";
+            if (whole_body_validator.has_value()) {
+                const auto diag = whole_body_validator->diagnoseJointState(q_now, request.safe_distance);
+                whole_body_min_margin = diag.min_margin;
+                whole_body_collision_free = diag.collision_free;
+                whole_body_state = diag.reason;
+            }
+            publishTrajectoryMarkers(mapping, replanner, sample, fk_now.ee_position);
             RCLCPP_INFO(
                 node_->get_logger(),
-                "[%s] safety_tick: planner_tick=%d neo_iter=%d pos_err=%.5f ori_err=%.5f qdot_norm=%.5f qdot_max=%.5f qdot_limit_violation=%s joint_margin_min=%.5f task_residual_norm=%.6f map_clearance=%.5f",
+                "[%s] safety_tick: planner_tick=%d neo_iter=%d pos_err=%.5f ori_err=%.5f qdot_norm=%.5f qdot_max=%.5f qdot_limit_violation=%s joint_margin_min=%.5f task_residual_norm=%.6f ee_clearance=%.5f whole_body_margin=%.5f whole_body_collision_free=%s whole_body_state=%s terminal_goal_capture=%s terminal_position_priority=%s terminal_position_release_tol=%.5f terminal_orientation_blend=%.3f",
                 mapping.c_str(),
                 planner_tick,
                 neo_iter,
@@ -1600,7 +1748,24 @@ void ReactiveTaskController::plan_and_execute(
                 qdot_limit_violation ? "true" : "false",
                 joint_limit_margin_min,
                 task_residual_norm,
-                map_clearance);
+                ee_clearance,
+                whole_body_min_margin,
+                whole_body_collision_free ? "true" : "false",
+                whole_body_state.c_str(),
+                terminal_goal_capture_active ? "true" : "false",
+                terminal_position_priority ? "true" : "false",
+                terminal_position_release_tolerance,
+                terminal_orientation_blend);
+            if (terminal_goal_capture_active) {
+                RCLCPP_INFO(
+                    node_->get_logger(),
+                    "[%s] terminal_goal_capture_obstacle: min_distance=%.5f release_threshold=%.5f relaxed=%s active_safety_distance=%.5f",
+                    mapping.c_str(),
+                    terminal_obstacle_min_distance,
+                    terminal_obstacle_release_distance,
+                    terminal_obstacle_relaxed ? "true" : "false",
+                    qp_build_cfg.obstacle_damper.safety_distance);
+            }
             RCLCPP_INFO(
                 node_->get_logger(),
                 "[%s] safety_vectors: q_now=%s qdot=%s v_des=%s task_pred=%s task_residual=%s",
@@ -1648,7 +1813,9 @@ void ReactiveTaskController::plan_and_execute(
                     break;
                 }
                 ++ticks_in_chunk;
-                if (ticks_in_chunk >= chunk_ticks) {
+                if (ticks_in_chunk >= chunk_ticks &&
+                    !(terminal_goal_capture_active &&
+                      runtime_cfg_.terminal_goal_capture_suppress_replanning)) {
                     waiting_for_chunk_commit = true;
                     RCLCPP_INFO(
                         node_->get_logger(),
@@ -1712,10 +1879,23 @@ void ReactiveTaskController::plan_and_execute(
                         chunk_index);
                     launch_pending_chunk_plan();
                 }
-            } else if (!pending_plan_inflight) {
+            } else if (!pending_plan_inflight &&
+                       !(terminal_goal_capture_active &&
+                         runtime_cfg_.terminal_goal_capture_suppress_replanning)) {
                 launch_pending_chunk_plan();
             }
         }
+    }
+
+    if (!reached_goal && sample_ok && planner_tick >= effective_max_planner_ticks) {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "[%s] ReactiveTask stopped by planner tick budget: planner_tick=%d effective_max_ticks=%d active_duration=%.3f s planner_dt=%.3f s",
+            mapping.c_str(),
+            planner_tick,
+            effective_max_planner_ticks,
+            active_duration_sec,
+            planner_tick_sec);
     }
 
     if (pending_plan_inflight && pending_plan_future.valid()) {
@@ -1784,182 +1964,6 @@ bool ReactiveTaskController::send_joint_velocities(
         RCLCPP_ERROR(node_->get_logger(), "[%s] ReactiveTask send velocity exception: %s", mapping.c_str(), e.what());
         return false;
     }
-}
-
-void ReactiveTaskController::publishWholeBodyPostcheckFailureMarker(
-    const std::string& mapping,
-    const cp::PathPlanningInput::WholeBodyPostcheckFailureEvent& event,
-    const std::shared_ptr<const cp::DistanceFieldInterface>& map,
-    const MappingContext& ctx) {
-    if (!whole_body_postcheck_marker_pub_) {
-        return;
-    }
-
-    const int base_id = markerBaseIdForMapping(mapping);
-    const Eigen::Vector3d p = event.diagnostic.worst_point_world.allFinite() &&
-                                      event.diagnostic.worst_point_world.norm() > 1e-9
-                                  ? event.diagnostic.worst_point_world
-                                  : event.position;
-
-    visualization_msgs::msg::MarkerArray array_msg;
-
-    visualization_msgs::msg::Marker sphere;
-    sphere.header.frame_id = "world";
-    sphere.header.stamp = node_->now();
-    sphere.ns = "reactive_task_postcheck_failure";
-    sphere.id = base_id + 0;
-    sphere.type = visualization_msgs::msg::Marker::SPHERE;
-    sphere.action = visualization_msgs::msg::Marker::ADD;
-    sphere.pose.position.x = p.x();
-    sphere.pose.position.y = p.y();
-    sphere.pose.position.z = p.z();
-    sphere.pose.orientation.w = 1.0;
-    sphere.scale.x = 0.04;
-    sphere.scale.y = 0.04;
-    sphere.scale.z = 0.04;
-    sphere.color.r = 1.0f;
-    sphere.color.g = 0.1f;
-    sphere.color.b = 0.1f;
-    sphere.color.a = 0.95f;
-    array_msg.markers.push_back(sphere);
-
-    visualization_msgs::msg::Marker text;
-    text.header = sphere.header;
-    text.ns = "reactive_task_postcheck_failure_text";
-    text.id = base_id + 1;
-    text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-    text.action = visualization_msgs::msg::Marker::ADD;
-    text.pose.position.x = p.x();
-    text.pose.position.y = p.y();
-    text.pose.position.z = p.z() + 0.06;
-    text.pose.orientation.w = 1.0;
-    text.scale.z = 0.03;
-    text.color.r = 1.0f;
-    text.color.g = 1.0f;
-    text.color.b = 1.0f;
-    text.color.a = 0.95f;
-    std::ostringstream oss;
-    oss.setf(std::ios::fixed);
-    oss.precision(3);
-    oss << mapping << " "
-        << (event.diagnostic.reason.empty() ? "segment_fail" : event.diagnostic.reason)
-        << " d=" << event.diagnostic.worst_distance
-        << " r=" << event.diagnostic.worst_effective_radius
-        << " sd=" << event.diagnostic.safe_distance_used
-        << " req=" << event.diagnostic.required_clearance
-        << " m=" << event.diagnostic.min_margin;
-    if (!event.diagnostic.worst_link_name.empty()) {
-        oss << " " << event.diagnostic.worst_link_name;
-    }
-    text.text = oss.str();
-    array_msg.markers.push_back(text);
-
-    if (map) {
-        const cp::DistanceFieldQueryResult query = map->queryDistanceAndGradient(p);
-        if (query.gradient_valid) {
-            const double grad_norm = query.gradient.norm();
-            if (std::isfinite(grad_norm) && grad_norm > 1e-6) {
-                const Eigen::Vector3d dir = query.gradient / grad_norm;
-                visualization_msgs::msg::Marker arrow;
-                arrow.header = sphere.header;
-                arrow.ns = "reactive_task_postcheck_failure_gradient";
-                arrow.id = base_id + 2;
-                arrow.type = visualization_msgs::msg::Marker::ARROW;
-                arrow.action = visualization_msgs::msg::Marker::ADD;
-                geometry_msgs::msg::Point p0;
-                p0.x = p.x();
-                p0.y = p.y();
-                p0.z = p.z();
-                geometry_msgs::msg::Point p1;
-                const Eigen::Vector3d q = p + 0.12 * dir;
-                p1.x = q.x();
-                p1.y = q.y();
-                p1.z = q.z();
-                arrow.points.push_back(p0);
-                arrow.points.push_back(p1);
-                arrow.scale.x = 0.008;
-                arrow.scale.y = 0.016;
-                arrow.scale.z = 0.02;
-                arrow.color.r = 0.1f;
-                arrow.color.g = 1.0f;
-                arrow.color.b = 0.1f;
-                arrow.color.a = 0.95f;
-                array_msg.markers.push_back(arrow);
-            }
-        }
-    }
-
-    if (!ctx.collision_ellipsoids.empty() && event.diagnostic.q_solution.size() > 0 &&
-        ctx.fk_provider) {
-        arm_controller::kinematics::ForwardKinematicsOutput fk_out;
-        if (ctx.fk_provider->compute(event.diagnostic.q_solution, fk_out)) {
-            for (const auto& ellipsoid : ctx.collision_ellipsoids) {
-                const std::string debug_name =
-                    ellipsoid.debug_name.empty() ? ("ellipsoid_" + ellipsoid.link_name) : ellipsoid.debug_name;
-                if (debug_name != event.diagnostic.worst_link_name) {
-                    continue;
-                }
-                const auto it = fk_out.link_poses.find(ellipsoid.link_name);
-                if (it == fk_out.link_poses.end()) {
-                    break;
-                }
-
-                const Eigen::Isometry3d& T_world_link = it->second;
-                const Eigen::Vector3d center_world = T_world_link * ellipsoid.center_in_link;
-                const Eigen::Quaterniond q_world(T_world_link.linear());
-
-                visualization_msgs::msg::Marker ellipsoid_marker;
-                ellipsoid_marker.header = sphere.header;
-                ellipsoid_marker.ns = "reactive_task_postcheck_failure_ellipsoid";
-                ellipsoid_marker.id = base_id + 3;
-                ellipsoid_marker.type = visualization_msgs::msg::Marker::SPHERE;
-                ellipsoid_marker.action = visualization_msgs::msg::Marker::ADD;
-                ellipsoid_marker.pose.position.x = center_world.x();
-                ellipsoid_marker.pose.position.y = center_world.y();
-                ellipsoid_marker.pose.position.z = center_world.z();
-                ellipsoid_marker.pose.orientation.x = q_world.x();
-                ellipsoid_marker.pose.orientation.y = q_world.y();
-                ellipsoid_marker.pose.orientation.z = q_world.z();
-                ellipsoid_marker.pose.orientation.w = q_world.w();
-                ellipsoid_marker.scale.x = 2.0 * ellipsoid.radii.x();
-                ellipsoid_marker.scale.y = 2.0 * ellipsoid.radii.y();
-                ellipsoid_marker.scale.z = 2.0 * ellipsoid.radii.z();
-                ellipsoid_marker.color.r = 1.0f;
-                ellipsoid_marker.color.g = 0.6f;
-                ellipsoid_marker.color.b = 0.1f;
-                ellipsoid_marker.color.a = 0.25f;
-                array_msg.markers.push_back(ellipsoid_marker);
-                break;
-            }
-        }
-    }
-
-    whole_body_postcheck_marker_pub_->publish(array_msg);
-}
-
-void ReactiveTaskController::clearWholeBodyPostcheckFailureMarker(
-    const std::string& mapping) {
-    if (!whole_body_postcheck_marker_pub_) {
-        return;
-    }
-
-    visualization_msgs::msg::MarkerArray array_msg;
-    for (const auto& ns : {
-             std::string("reactive_task_postcheck_failure"),
-             std::string("reactive_task_postcheck_failure_text"),
-             std::string("reactive_task_postcheck_failure_gradient"),
-             std::string("reactive_task_postcheck_failure_ellipsoid")}) {
-        for (int offset = 0; offset <= 3; ++offset) {
-            visualization_msgs::msg::Marker marker;
-            marker.header.frame_id = "world";
-            marker.header.stamp = node_->now();
-            marker.ns = ns;
-            marker.id = markerBaseIdForMapping(mapping) + offset;
-            marker.action = visualization_msgs::msg::Marker::DELETE;
-            array_msg.markers.push_back(marker);
-        }
-    }
-    whole_body_postcheck_marker_pub_->publish(array_msg);
 }
 
 void ReactiveTaskController::publishCollisionEllipsoidMarkers(
@@ -2062,6 +2066,126 @@ void ReactiveTaskController::clearCollisionEllipsoidMarkers(
     if (!array_msg.markers.empty()) {
         collision_ellipsoid_marker_pub_->publish(array_msg);
     }
+}
+
+void ReactiveTaskController::publishTrajectoryMarkers(
+    const std::string& mapping,
+    const cp::ReplannerManager& replanner,
+    const cp::TimedCartesianSample& sample,
+    const Eigen::Vector3d& ee_position) {
+    if (!trajectory_marker_pub_) {
+        return;
+    }
+    if (!replanner.hasActiveTrajectory()) {
+        clearTrajectoryMarkers(mapping);
+        return;
+    }
+
+    visualization_msgs::msg::MarkerArray array_msg;
+    const int base_id = markerBaseIdForMapping(mapping) + 2000;
+    const auto stamp = node_->now();
+
+    visualization_msgs::msg::Marker path_marker;
+    path_marker.header.frame_id = "world";
+    path_marker.header.stamp = stamp;
+    path_marker.ns = "reactive_task_active_path";
+    path_marker.id = base_id;
+    path_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    path_marker.action = visualization_msgs::msg::Marker::ADD;
+    path_marker.pose.orientation.w = 1.0;
+    path_marker.scale.x = 0.01;
+    path_marker.color.r = 0.05f;
+    path_marker.color.g = 0.85f;
+    path_marker.color.b = 0.95f;
+    path_marker.color.a = 0.95f;
+    const double total_duration_sec = replanner.activeSegmentTotalDurationSec();
+    const double marker_sample_dt_sec = 0.05;
+    const int dense_point_count = std::max(
+        2,
+        std::min(
+            800,
+            static_cast<int>(std::ceil(total_duration_sec / marker_sample_dt_sec)) + 1));
+    path_marker.points.reserve(static_cast<std::size_t>(dense_point_count));
+    for (int i = 0; i < dense_point_count; ++i) {
+        const double alpha = (dense_point_count <= 1)
+                                 ? 0.0
+                                 : static_cast<double>(i) /
+                                       static_cast<double>(dense_point_count - 1);
+        const double t = alpha * total_duration_sec;
+        cp::TimedCartesianSample path_sample;
+        if (!replanner.sampleByElapsedTime(t, path_sample)) {
+            continue;
+        }
+        path_marker.points.push_back(toPointMsg(path_sample.T_target.translation()));
+    }
+    if (path_marker.points.size() >= 2u) {
+        array_msg.markers.push_back(path_marker);
+    } else {
+        path_marker.action = visualization_msgs::msg::Marker::DELETE;
+        array_msg.markers.push_back(path_marker);
+    }
+
+    visualization_msgs::msg::Marker target_marker;
+    target_marker.header.frame_id = "world";
+    target_marker.header.stamp = stamp;
+    target_marker.ns = "reactive_task_target_point";
+    target_marker.id = base_id + 1;
+    target_marker.type = visualization_msgs::msg::Marker::SPHERE;
+    target_marker.action = visualization_msgs::msg::Marker::ADD;
+    target_marker.pose.position = toPointMsg(sample.T_target.translation());
+    target_marker.pose.orientation.w = 1.0;
+    target_marker.scale.x = 0.035;
+    target_marker.scale.y = 0.035;
+    target_marker.scale.z = 0.035;
+    target_marker.color.r = 1.0f;
+    target_marker.color.g = 0.82f;
+    target_marker.color.b = 0.10f;
+    target_marker.color.a = 0.95f;
+    array_msg.markers.push_back(target_marker);
+
+    visualization_msgs::msg::Marker actual_marker;
+    actual_marker.header.frame_id = "world";
+    actual_marker.header.stamp = stamp;
+    actual_marker.ns = "reactive_task_actual_point";
+    actual_marker.id = base_id + 2;
+    actual_marker.type = visualization_msgs::msg::Marker::SPHERE;
+    actual_marker.action = visualization_msgs::msg::Marker::ADD;
+    actual_marker.pose.position = toPointMsg(ee_position);
+    actual_marker.pose.orientation.w = 1.0;
+    actual_marker.scale.x = 0.03;
+    actual_marker.scale.y = 0.03;
+    actual_marker.scale.z = 0.03;
+    actual_marker.color.r = 0.10f;
+    actual_marker.color.g = 1.0f;
+    actual_marker.color.b = 0.25f;
+    actual_marker.color.a = 0.95f;
+    array_msg.markers.push_back(actual_marker);
+
+    trajectory_marker_pub_->publish(array_msg);
+}
+
+void ReactiveTaskController::clearTrajectoryMarkers(const std::string& mapping) {
+    if (!trajectory_marker_pub_) {
+        return;
+    }
+
+    visualization_msgs::msg::MarkerArray array_msg;
+    const int base_id = markerBaseIdForMapping(mapping) + 2000;
+    const char* namespaces[] = {
+        "reactive_task_active_path",
+        "reactive_task_target_point",
+        "reactive_task_actual_point",
+    };
+    for (int i = 0; i < 3; ++i) {
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = "world";
+        marker.header.stamp = node_->now();
+        marker.ns = namespaces[i];
+        marker.id = base_id + i;
+        marker.action = visualization_msgs::msg::Marker::DELETE;
+        array_msg.markers.push_back(marker);
+    }
+    trajectory_marker_pub_->publish(array_msg);
 }
 
 bool ReactiveTaskController::execute(

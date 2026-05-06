@@ -339,6 +339,67 @@ WholeBodyEllipsoidPoseValidator::makePoseDiagnosticFn() const {
     };
 }
 
+PathPlanningInput::JointStateValidatorFn
+WholeBodyEllipsoidPoseValidator::makeJointStateValidatorFn() const {
+    return [this](
+               const Eigen::VectorXd& q,
+               const double safe_distance,
+               PathPlanningInput::WholeBodyPoseDiagnostic* diag_out) {
+        const PoseDiagnostic diag = this->diagnoseJointState(q, safe_distance);
+        if (diag_out != nullptr) {
+            fillPlanningDiagnostic(diag, *diag_out);
+        }
+        return diag.collision_free;
+    };
+}
+
+PathPlanningInput::JointSegmentValidatorFn
+WholeBodyEllipsoidPoseValidator::makeJointSegmentValidatorFn() const {
+    return [this](
+               const Eigen::VectorXd& q_from,
+               const Eigen::VectorXd& q_to,
+               const double safe_distance,
+               PathPlanningInput::WholeBodyPoseDiagnostic* diag_out) {
+        if (q_from.size() == 0 || q_to.size() == 0 ||
+            q_from.size() != q_to.size() || !q_from.allFinite() || !q_to.allFinite()) {
+            PoseDiagnostic diag;
+            diag.ik_ok = true;
+            diag.collision_free = false;
+            diag.min_margin = -1.0;
+            diag.reason = "invalid_q_segment";
+            if (diag_out != nullptr) {
+                fillPlanningDiagnostic(diag, *diag_out);
+            }
+            return false;
+        }
+
+        const PoseDiagnostic start_diag = this->diagnoseJointState(q_from, safe_distance);
+        if (!start_diag.collision_free) {
+            if (diag_out != nullptr) {
+                fillPlanningDiagnostic(start_diag, *diag_out);
+            }
+            return false;
+        }
+
+        const double max_joint_delta = (q_to - q_from).cwiseAbs().maxCoeff();
+        const int steps = std::max(
+            1,
+            static_cast<int>(std::ceil(max_joint_delta / kJointSegmentStepRad)));
+        for (int i = 1; i <= steps; ++i) {
+            const double t = static_cast<double>(i) / static_cast<double>(steps);
+            const Eigen::VectorXd q_interp = (1.0 - t) * q_from + t * q_to;
+            const PoseDiagnostic diag = this->diagnoseJointState(q_interp, safe_distance);
+            if (!diag.collision_free) {
+                if (diag_out != nullptr) {
+                    fillPlanningDiagnostic(diag, *diag_out);
+                }
+                return false;
+            }
+        }
+        return true;
+    };
+}
+
 bool WholeBodyEllipsoidPoseValidator::solveIk(
     const Eigen::Vector3d& p_target,
     const Eigen::Matrix3d& R_target,
@@ -475,6 +536,13 @@ WholeBodyEllipsoidPoseValidator::diagnoseConfiguration(
         }
     }
     return diag;
+}
+
+WholeBodyEllipsoidPoseValidator::PoseDiagnostic
+WholeBodyEllipsoidPoseValidator::diagnoseJointState(
+    const Eigen::VectorXd& q,
+    const double safe_distance) const {
+    return diagnoseConfiguration(q, safe_distance);
 }
 
 bool WholeBodyEllipsoidPoseValidator::isWholeBodyCollisionFree(

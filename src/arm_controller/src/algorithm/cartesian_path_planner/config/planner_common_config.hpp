@@ -6,12 +6,30 @@ struct PlannerCommonConfig {
     double path_resolution{0.02};
     double max_path_length{20.0};
     double default_segment_speed{0.1}; // m/s
-    // B-scheme: keep the front-end as geometric search only, and move
-    // whole-body / IK feasibility to the trajectory back-end.
-    bool frontend_geometry_only{false};
-    // Begin rotating from start pose toward goal pose after this fraction
-    // of the geometric path has been traversed.
-    double goal_orientation_transition_start_ratio{0.60};
+    bool use_joint_space_sampling{false};
+    int joint_space_sampling_max_iterations{4000};
+    double joint_space_sampling_step_rad{0.20};
+    double joint_space_sampling_goal_bias{0.20};
+    double joint_space_sampling_connect_threshold_rad{0.25};
+    double joint_space_sampling_local_window_rad{0.35};
+    int joint_space_sampling_search_stages{3};
+    double joint_space_sampling_window_scale{2.0};
+    bool joint_space_sampling_allow_full_joint_limit_fallback{true};
+    int joint_space_shortcut_trials{100};
+    int joint_space_sampling_solution_pool_size{6};
+    bool prefer_clearance_shell{false};
+    double preferred_clearance_shell_margin_m{0.0};
+    double preferred_clearance_shell_weight{0.0};
+    double joint_space_path_length_weight{1.0};
+    double joint_space_joint_motion_weight{0.15};
+    bool enable_joint_trajectory_post_optimization{true};
+    int joint_trajectory_postopt_iterations{2};
+    int joint_trajectory_postopt_samples_per_waypoint{12};
+    double joint_trajectory_postopt_perturbation_rad{0.05};
+    double joint_trajectory_shell_weight{8.0};
+    double joint_trajectory_orientation_weight{3.0};
+    double joint_trajectory_smoothness_weight{0.25};
+    double joint_trajectory_position_weight{1.0};
 
     // Use trajectory_interpolator to smooth Cartesian waypoints in time domain.
     bool enable_interpolator_smoothing{true};

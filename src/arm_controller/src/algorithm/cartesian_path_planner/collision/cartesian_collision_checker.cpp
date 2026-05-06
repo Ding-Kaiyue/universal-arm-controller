@@ -12,21 +12,8 @@ CartesianCollisionChecker::CartesianCollisionChecker(
 bool CartesianCollisionChecker::isStateValid(
     const Eigen::Vector3d& p,
     double safe_distance) const {
-    return isStateValid(p, safe_distance, {});
-}
-
-bool CartesianCollisionChecker::isStateValid(
-    const Eigen::Vector3d& p,
-    const double safe_distance,
-    const std::vector<PathPlanningInput::ForbiddenSphere>& forbidden_spheres) const {
     if (!distance_field_) {
         return false;
-    }
-
-    for (const auto& forbidden : forbidden_spheres) {
-        if (forbidden.radius > 0.0 && (p - forbidden.center).norm() < forbidden.radius) {
-            return false;
-        }
     }
 
     const DistanceFieldQueryResult query =
@@ -45,15 +32,6 @@ bool CartesianCollisionChecker::isSegmentValid(
     const Eigen::Vector3d& p1,
     double safe_distance,
     double step) const {
-    return isSegmentValid(p0, p1, safe_distance, step, {});
-}
-
-bool CartesianCollisionChecker::isSegmentValid(
-    const Eigen::Vector3d& p0,
-    const Eigen::Vector3d& p1,
-    const double safe_distance,
-    const double step,
-    const std::vector<PathPlanningInput::ForbiddenSphere>& forbidden_spheres) const {
     if (!distance_field_) {
         return false;
     }
@@ -69,12 +47,6 @@ bool CartesianCollisionChecker::isSegmentValid(
     const std::vector<DistanceFieldQueryResult> queries =
         distance_field_->queryDistanceAndGradientBatch(sample_points);
     for (std::size_t i = 0; i < sample_points.size(); ++i) {
-        const Eigen::Vector3d& p = sample_points[i];
-        for (const auto& forbidden : forbidden_spheres) {
-            if (forbidden.radius > 0.0 && (p - forbidden.center).norm() < forbidden.radius) {
-                return false;
-            }
-        }
         const DistanceFieldQueryResult& query = queries[i];
         if (!query.observed || !query.distance_valid) {
             continue;
