@@ -2,7 +2,6 @@
 
 #include "algorithm/cartesian_path_planner/config/planner_common_config.hpp"
 #include "algorithm/cartesian_path_planner/config/smoothing_config.hpp"
-#include "algorithm/cartesian_path_planner/map/distance_field_interface.hpp"
 #include "algorithm/cartesian_path_planner/types.hpp"
 
 #include <memory>
@@ -14,8 +13,7 @@ class CartesianPathPlanner {
 public:
     CartesianPathPlanner(
         const PlannerCommonConfig& common_cfg,
-        const SmoothingConfig& smoothing_cfg,
-        std::shared_ptr<const DistanceFieldInterface> distance_field);
+        const SmoothingConfig& smoothing_cfg);
 
     PathPlanningOutput planPath(const PathPlanningInput& input);
     TimedCartesianTrajectory planTrajectory(const PathPlanningInput& input);
@@ -36,11 +34,22 @@ private:
         std::vector<Eigen::VectorXd> joint_path;
         double cartesian_length{0.0};
         double joint_motion{0.0};
-        double shell_deviation_cost{0.0};
+        double mean_clearance_deficit{0.0};
+        double mean_early_clearance_deficit{0.0};
+        double min_margin{std::numeric_limits<double>::infinity()};
+        double early_min_margin{std::numeric_limits<double>::infinity()};
+        double mean_clearance_reward{0.0};
+        std::string worst_link_name;
+        std::string early_worst_link_name;
+        int source_stage{0};
         double score{std::numeric_limits<double>::infinity()};
     };
 
     PathPlanningOutput planJointSpacePath(const PathPlanningInput& input);
+    PathPlanningOutput planOmplRrtConnectPath(
+        const PathPlanningInput& input,
+        const Eigen::VectorXd& q_start,
+        const std::vector<Eigen::VectorXd>& valid_goals) const;
     TimedCartesianTrajectory buildJointSpaceTrajectory(
         const std::vector<Eigen::VectorXd>& joint_path,
         const PathPlanningInput& input) const;

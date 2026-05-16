@@ -492,7 +492,7 @@ def build_figure(data_list, segment_label="distance-sampled", link_sphere_list=N
         _add_ik_ellipsoids_plotly(fig, data, arm_tag)
 
     fig.update_layout(
-        title=f"Replanner 3D (Interactive) | {segment_label} | S*=start, E*=end",
+        title=f"Global Trajectory 3D (Interactive) | {segment_label} | S*=start, E*=end",
         scene={
             "xaxis": {"title": "X (m)", "range": [map_min[0], map_max[0]]},
             "yaxis": {"title": "Y (m)", "range": [map_min[1], map_max[1]]},
@@ -516,7 +516,7 @@ def build_figure_from_key(data_list, key, link_sphere_list=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate interactive 3D replanner visualization.")
+    parser = argparse.ArgumentParser(description="Generate interactive 3D global trajectory visualization.")
     parser.add_argument("--input", nargs="+", required=True, help="Path(s) to replanner_segments.json")
     parser.add_argument("--link-spheres", nargs="*", default=[], help="Optional path(s) to link_spheres_*.json for real arm ellipsoids")
     parser.add_argument("--output", default="", help="Output html path (default: same dir/replanner_segments_3d_interactive.html)")
@@ -630,7 +630,7 @@ def main():
         ax.set_xlabel("X (m)")
         ax.set_ylabel("Y (m)")
         ax.set_zlabel("Z (m)")
-        ax.set_title(f"Replanner 3D (show-3d) [{seg_label}]")
+        ax.set_title(f"Global Trajectory 3D (show-3d) [{seg_label}]")
         ax.view_init(elev=22, azim=-55)
         ax.legend(loc="upper left")
         plt.tight_layout()

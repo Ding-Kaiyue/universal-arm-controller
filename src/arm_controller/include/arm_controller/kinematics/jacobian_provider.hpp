@@ -29,6 +29,8 @@ public:
 
 class MoveItJacobianProvider final : public JacobianProvider {
 public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     MoveItJacobianProvider(
         const rclcpp::Node::SharedPtr& node,
         const std::shared_ptr<trajectory_planning::infrastructure::integration::MoveItAdapter>& moveit_adapter);
@@ -58,6 +60,8 @@ private:
 
 class PinocchioJacobianProvider final : public JacobianProvider {
 public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     PinocchioJacobianProvider(
         const rclcpp::Node::SharedPtr& node,
         const pinocchio::Model& model,
@@ -90,4 +94,3 @@ private:
 };
 
 }  // namespace arm_controller::kinematics
-

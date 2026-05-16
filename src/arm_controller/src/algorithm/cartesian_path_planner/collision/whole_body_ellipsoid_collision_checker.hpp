@@ -19,7 +19,7 @@
 
 namespace arm_controller::algorithm::cartesian_path_planner {
 
-class WholeBodyEllipsoidPoseValidator {
+class WholeBodyEllipsoidCollisionChecker {
 public:
     using IkSolveFn = std::function<bool(
         const Eigen::Vector3d&,
@@ -54,8 +54,12 @@ public:
 
     using LinkCollisionEllipsoid =
         arm_controller::algorithm::reactive_qp::LinkCollisionEllipsoid;
+    using LinkCollisionEllipsoidList =
+        arm_controller::algorithm::reactive_qp::LinkCollisionEllipsoidList;
 
     struct PoseDiagnostic {
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
         bool ik_ok{false};
         bool external_ik_ok{false};
         bool fallback_ik_used{false};
@@ -78,12 +82,12 @@ public:
         Eigen::VectorXd q_solution;
     };
 
-    WholeBodyEllipsoidPoseValidator(
+    WholeBodyEllipsoidCollisionChecker(
         Config cfg,
         std::shared_ptr<const DistanceFieldInterface> distance_field,
         std::shared_ptr<arm_controller::kinematics::PinocchioForwardKinematics> fk_provider,
         std::shared_ptr<arm_controller::kinematics::JacobianProvider> jacobian_provider,
-        std::vector<LinkCollisionEllipsoid> link_ellipsoids);
+        LinkCollisionEllipsoidList link_ellipsoids);
 
     bool validatePose(
         const Eigen::Vector3d& p_target,
@@ -217,7 +221,8 @@ private:
     std::shared_ptr<const DistanceFieldInterface> distance_field_;
     std::shared_ptr<arm_controller::kinematics::PinocchioForwardKinematics> fk_provider_;
     std::shared_ptr<arm_controller::kinematics::JacobianProvider> jacobian_provider_;
-    std::vector<LinkCollisionEllipsoid> link_ellipsoids_;
+    LinkCollisionEllipsoidList link_ellipsoids_;
+    std::vector<std::string> link_pose_query_names_;
     mutable std::mutex pose_cache_mutex_;
     mutable std::unordered_map<PoseCacheKey, PoseCacheValue, PoseCacheKeyHash> pose_cache_;
     mutable std::mutex segment_cache_mutex_;

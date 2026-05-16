@@ -45,6 +45,8 @@ public:
 };
 
 struct ReactiveQpExampleConfig {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     TaskVelocityConfig task_velocity;
     Eigen::Vector3d target_translation{0.05, -0.02, 0.01};
 

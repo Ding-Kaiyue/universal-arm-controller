@@ -10,6 +10,9 @@ namespace {
 
 using LinkSphere = arm_controller::algorithm::reactive_qp::LinkCollisionSphere;
 using LinkEllipsoid = arm_controller::algorithm::reactive_qp::LinkCollisionEllipsoid;
+using LinkSphereList = arm_controller::algorithm::reactive_qp::LinkCollisionSphereList;
+using LinkEllipsoidList = arm_controller::algorithm::reactive_qp::LinkCollisionEllipsoidList;
+using Vector3dList = std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>;
 
 std::string resolveBodyFrameForJoint(
     const pinocchio::Model& model,
@@ -29,9 +32,9 @@ std::string resolveBodyFrameForJoint(
 
 void addSpheresForLink(
     const std::string& link_name,
-    const std::vector<Eigen::Vector3d>& centers,
+    const Vector3dList& centers,
     double radius,
-    std::vector<LinkSphere>& out_spheres) {
+    LinkSphereList& out_spheres) {
     for (std::size_t i = 0; i < centers.size(); ++i) {
         LinkSphere s;
         s.link_name = link_name;
@@ -44,9 +47,9 @@ void addSpheresForLink(
 
 void addEllipsoidsForLink(
     const std::string& link_name,
-    const std::vector<Eigen::Vector3d>& centers,
+    const Vector3dList& centers,
     const Eigen::Vector3d& radii,
-    std::vector<LinkEllipsoid>& out_ellipsoids) {
+    LinkEllipsoidList& out_ellipsoids) {
     for (std::size_t i = 0; i < centers.size(); ++i) {
         LinkEllipsoid e;
         e.link_name = link_name;
@@ -63,7 +66,7 @@ bool LinkSphereModel::buildForMapping(
     const std::string& hardware_config_path,
     const std::string& mapping,
     const pinocchio::Model& model,
-    std::vector<LinkSphere>& out_spheres,
+    LinkSphereList& out_spheres,
     std::string* error) {
     out_spheres.clear();
     YAML::Node root;
@@ -111,7 +114,7 @@ bool LinkSphereModel::buildEllipsoidsForMapping(
     const std::string& hardware_config_path,
     const std::string& mapping,
     const pinocchio::Model& model,
-    std::vector<LinkEllipsoid>& out_ellipsoids,
+    LinkEllipsoidList& out_ellipsoids,
     std::string* error) {
     out_ellipsoids.clear();
     YAML::Node root;
@@ -159,7 +162,7 @@ bool LinkSphereModel::buildFromYamlExplicit(
     const std::string& mapping,
     const pinocchio::Model& model,
     const YAML::Node& mapping_node,
-    std::vector<LinkSphere>& out_spheres,
+    LinkSphereList& out_spheres,
     std::string* error) {
     const YAML::Node explicit_spheres = mapping_node["collision_spheres"];
     if (!explicit_spheres || !explicit_spheres.IsSequence()) {
@@ -208,7 +211,7 @@ bool LinkSphereModel::buildEllipsoidsFromYamlExplicit(
     const std::string& mapping,
     const pinocchio::Model& model,
     const YAML::Node& mapping_node,
-    std::vector<LinkEllipsoid>& out_ellipsoids,
+    LinkEllipsoidList& out_ellipsoids,
     std::string* error) {
     const YAML::Node explicit_spheres = mapping_node["collision_spheres"];
     if (!explicit_spheres || !explicit_spheres.IsSequence()) {
@@ -261,7 +264,7 @@ bool LinkSphereModel::buildFromPreset(
     const std::string& robot_type,
     const std::vector<std::string>& joint_names,
     const pinocchio::Model& model,
-    std::vector<LinkSphere>& out_spheres,
+    LinkSphereList& out_spheres,
     std::string* error) {
     if (joint_names.empty()) {
         if (error != nullptr) {
@@ -273,7 +276,7 @@ bool LinkSphereModel::buildFromPreset(
     // REMANI-style defaults: spheres sampled along each link local axis.
     // We use a generic preset for 6-DOF arms; can be overridden via YAML.
     const double r_default = (robot_type == "dual_arm620") ? 0.03 : 0.035;
-    const std::vector<std::vector<Eigen::Vector3d>> preset_centers = {
+    const std::vector<Vector3dList> preset_centers = {
         {Eigen::Vector3d(0.00, 0.00, 0.00), Eigen::Vector3d(0.00, 0.00, 0.05), Eigen::Vector3d(0.00, 0.00, -0.05)},
         {Eigen::Vector3d(0.00, 0.00, 0.00), Eigen::Vector3d(0.07, 0.00, 0.00), Eigen::Vector3d(0.14, 0.00, 0.00), Eigen::Vector3d(0.21, 0.00, 0.00)},
         {Eigen::Vector3d(0.00, 0.00, 0.00)},
@@ -304,7 +307,7 @@ bool LinkSphereModel::buildEllipsoidsFromPreset(
     const std::string& robot_type,
     const std::vector<std::string>& joint_names,
     const pinocchio::Model& model,
-    std::vector<LinkEllipsoid>& out_ellipsoids,
+    LinkEllipsoidList& out_ellipsoids,
     std::string* error) {
     if (joint_names.empty()) {
         if (error != nullptr) {
@@ -317,7 +320,7 @@ bool LinkSphereModel::buildEllipsoidsFromPreset(
         (robot_type == "dual_arm620")
             ? Eigen::Vector3d(0.028, 0.028, 0.050)
             : Eigen::Vector3d(0.030, 0.030, 0.055);
-    const std::vector<std::vector<Eigen::Vector3d>> preset_centers = {
+    const std::vector<Vector3dList> preset_centers = {
         {Eigen::Vector3d(0.00, 0.00, 0.04)},
         {Eigen::Vector3d(0.00, 0.15, 0.00)},
         {Eigen::Vector3d(0.00, -0.08, 0.01)},

@@ -15,8 +15,17 @@
 namespace arm_controller::kinematics {
 
 struct ForwardKinematicsOutput {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    using LinkPoseMap = std::unordered_map<
+        std::string,
+        Eigen::Isometry3d,
+        std::hash<std::string>,
+        std::equal_to<std::string>,
+        Eigen::aligned_allocator<std::pair<const std::string, Eigen::Isometry3d>>>;
+
     // World/base pose of each link frame (BODY frames in Pinocchio model).
-    std::unordered_map<std::string, Eigen::Isometry3d> link_poses;
+    LinkPoseMap link_poses;
 
     // End-effector pose in world/base frame.
     Eigen::Isometry3d ee_pose = Eigen::Isometry3d::Identity();
@@ -24,8 +33,20 @@ struct ForwardKinematicsOutput {
     Eigen::Matrix3d ee_rotation = Eigen::Matrix3d::Identity();
 };
 
+struct LinkPoseResult {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    std::string link_name;
+    Eigen::Isometry3d pose{Eigen::Isometry3d::Identity()};
+};
+
+using LinkPoseResultList =
+    std::vector<LinkPoseResult, Eigen::aligned_allocator<LinkPoseResult>>;
+
 class PinocchioForwardKinematics final {
 public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     PinocchioForwardKinematics(
         const rclcpp::Node::SharedPtr& node,
         const pinocchio::Model& model,
@@ -38,6 +59,15 @@ public:
     bool compute(
         const Eigen::VectorXd& q,
         ForwardKinematicsOutput& out,
+        const std::string& ee_link_name = "") const;
+
+    bool computeLinkPoses(
+        const Eigen::VectorXd& q,
+        const std::vector<std::string>& link_names,
+        LinkPoseResultList& link_poses,
+        Eigen::Vector3d* ee_position = nullptr,
+        Eigen::Matrix3d* ee_rotation = nullptr,
+        Eigen::Isometry3d* ee_pose = nullptr,
         const std::string& ee_link_name = "") const;
 
 private:
@@ -57,4 +87,3 @@ private:
 };
 
 }  // namespace arm_controller::kinematics
-

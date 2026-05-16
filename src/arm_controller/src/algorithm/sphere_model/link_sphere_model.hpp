@@ -23,7 +23,7 @@ public:
         const std::string& hardware_config_path,
         const std::string& mapping,
         const pinocchio::Model& model,
-        std::vector<arm_controller::algorithm::reactive_qp::LinkCollisionSphere>& out_spheres,
+        arm_controller::algorithm::reactive_qp::LinkCollisionSphereList& out_spheres,
         std::string* error = nullptr);
 
     // Build link-ellipsoid model for whole-body collision constraints.
@@ -39,7 +39,7 @@ public:
         const std::string& hardware_config_path,
         const std::string& mapping,
         const pinocchio::Model& model,
-        std::vector<arm_controller::algorithm::reactive_qp::LinkCollisionEllipsoid>& out_ellipsoids,
+        arm_controller::algorithm::reactive_qp::LinkCollisionEllipsoidList& out_ellipsoids,
         std::string* error = nullptr);
 
 private:
@@ -47,28 +47,28 @@ private:
         const std::string& mapping,
         const pinocchio::Model& model,
         const YAML::Node& mapping_node,
-        std::vector<arm_controller::algorithm::reactive_qp::LinkCollisionSphere>& out_spheres,
+        arm_controller::algorithm::reactive_qp::LinkCollisionSphereList& out_spheres,
         std::string* error);
 
     static bool buildEllipsoidsFromYamlExplicit(
         const std::string& mapping,
         const pinocchio::Model& model,
         const YAML::Node& mapping_node,
-        std::vector<arm_controller::algorithm::reactive_qp::LinkCollisionEllipsoid>& out_ellipsoids,
+        arm_controller::algorithm::reactive_qp::LinkCollisionEllipsoidList& out_ellipsoids,
         std::string* error);
 
     static bool buildFromPreset(
         const std::string& robot_type,
         const std::vector<std::string>& joint_names,
         const pinocchio::Model& model,
-        std::vector<arm_controller::algorithm::reactive_qp::LinkCollisionSphere>& out_spheres,
+        arm_controller::algorithm::reactive_qp::LinkCollisionSphereList& out_spheres,
         std::string* error);
 
     static bool buildEllipsoidsFromPreset(
         const std::string& robot_type,
         const std::vector<std::string>& joint_names,
         const pinocchio::Model& model,
-        std::vector<arm_controller::algorithm::reactive_qp::LinkCollisionEllipsoid>& out_ellipsoids,
+        arm_controller::algorithm::reactive_qp::LinkCollisionEllipsoidList& out_ellipsoids,
         std::string* error);
 };
 

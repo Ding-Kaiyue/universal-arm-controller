@@ -440,7 +440,7 @@ int main(int argc, char** argv) {
         const std::string hardware_cfg_path =
             ament_index_cpp::get_package_share_directory("arm_controller") +
             "/config/hardware_config.yaml";
-        std::vector<rq::LinkCollisionEllipsoid> link_ellipsoids;
+        rq::LinkCollisionEllipsoidList link_ellipsoids;
         std::string sphere_model_error;
         if (!arm_controller::algorithm::sphere_model::LinkSphereModel::buildEllipsoidsForMapping(
                 hardware_cfg_path, mapping, model, link_ellipsoids, &sphere_model_error)) {

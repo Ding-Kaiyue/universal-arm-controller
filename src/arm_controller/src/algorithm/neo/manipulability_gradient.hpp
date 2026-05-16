@@ -9,6 +9,8 @@
 namespace arm_controller::algorithm::reactive_qp {
 
 struct ManipulabilityGradientConfig {
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
   double finite_difference_step{1e-4};
   double determinant_damping{1e-8};
   std::string link_name;

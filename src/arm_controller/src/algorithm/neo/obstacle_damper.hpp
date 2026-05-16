@@ -19,9 +19,15 @@ struct ObstacleDamperConfig {
 
 
 struct ObstacleConstraintInput {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     // normal_jacobian = n^T * J_point, shape: 1 x dof
     // 使得 d_dot = normal_jacobian * qdot
     Eigen::RowVectorXd normal_jacobian;
+    // Full linear Jacobian at the queried point, shape: 3 x dof.
+    Eigen::MatrixXd linear_jacobian;
+    // Obstacle outward normal in world frame.
+    Eigen::Vector3d normal_world{Eigen::Vector3d::Zero()};
 
     // 当前有符号距离 d(q)
     double distance{1e9};
@@ -29,11 +35,14 @@ struct ObstacleConstraintInput {
     std::string debug_name;
 };
 
+using ObstacleConstraintInputList =
+    std::vector<ObstacleConstraintInput, Eigen::aligned_allocator<ObstacleConstraintInput>>;
+
 class ObstacleDamper {
 public:
     // 统计当前会激活多少条障碍 CBF 约束
     static int countActiveRows(
-        const std::vector<ObstacleConstraintInput>& constraints,
+        const ObstacleConstraintInputList& constraints,
         const ObstacleDamperConfig& config,
         int dof);
     
@@ -47,7 +56,7 @@ public:
     //
     // 返回实际追加的约束行数
     static int appendConstraints(
-        const std::vector<ObstacleConstraintInput>& constraints,
+        const ObstacleConstraintInputList& constraints,
         const ObstacleDamperConfig& config,
         Eigen::MatrixXd& A_qdot,
         Eigen::VectorXd& lb,

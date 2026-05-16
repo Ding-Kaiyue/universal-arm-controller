@@ -20,6 +20,7 @@
   <depend>controller_interfaces</depend>
   <depend>yaml-cpp</depend>
   <depend>urdf</depend>
+  <depend>ament_index_cpp</depend>
   <depend>trajectory_planning_v3</depend>
   <depend>trajectory_interpolator</depend>
   <depend>hardware_driver</depend>
@@ -27,6 +28,12 @@
   <depend>OsqpEigen</depend>
   <depend>osqp</depend>
   <depend>pinocchio</depend>
+  <depend>ompl</depend>
+  <depend>tesseract_common</depend>
+  <depend>tesseract_environment</depend>
+  <depend>tesseract_motion_planners</depend>
+  <depend>trajopt</depend>
+  <depend>trajopt_ifopt</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

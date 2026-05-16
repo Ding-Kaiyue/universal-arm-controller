@@ -146,7 +146,7 @@ TEST(ObstacleDamperTest, AppendsExpectedCbfRow) {
     rq::ObstacleConstraintInput c;
     c.normal_jacobian = Eigen::RowVector2d(1.0, -0.5);
     c.distance = 0.2;
-    std::vector<rq::ObstacleConstraintInput> all{c};
+    rq::ObstacleConstraintInputList all{c};
 
     const int rows = rq::ObstacleDamper::countActiveRows(all, cfg, 2);
     ASSERT_EQ(rows, 1);
@@ -167,7 +167,7 @@ TEST(ObstacleDamperTest, InvalidConfigProducesNoRows) {
     rq::ObstacleConstraintInput c;
     c.normal_jacobian = Eigen::RowVector2d(1.0, 0.0);
     c.distance = 0.1;
-    std::vector<rq::ObstacleConstraintInput> all{c};
+    rq::ObstacleConstraintInputList all{c};
     EXPECT_EQ(rq::ObstacleDamper::countActiveRows(all, cfg, 2), 0);
 }
 

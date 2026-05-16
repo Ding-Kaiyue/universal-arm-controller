@@ -227,7 +227,7 @@ std::optional<TimedCartesianTrajectory> TrajectoryParameterizer::tryMinimumSnapO
         return std::nullopt;
     }
 
-    std::vector<Eigen::Vector3d> reference_positions;
+    Vector3dList reference_positions;
     reference_positions.reserve(candidate.waypoints.size());
     std::vector<bool> anchor_mask(candidate.waypoints.size(), false);
     for (size_t i = 0; i < candidate.waypoints.size(); ++i) {
@@ -247,7 +247,7 @@ std::optional<TimedCartesianTrajectory> TrajectoryParameterizer::tryMinimumSnapO
         return std::nullopt;
     }
 
-    std::vector<Eigen::Vector3d> updated_positions(reference_positions.size());
+    Vector3dList updated_positions(reference_positions.size());
     for (int iter = 0; iter < cfg_.minimum_snap_iterations; ++iter) {
         for (size_t i = 0; i < candidate.waypoints.size(); ++i) {
             if (i < 2 || i + 2 >= candidate.waypoints.size() || anchor_mask[i]) {

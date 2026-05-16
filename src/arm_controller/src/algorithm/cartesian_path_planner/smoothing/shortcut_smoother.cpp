@@ -42,7 +42,7 @@ CartesianPath ShortcutSmoother::smooth(
                 p0, p1, input.hard_clearance, cfg_.collision_check_step)) {
             continue;
         }
-        std::vector<CartesianWaypoint> new_wps;
+        CartesianWaypointList new_wps;
         new_wps.reserve(out.waypoints.size() - (j - i - 1));
         new_wps.insert(new_wps.end(), out.waypoints.begin(), out.waypoints.begin() + i + 1);
         new_wps.insert(new_wps.end(), out.waypoints.begin() + j, out.waypoints.end());

@@ -3,8 +3,10 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <Eigen/Core>
 #include <rclcpp/rclcpp.hpp>
@@ -24,6 +26,7 @@ public:
         double observation_margin_m{0.15};
         int isolated_min_neighbor_count{2};
         int isolated_neighbor_radius_cells{1};
+        int min_cluster_cell_count{1};
     };
 
     CameraDriverPointcloudMapAdapter(const Config& config,
@@ -34,11 +37,13 @@ public:
     Eigen::Vector3d getGradient(const Eigen::Vector3d& p) const override;
     DistanceFieldQueryResult queryDistanceAndGradient(
         const Eigen::Vector3d& p) const override;
-    std::vector<DistanceFieldQueryResult> queryDistanceAndGradientBatch(
-        const std::vector<Eigen::Vector3d>& positions) const override;
+    DistanceFieldQueryResultList queryDistanceAndGradientBatch(
+        const Vector3dList& positions) const override;
 
     int processedFrames() const { return processed_frames_.load(); }
     std::size_t activeCellCount() const;
+    double voxelSize() const { return config_.voxel_size_m; }
+    Vector3dList occupiedCellCenters(std::size_t max_count) const;
 
 private:
     struct CellKey {
@@ -48,6 +53,15 @@ private:
 
         bool operator==(const CellKey& other) const {
             return x == other.x && y == other.y && z == other.z;
+        }
+        bool operator<(const CellKey& other) const {
+            if (x != other.x) {
+                return x < other.x;
+            }
+            if (y != other.y) {
+                return y < other.y;
+            }
+            return z < other.z;
         }
     };
 
@@ -65,14 +79,25 @@ private:
         int count{0};
     };
 
-    using OccupancyMap = std::unordered_map<CellKey, Eigen::Vector3d, CellKeyHash>;
-    using AccumulatorMap = std::unordered_map<CellKey, CellAccum, CellKeyHash>;
+    using OccupancyMap = std::unordered_map<
+        CellKey,
+        Eigen::Vector3d,
+        CellKeyHash,
+        std::equal_to<CellKey>,
+        Eigen::aligned_allocator<std::pair<const CellKey, Eigen::Vector3d>>>;
+    using AccumulatorMap = std::unordered_map<
+        CellKey,
+        CellAccum,
+        CellKeyHash,
+        std::equal_to<CellKey>,
+        Eigen::aligned_allocator<std::pair<const CellKey, CellAccum>>>;
 
     void onPointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
     CellKey toCellKey(const Eigen::Vector3d& p) const;
     bool pointWithinObservedBounds(const Eigen::Vector3d& p) const;
     int countOccupiedNeighbors(const CellKey& key,
                                const AccumulatorMap& accumulators) const;
+    OccupancyMap filterSmallClusters(const OccupancyMap& occupied_cells) const;
 
     Config config_;
     rclcpp::Node::SharedPtr node_;

@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.8)
 project(arm_controller)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 # Ensure option() honors normal variables behavior consistently
 if(POLICY CMP0077)
   cmake_policy(SET CMP0077 NEW)
@@ -77,10 +81,22 @@ find_package(moveit_core REQUIRED)
 find_package(orocos_kdl REQUIRED)
 find_package(kdl_parser REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(OsqpEigen REQUIRED)
+set(ARM_CONTROLLER_TESSERACT_OSQP_DIR "/home/dyk/Bags/tesseract_ws/install/osqp/lib/cmake/osqp")
+if(EXISTS "${ARM_CONTROLLER_TESSERACT_OSQP_DIR}/osqp-config.cmake")
+  set(osqp_DIR "${ARM_CONTROLLER_TESSERACT_OSQP_DIR}" CACHE PATH "osqp config directory" FORCE)
+endif()
+set(ARM_CONTROLLER_TESSERACT_OSQP_LIB "/home/dyk/Bags/tesseract_ws/install/osqp/lib")
+find_package(osqp REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(csaps REQUIRED)
+find_package(ompl REQUIRED)
+
+find_package(tesseract_common REQUIRED)
+find_package(tesseract_environment REQUIRED)
+find_package(tesseract_motion_planners REQUIRED COMPONENTS trajopt trajopt_ifopt)
+find_package(trajopt REQUIRED)
+find_package(trajopt_ifopt REQUIRED)
 
 # 抑制 Boost.Python 找不到 Python 3.10 的警告（这是一个已知问题，不影响编译）
 set(Boost_NO_WARN_NEW_VERSIONS ON)
@@ -97,6 +113,7 @@ include_directories(
   ${PROJECT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/include
   ${PROJECT_SOURCE_DIR}/include/${PROJECT_NAME}
+  ${OMPL_INCLUDE_DIRS}
 )
 
 install(
@@ -134,13 +151,13 @@ add_library(arm_controller_lib
   src/algorithm/neo/task_velocity_generator.cpp
   src/algorithm/cartesian_path_planner/collision/cartesian_collision_checker.cpp
   src/algorithm/cartesian_path_planner/collision/clearance_evaluator.cpp
-  src/algorithm/cartesian_path_planner/collision/whole_body_ellipsoid_pose_validator.cpp
-  src/algorithm/cartesian_path_planner/core/cartesian_path_planner.cpp
+  src/algorithm/cartesian_path_planner/collision/whole_body_ellipsoid_collision_checker.cpp
   src/algorithm/cartesian_path_planner/core/trajectory_parameterizer.cpp
+  src/algorithm/global_planner/ompl_rrt_connect_global_planner.cpp
   src/algorithm/cartesian_path_planner/map/dummy_distance_field.cpp
   src/algorithm/cartesian_path_planner/map/camera_driver_pointcloud_map_adapter.cpp
   src/algorithm/cartesian_path_planner/map/camera_driver_esdf_map_client.cpp
-  src/algorithm/cartesian_path_planner/replanning/replanner_manager.cpp
+  src/algorithm/cartesian_path_planner/global_trajectory/global_trajectory_manager.cpp
   src/algorithm/cartesian_path_planner/smoothing/shortcut_smoother.cpp
   src/algorithm/cartesian_path_planner/sampling/reference_sampler.cpp
   src/algorithm/sphere_model/link_sphere_model.cpp
@@ -166,6 +183,22 @@ add_library(arm_controller_lib
   src/controller/mink_servo/mink_servo_interface.cpp
   src/controller/mink_servo/mink_servo_ipc_interface.cpp
   src/controller/reactive_task/reactive_task_controller.cpp
+  src/controller/reactive_task/reactive_task_execution_state_machine.cpp
+  src/controller/reactive_task/reactive_task_mapping_context.cpp
+  src/controller/reactive_task/reactive_task_runtime.cpp
+  src/controller/reactive_task/reactive_task_planning_execution.cpp
+  src/controller/reactive_task/reactive_task_planning_session.cpp
+  src/controller/reactive_task/reactive_task_planning_runtime.cpp
+  src/controller/reactive_task/reactive_task_execution_loop.cpp
+  src/controller/reactive_task/reactive_task_runtime_config.cpp
+  src/controller/reactive_task/reactive_task_diagnostics_publisher.cpp
+  src/controller/reactive_task/reactive_task_environment_probe.cpp
+  src/controller/reactive_task/reactive_task_local_planner.cpp
+  src/controller/reactive_task/reactive_task_local_reference_manager.cpp
+  src/controller/reactive_task/reactive_task_neo_pipeline.cpp
+  src/controller/reactive_task/reactive_task_terminal_policy.cpp
+  src/controller/reactive_task/reactive_task_safety_policy.cpp
+  src/controller/reactive_task/reactive_task_watchdog.cpp
   src/controller/reactive_task/reactive_task_interface.cpp
   src/controller/reactive_task/reactive_task_ipc_interface.cpp
   # src/controller/move2initial/move2initial_controller.cpp
@@ -225,7 +258,6 @@ ament_target_dependencies(arm_controller_lib
   orocos_kdl
   kdl_parser
   Eigen3
-  OsqpEigen
   tf2_ros
   tf2_geometry_msgs
   csaps
@@ -235,10 +267,19 @@ ament_target_dependencies(arm_controller_lib
 # 链接硬件驱动库、osqp、csaps 和 pinocchio 到库
 target_link_libraries(arm_controller_lib
   hardware_driver::hardware_driver_canfd
-  OsqpEigen::OsqpEigen
+  osqp::osqp
   csaps::csaps
   pinocchio::pinocchio
   yaml-cpp
+  ${OMPL_LIBRARIES}
+)
+
+target_link_libraries(arm_controller_lib
+  tesseract::tesseract_motion_planners_trajopt
+  tesseract::tesseract_motion_planners_trajopt_ifopt
+  tesseract::tesseract_environment
+  trajopt::trajopt
+  trajopt::trajopt_ifopt
 )
 
 # 为库本身添加覆盖率编译选项（在构建测试时）
@@ -259,6 +300,13 @@ target_link_libraries(universial_arm_controller_node
   arm_controller_lib
   yaml-cpp
   hardware_driver::hardware_driver_canfd
+)
+target_link_options(universial_arm_controller_node PRIVATE
+  -Wl,--disable-new-dtags
+)
+set_target_properties(universial_arm_controller_node PROPERTIES
+  BUILD_RPATH "${ARM_CONTROLLER_TESSERACT_OSQP_LIB}"
+  INSTALL_RPATH "${ARM_CONTROLLER_TESSERACT_OSQP_LIB}"
 )
 ament_target_dependencies(universial_arm_controller_node
   rclcpp
@@ -356,6 +404,13 @@ if(EXAMPLE_SOURCES)
     target_link_libraries(${EXAMPLE_NAME}
       arm_controller_lib
     )
+    target_link_options(${EXAMPLE_NAME} PRIVATE
+      -Wl,--disable-new-dtags
+    )
+    set_target_properties(${EXAMPLE_NAME} PROPERTIES
+      BUILD_RPATH "${ARM_CONTROLLER_TESSERACT_OSQP_LIB}"
+      INSTALL_RPATH "${ARM_CONTROLLER_TESSERACT_OSQP_LIB}"
+    )
     ament_target_dependencies(${EXAMPLE_NAME}
       rclcpp
       std_msgs
@@ -382,6 +437,7 @@ if(BUILD_TESTING)
 
       target_link_libraries(${TEST_NAME}
         arm_controller_lib
+        pinocchio::pinocchio
       )
 
       ament_target_dependencies(${TEST_NAME}
@@ -392,6 +448,8 @@ if(BUILD_TESTING)
         trajectory_msgs
         trajectory_planning_interfaces
         controller_interfaces
+        ament_index_cpp
+        pinocchio
       )
 
       # 为测试目标添加覆盖率编译选项

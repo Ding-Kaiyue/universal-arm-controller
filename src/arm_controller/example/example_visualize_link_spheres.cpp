@@ -238,7 +238,7 @@ int main(int argc, char** argv) {
     }
     std::cout << "]" << std::endl;
 
-    std::vector<rq::LinkCollisionEllipsoid> ellipsoids;
+    rq::LinkCollisionEllipsoidList ellipsoids;
     if (!sm::LinkSphereModel::buildEllipsoidsForMapping(
             hardware_cfg_path, mapping, model, ellipsoids, &error)) {
         std::cerr << "[visualize_link_spheres] buildEllipsoidsForMapping failed: " << error << std::endl;

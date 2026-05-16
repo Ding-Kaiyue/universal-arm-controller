@@ -37,15 +37,18 @@ bool CartesianCollisionChecker::isSegmentValid(
     }
     const double len = (p1 - p0).norm();
     const int n = std::max(1, static_cast<int>(std::ceil(len / step)));
-    std::vector<Eigen::Vector3d> sample_points;
+    Vector3dList sample_points;
     sample_points.reserve(static_cast<std::size_t>(n + 1));
     for (int i = 0; i <= n; ++i) {
         const double s = static_cast<double>(i) / static_cast<double>(n);
         sample_points.push_back((1.0 - s) * p0 + s * p1);
     }
 
-    const std::vector<DistanceFieldQueryResult> queries =
+    const DistanceFieldQueryResultList queries =
         distance_field_->queryDistanceAndGradientBatch(sample_points);
+    if (queries.size() != sample_points.size()) {
+        return false;
+    }
     for (std::size_t i = 0; i < sample_points.size(); ++i) {
         const DistanceFieldQueryResult& query = queries[i];
         if (!query.observed || !query.distance_valid) {

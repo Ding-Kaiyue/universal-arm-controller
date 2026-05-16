@@ -6,6 +6,8 @@
 namespace arm_controller::algorithm::reactive_qp {
 
 struct ReactiveQpProblem {
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
   Eigen::MatrixXd hessian;
   Eigen::VectorXd gradient;
   Eigen::MatrixXd constraint_matrix;

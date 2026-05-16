@@ -197,6 +197,22 @@ bool ReactiveQpExampleConfigLoader::loadFromYaml(
                 if (h["slack_weight"]) {
                     out_config.qp_build.hessian.slack_weight = h["slack_weight"].as<double>();
                 }
+                if (h["shell_tracking_weight"]) {
+                    out_config.qp_build.hessian.shell_tracking_weight =
+                        h["shell_tracking_weight"].as<double>();
+                }
+                if (h["shell_centering_gain"]) {
+                    out_config.qp_build.hessian.shell_centering_gain =
+                        h["shell_centering_gain"].as<double>();
+                }
+                if (h["shell_target_velocity_limit"]) {
+                    out_config.qp_build.hessian.shell_target_velocity_limit =
+                        h["shell_target_velocity_limit"].as<double>();
+                }
+                if (h["qdot_smoothing_weight"]) {
+                    out_config.qp_build.hessian.qdot_smoothing_weight =
+                        h["qdot_smoothing_weight"].as<double>();
+                }
                 if (h["posture_weight"]) {
                     out_config.qp_build.hessian.posture_weight = h["posture_weight"].as<double>();
                 }

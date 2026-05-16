@@ -5,6 +5,8 @@
 namespace arm_controller::algorithm::reactive_qp {
 
 struct JointLimitData {
+	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
 	Eigen::VectorXd q_min;
 	Eigen::VectorXd q_max;
 };

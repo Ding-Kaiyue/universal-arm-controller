@@ -10,7 +10,7 @@ constexpr double kInfinity = 1e20;
 }
 
 int ObstacleDamper::countActiveRows(
-    const std::vector<ObstacleConstraintInput>& constraints,
+    const ObstacleConstraintInputList& constraints,
     const ObstacleDamperConfig& config,
     const int dof) {
     if (dof <= 0) {
@@ -37,7 +37,7 @@ int ObstacleDamper::countActiveRows(
 }
 
 int ObstacleDamper::appendConstraints(
-    const std::vector<ObstacleConstraintInput>& constraints,
+    const ObstacleConstraintInputList& constraints,
     const ObstacleDamperConfig& config,
     Eigen::MatrixXd& A_qdot,
     Eigen::VectorXd& lb,

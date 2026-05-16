@@ -126,6 +126,34 @@ bool PinocchioJacobianProvider::initialize() {
     RCLCPP_ERROR(node_->get_logger(), "PinocchioJacobianProvider: invalid q/v index mapping");
     return false;
   }
+  for (const int q_index : q_indices_) {
+    if (q_index < 0 || q_index >= model_.nq) {
+      RCLCPP_ERROR(
+          node_->get_logger(),
+          "PinocchioJacobianProvider: q index %d out of range [0, %d)",
+          q_index,
+          model_.nq);
+      return false;
+    }
+  }
+  for (const int v_index : v_indices_) {
+    if (v_index < 0 || v_index >= model_.nv) {
+      RCLCPP_ERROR(
+          node_->get_logger(),
+          "PinocchioJacobianProvider: v index %d out of range [0, %d)",
+          v_index,
+          model_.nv);
+      return false;
+    }
+  }
+  if (default_frame_ >= static_cast<pinocchio::FrameIndex>(model_.nframes)) {
+    RCLCPP_ERROR(
+        node_->get_logger(),
+        "PinocchioJacobianProvider: default frame %u out of range [0, %u)",
+        static_cast<unsigned int>(default_frame_),
+        static_cast<unsigned int>(model_.nframes));
+    return false;
+  }
   data_ = std::make_unique<pinocchio::Data>(model_);
   initialized_ = true;
   return true;
@@ -171,8 +199,17 @@ Eigen::MatrixXd PinocchioJacobianProvider::computeJacobian(
   }
 
   Eigen::VectorXd q_full = Eigen::VectorXd::Zero(model_.nq);
-  for (int i = 0; i < q.size(); ++i) {
-    q_full(q_indices_[i]) = q(i);
+  for (Eigen::Index i = 0; i < q.size(); ++i) {
+    const int q_index = q_indices_[static_cast<std::size_t>(i)];
+    if (q_index < 0 || q_index >= model_.nq) {
+      RCLCPP_ERROR(
+          node_->get_logger(),
+          "PinocchioJacobianProvider: q index %d out of range [0, %d)",
+          q_index,
+          model_.nq);
+      return Eigen::MatrixXd();
+    }
+    q_full(q_index) = q(i);
   }
 
   pinocchio::forwardKinematics(model_, *data_, q_full);
@@ -186,7 +223,16 @@ Eigen::MatrixXd PinocchioJacobianProvider::computeJacobian(
   const int dof = static_cast<int>(v_indices_.size());
   Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, dof);
   for (int i = 0; i < dof; ++i) {
-    J.col(i) = J6_full.col(v_indices_[i]);
+    const int v_index = v_indices_[static_cast<std::size_t>(i)];
+    if (v_index < 0 || v_index >= model_.nv) {
+      RCLCPP_ERROR(
+          node_->get_logger(),
+          "PinocchioJacobianProvider: v index %d out of range [0, %d)",
+          v_index,
+          model_.nv);
+      return Eigen::MatrixXd();
+    }
+    J.col(i) = J6_full.col(v_index);
   }
 
   if (!point_in_link.isZero(1e-12)) {

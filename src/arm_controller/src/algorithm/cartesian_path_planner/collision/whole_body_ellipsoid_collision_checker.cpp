@@ -1,4 +1,4 @@
-#include "algorithm/cartesian_path_planner/collision/whole_body_ellipsoid_pose_validator.hpp"
+#include "algorithm/cartesian_path_planner/collision/whole_body_ellipsoid_collision_checker.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -6,6 +6,7 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <unordered_set>
 
 namespace arm_controller::algorithm::cartesian_path_planner {
 
@@ -13,6 +14,7 @@ namespace {
 
 constexpr double kGradientNormEps = 1e-9;
 constexpr double kJointSegmentStepRad = 0.10;
+constexpr double kSelfNearestRejectPaddingM = 0.05;
 
 Eigen::Vector3d rotationToRpyDeg(const Eigen::Matrix3d& R) {
     return R.eulerAngles(0, 1, 2) * (180.0 / M_PI);
@@ -34,9 +36,38 @@ double conservativeEllipsoidRadius(const Eigen::Vector3d& radii_link) {
     return radii_link.maxCoeff();
 }
 
+bool pointInsideInflatedRobotEllipsoid(
+    const Eigen::Vector3d& point_world,
+    const std::vector<const WholeBodyEllipsoidCollisionChecker::LinkCollisionEllipsoid*>& ellipsoids,
+    const std::vector<Eigen::Isometry3d, Eigen::aligned_allocator<Eigen::Isometry3d>>& link_poses,
+    const double padding_m) {
+    if (!point_world.allFinite() || ellipsoids.size() != link_poses.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < ellipsoids.size(); ++i) {
+        const auto* ellipsoid = ellipsoids[i];
+        if (ellipsoid == nullptr || !ellipsoid->radii.allFinite()) {
+            continue;
+        }
+        const Eigen::Vector3d radii =
+            (ellipsoid->radii + Eigen::Vector3d::Constant(std::max(0.0, padding_m)))
+                .cwiseMax(Eigen::Vector3d::Constant(1e-4));
+        const Eigen::Vector3d center_world =
+            link_poses[i] * ellipsoid->center_in_link;
+        const Eigen::Vector3d delta_link =
+            link_poses[i].linear().transpose() * (point_world - center_world);
+        const double normalized_sq =
+            delta_link.cwiseQuotient(radii).squaredNorm();
+        if (std::isfinite(normalized_sq) && normalized_sq <= 1.0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
-std::size_t WholeBodyEllipsoidPoseValidator::PoseCacheKeyHash::operator()(
+std::size_t WholeBodyEllipsoidCollisionChecker::PoseCacheKeyHash::operator()(
     const PoseCacheKey& key) const noexcept {
     std::size_t h = std::hash<int>{}(key.px);
     h ^= (std::hash<int>{}(key.py) << 1);
@@ -49,7 +80,7 @@ std::size_t WholeBodyEllipsoidPoseValidator::PoseCacheKeyHash::operator()(
     return h;
 }
 
-std::size_t WholeBodyEllipsoidPoseValidator::SegmentCacheKeyHash::operator()(
+std::size_t WholeBodyEllipsoidCollisionChecker::SegmentCacheKeyHash::operator()(
     const SegmentCacheKey& key) const noexcept {
     const PoseCacheKeyHash pose_hasher;
     std::size_t h = pose_hasher(key.from);
@@ -57,19 +88,30 @@ std::size_t WholeBodyEllipsoidPoseValidator::SegmentCacheKeyHash::operator()(
     return h;
 }
 
-WholeBodyEllipsoidPoseValidator::WholeBodyEllipsoidPoseValidator(
+WholeBodyEllipsoidCollisionChecker::WholeBodyEllipsoidCollisionChecker(
     Config cfg,
     std::shared_ptr<const DistanceFieldInterface> distance_field,
     std::shared_ptr<arm_controller::kinematics::PinocchioForwardKinematics> fk_provider,
     std::shared_ptr<arm_controller::kinematics::JacobianProvider> jacobian_provider,
-    std::vector<LinkCollisionEllipsoid> link_ellipsoids)
+    LinkCollisionEllipsoidList link_ellipsoids)
     : cfg_(cfg),
       distance_field_(std::move(distance_field)),
       fk_provider_(std::move(fk_provider)),
       jacobian_provider_(std::move(jacobian_provider)),
-      link_ellipsoids_(std::move(link_ellipsoids)) {}
+      link_ellipsoids_(std::move(link_ellipsoids)) {
+    std::unordered_set<std::string> seen;
+    link_pose_query_names_.reserve(link_ellipsoids_.size());
+    for (const auto& e : link_ellipsoids_) {
+        if (e.link_name.empty()) {
+            continue;
+        }
+        if (seen.insert(e.link_name).second) {
+            link_pose_query_names_.push_back(e.link_name);
+        }
+    }
+}
 
-bool WholeBodyEllipsoidPoseValidator::validatePose(
+bool WholeBodyEllipsoidCollisionChecker::validatePose(
     const Eigen::Vector3d& p_target,
     const Eigen::Matrix3d& R_target,
     const double safe_distance,
@@ -92,7 +134,7 @@ bool WholeBodyEllipsoidPoseValidator::validatePose(
     return true;
 }
 
-bool WholeBodyEllipsoidPoseValidator::validateSegment(
+bool WholeBodyEllipsoidCollisionChecker::validateSegment(
     const CartesianWaypoint& from,
     const CartesianWaypoint& to,
     const double safe_distance,
@@ -239,8 +281,8 @@ bool WholeBodyEllipsoidPoseValidator::validateSegment(
     return true;
 }
 
-WholeBodyEllipsoidPoseValidator::PoseDiagnostic
-WholeBodyEllipsoidPoseValidator::diagnosePose(
+WholeBodyEllipsoidCollisionChecker::PoseDiagnostic
+WholeBodyEllipsoidCollisionChecker::diagnosePose(
     const Eigen::Vector3d& p_target,
     const Eigen::Matrix3d& R_target,
     const double safe_distance,
@@ -269,7 +311,7 @@ WholeBodyEllipsoidPoseValidator::diagnosePose(
     return q_diag;
 }
 
-void WholeBodyEllipsoidPoseValidator::fillPlanningDiagnostic(
+void WholeBodyEllipsoidCollisionChecker::fillPlanningDiagnostic(
     const PoseDiagnostic& in,
     PathPlanningInput::WholeBodyPoseDiagnostic& out) {
     out.ik_ok = in.ik_ok;
@@ -291,11 +333,15 @@ void WholeBodyEllipsoidPoseValidator::fillPlanningDiagnostic(
     out.failed_segment_t = in.failed_segment_t;
     out.failed_pose_world = in.failed_pose_world;
     out.failed_pose_orientation = in.failed_pose_orientation;
-    out.q_solution = in.q_solution;
+    if (in.q_solution.size() > 0) {
+        out.q_solution = in.q_solution;
+    } else {
+        out.q_solution.resize(0);
+    }
 }
 
 PathPlanningInput::WholeBodyPoseValidatorFn
-WholeBodyEllipsoidPoseValidator::makePoseValidatorFn() const {
+WholeBodyEllipsoidCollisionChecker::makePoseValidatorFn() const {
     return [this](
                const Eigen::Vector3d& p,
                const Eigen::Matrix3d& R,
@@ -307,7 +353,7 @@ WholeBodyEllipsoidPoseValidator::makePoseValidatorFn() const {
 }
 
 PathPlanningInput::WholeBodySegmentValidatorFn
-WholeBodyEllipsoidPoseValidator::makeSegmentValidatorFn() const {
+WholeBodyEllipsoidCollisionChecker::makeSegmentValidatorFn() const {
     return [this](
                const CartesianWaypoint& from,
                const CartesianWaypoint& to,
@@ -326,7 +372,7 @@ WholeBodyEllipsoidPoseValidator::makeSegmentValidatorFn() const {
 }
 
 PathPlanningInput::WholeBodyPoseDiagnosticFn
-WholeBodyEllipsoidPoseValidator::makePoseDiagnosticFn() const {
+WholeBodyEllipsoidCollisionChecker::makePoseDiagnosticFn() const {
     return [this](
                const Eigen::Vector3d& p,
                const Eigen::Matrix3d& R,
@@ -340,21 +386,26 @@ WholeBodyEllipsoidPoseValidator::makePoseDiagnosticFn() const {
 }
 
 PathPlanningInput::JointStateValidatorFn
-WholeBodyEllipsoidPoseValidator::makeJointStateValidatorFn() const {
+WholeBodyEllipsoidCollisionChecker::makeJointStateValidatorFn() const {
     return [this](
                const Eigen::VectorXd& q,
                const double safe_distance,
                PathPlanningInput::WholeBodyPoseDiagnostic* diag_out) {
         const PoseDiagnostic diag = this->diagnoseJointState(q, safe_distance);
-        if (diag_out != nullptr) {
+        if (diag_out != nullptr && !diag.collision_free) {
             fillPlanningDiagnostic(diag, *diag_out);
+        } else if (diag_out != nullptr) {
+            diag_out->collision_free = true;
+            diag_out->min_margin = diag.min_margin;
+            diag_out->reason = diag.reason;
+            diag_out->worst_link_name = diag.worst_link_name;
         }
         return diag.collision_free;
     };
 }
 
 PathPlanningInput::JointSegmentValidatorFn
-WholeBodyEllipsoidPoseValidator::makeJointSegmentValidatorFn() const {
+WholeBodyEllipsoidCollisionChecker::makeJointSegmentValidatorFn() const {
     return [this](
                const Eigen::VectorXd& q_from,
                const Eigen::VectorXd& q_to,
@@ -400,7 +451,7 @@ WholeBodyEllipsoidPoseValidator::makeJointSegmentValidatorFn() const {
     };
 }
 
-bool WholeBodyEllipsoidPoseValidator::solveIk(
+bool WholeBodyEllipsoidCollisionChecker::solveIk(
     const Eigen::Vector3d& p_target,
     const Eigen::Matrix3d& R_target,
     const std::optional<Eigen::VectorXd>& q_seed,
@@ -422,8 +473,8 @@ bool WholeBodyEllipsoidPoseValidator::solveIk(
     return false;
 }
 
-WholeBodyEllipsoidPoseValidator::PoseDiagnostic
-WholeBodyEllipsoidPoseValidator::diagnoseConfiguration(
+WholeBodyEllipsoidCollisionChecker::PoseDiagnostic
+WholeBodyEllipsoidCollisionChecker::diagnoseConfiguration(
     const Eigen::VectorXd& q,
     const double safe_distance) const {
     PoseDiagnostic diag;
@@ -433,7 +484,6 @@ WholeBodyEllipsoidPoseValidator::diagnoseConfiguration(
     diag.min_margin = std::numeric_limits<double>::infinity();
     diag.safe_distance_used = safe_distance;
     diag.reason = "ok";
-    diag.q_solution = q;
 
     if (q.size() == 0 || !q.allFinite()) {
         diag.collision_free = false;
@@ -447,41 +497,57 @@ WholeBodyEllipsoidPoseValidator::diagnoseConfiguration(
         diag.reason = "invalid_validator";
         return diag;
     }
-
-    arm_controller::kinematics::ForwardKinematicsOutput fk_out;
-    if (!fk_provider_->compute(q, fk_out)) {
+    arm_controller::kinematics::LinkPoseResultList link_poses;
+    Eigen::Vector3d ee_position = Eigen::Vector3d::Zero();
+    Eigen::Matrix3d ee_rotation = Eigen::Matrix3d::Identity();
+    if (!fk_provider_->computeLinkPoses(
+            q,
+            link_pose_query_names_,
+            link_poses,
+            &ee_position,
+            &ee_rotation)) {
         diag.collision_free = false;
         diag.min_margin = -1.0;
         diag.reason = "fk_fail";
         return diag;
     }
 
-    diag.failed_pose_world = fk_out.ee_position;
-    diag.failed_pose_orientation = fk_out.ee_rotation;
+    diag.failed_pose_world = ee_position;
+    diag.failed_pose_orientation = ee_rotation;
 
-    std::vector<Eigen::Vector3d> query_points;
+    std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>> query_points;
     std::vector<const LinkCollisionEllipsoid*> query_ellipsoids;
-    std::vector<const Eigen::Isometry3d*> query_link_poses;
+    std::vector<Eigen::Isometry3d, Eigen::aligned_allocator<Eigen::Isometry3d>> query_link_poses;
     query_points.reserve(link_ellipsoids_.size());
     query_ellipsoids.reserve(link_ellipsoids_.size());
     query_link_poses.reserve(link_ellipsoids_.size());
 
     for (const auto& e : link_ellipsoids_) {
-        const auto it = fk_out.link_poses.find(e.link_name);
-        if (it == fk_out.link_poses.end()) {
+        const auto it = std::find_if(
+            link_poses.begin(),
+            link_poses.end(),
+            [&e](const arm_controller::kinematics::LinkPoseResult& result) {
+                return result.link_name == e.link_name;
+            });
+        if (it == link_poses.end()) {
             continue;
         }
-        const Eigen::Isometry3d& T_world_link = it->second;
+        const Eigen::Isometry3d& T_world_link = it->pose;
         query_points.push_back(T_world_link * e.center_in_link);
         query_ellipsoids.push_back(&e);
-        query_link_poses.push_back(&T_world_link);
+        query_link_poses.push_back(T_world_link);
     }
-
-    const std::vector<DistanceFieldQueryResult> queries =
+    const DistanceFieldQueryResultList queries =
         distance_field_->queryDistanceAndGradientBatch(query_points);
+    if (queries.size() != query_points.size()) {
+        diag.collision_free = false;
+        diag.min_margin = -1.0;
+        diag.reason = "distance_field_batch_size_mismatch";
+        return diag;
+    }
     for (std::size_t i = 0; i < query_ellipsoids.size(); ++i) {
         const auto& e = *query_ellipsoids[i];
-        const Eigen::Isometry3d& T_world_link = *query_link_poses[i];
+        const Eigen::Isometry3d& T_world_link = query_link_poses[i];
         const Eigen::Vector3d& p_world = query_points[i];
         const DistanceFieldQueryResult& query = queries[i];
         if (!query.observed) {
@@ -502,6 +568,17 @@ WholeBodyEllipsoidPoseValidator::diagnoseConfiguration(
             diag.worst_gradient_norm = gn;
             diag.worst_gradient_world = raw_gradient;
             return diag;
+        }
+        if (query.gradient_valid && gn >= kGradientNormEps) {
+            const Eigen::Vector3d nearest_obstacle_point =
+                p_world - d * (raw_gradient / gn);
+            if (pointInsideInflatedRobotEllipsoid(
+                    nearest_obstacle_point,
+                    query_ellipsoids,
+                    query_link_poses,
+                    kSelfNearestRejectPaddingM)) {
+                continue;
+            }
         }
 
         double r_eff = conservativeEllipsoidRadius(e.radii);
@@ -530,34 +607,34 @@ WholeBodyEllipsoidPoseValidator::diagnoseConfiguration(
     }
 
     if (!std::isfinite(diag.min_margin)) {
-        diag.min_margin = -1.0;
+        diag.min_margin = std::numeric_limits<double>::infinity();
         if (diag.reason == "ok") {
-            diag.reason = "no_ellipsoids";
+            diag.reason = "no_observed_obstacles";
         }
     }
     return diag;
 }
 
-WholeBodyEllipsoidPoseValidator::PoseDiagnostic
-WholeBodyEllipsoidPoseValidator::diagnoseJointState(
+WholeBodyEllipsoidCollisionChecker::PoseDiagnostic
+WholeBodyEllipsoidCollisionChecker::diagnoseJointState(
     const Eigen::VectorXd& q,
     const double safe_distance) const {
     return diagnoseConfiguration(q, safe_distance);
 }
 
-bool WholeBodyEllipsoidPoseValidator::isWholeBodyCollisionFree(
+bool WholeBodyEllipsoidCollisionChecker::isWholeBodyCollisionFree(
     const Eigen::VectorXd& q,
     const double safe_distance) const {
     return diagnoseConfiguration(q, safe_distance).collision_free;
 }
 
-bool WholeBodyEllipsoidPoseValidator::shouldUseSeedAgnosticCache(
+bool WholeBodyEllipsoidCollisionChecker::shouldUseSeedAgnosticCache(
     const std::optional<Eigen::VectorXd>& q_seed) const {
     return !q_seed.has_value() || q_seed->size() == 0;
 }
 
-WholeBodyEllipsoidPoseValidator::PoseCacheKey
-WholeBodyEllipsoidPoseValidator::makePoseCacheKey(
+WholeBodyEllipsoidCollisionChecker::PoseCacheKey
+WholeBodyEllipsoidCollisionChecker::makePoseCacheKey(
     const Eigen::Vector3d& p_target,
     const Eigen::Matrix3d& R_target,
     const double safe_distance) const {
@@ -583,7 +660,7 @@ WholeBodyEllipsoidPoseValidator::makePoseCacheKey(
     };
 }
 
-bool WholeBodyEllipsoidPoseValidator::lookupPoseCache(
+bool WholeBodyEllipsoidCollisionChecker::lookupPoseCache(
     const PoseCacheKey& key,
     Eigen::VectorXd& q_solution) const {
     std::lock_guard<std::mutex> lock(pose_cache_mutex_);
@@ -595,7 +672,7 @@ bool WholeBodyEllipsoidPoseValidator::lookupPoseCache(
     return true;
 }
 
-void WholeBodyEllipsoidPoseValidator::storePoseCache(
+void WholeBodyEllipsoidCollisionChecker::storePoseCache(
     const PoseCacheKey& key,
     const Eigen::VectorXd& q_solution) const {
     std::lock_guard<std::mutex> lock(pose_cache_mutex_);
@@ -606,8 +683,8 @@ void WholeBodyEllipsoidPoseValidator::storePoseCache(
     pose_cache_[key] = PoseCacheValue{q_solution};
 }
 
-WholeBodyEllipsoidPoseValidator::SegmentCacheKey
-WholeBodyEllipsoidPoseValidator::makeSegmentCacheKey(
+WholeBodyEllipsoidCollisionChecker::SegmentCacheKey
+WholeBodyEllipsoidCollisionChecker::makeSegmentCacheKey(
     const CartesianWaypoint& from,
     const CartesianWaypoint& to,
     const double safe_distance) const {
@@ -617,7 +694,7 @@ WholeBodyEllipsoidPoseValidator::makeSegmentCacheKey(
     };
 }
 
-bool WholeBodyEllipsoidPoseValidator::lookupSegmentCache(
+bool WholeBodyEllipsoidCollisionChecker::lookupSegmentCache(
     const SegmentCacheKey& key,
     Eigen::VectorXd& q_end) const {
     std::lock_guard<std::mutex> lock(segment_cache_mutex_);
@@ -629,7 +706,7 @@ bool WholeBodyEllipsoidPoseValidator::lookupSegmentCache(
     return true;
 }
 
-void WholeBodyEllipsoidPoseValidator::storeSegmentCache(
+void WholeBodyEllipsoidCollisionChecker::storeSegmentCache(
     const SegmentCacheKey& key,
     const Eigen::VectorXd& q_end) const {
     std::lock_guard<std::mutex> lock(segment_cache_mutex_);

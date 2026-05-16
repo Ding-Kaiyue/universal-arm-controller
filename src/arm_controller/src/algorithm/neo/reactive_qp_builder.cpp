@@ -150,31 +150,13 @@ bool ReactiveQpBuilder::build(
         !validateJointVelocityAndCbfCompatibility(input, config, error)) {
         return false;
     }
-    if (config.enable_obstacle_damper &&
+    if (config.enable_obstacle_damper && !config.enable_obstacle_slack &&
         !validateObstacleVelocityCompatibility(input, config, error)) {
         return false;
     }
 
     const int dof = static_cast<int>(input.q_current.size());
     const int task_dim = static_cast<int>(input.jacobian_task.rows());
-    // Decision variable: x = [qdot; s], qdot in R^dof, s in R^task_dim.
-    const int nv = dof + task_dim;
-
-    HessianBuildInput hessian_input;
-    hessian_input.jacobian_task = input.jacobian_task;
-    hessian_input.desired_twist = input.desired_twist;
-    hessian_input.q_current = input.q_current;
-    hessian_input.posture_velocity_reference = input.posture_velocity_reference;
-    hessian_input.posture_joint_weights = input.posture_joint_weights;
-    hessian_input.manipulability_gradient = input.manipulability_gradient;
-    if (!HessianBuilder::build(
-            hessian_input, config.hessian, out_problem.hessian, out_problem.gradient)) {
-        if (error != nullptr) {
-            *error = "Failed to build Hessian/gradient.";
-        }
-        return false;
-    }
-
     const int joint_limit_rows =
         config.enable_joint_limit_damper
             ? JointLimitDamper::countActiveRows(
@@ -185,17 +167,61 @@ bool ReactiveQpBuilder::build(
             ? ObstacleDamper::countActiveRows(
                     input.obstacle_constraints, config.obstacle_damper, dof)
             : 0;
+    const bool use_obstacle_slack =
+        config.enable_obstacle_slack && obstacle_rows > 0;
+    const int obstacle_slack_offset = dof + task_dim;
+    const int obstacle_slack_dim = use_obstacle_slack ? obstacle_rows : 0;
+    // Decision variable: x = [qdot; s; r], where r are non-negative
+    // obstacle CBF relaxations. Keeping obstacle slack separate from task slack
+    // prevents transient multi-obstacle conflicts from making the QP infeasible.
+    const int nv = dof + task_dim + obstacle_slack_dim;
+
+    HessianBuildInput hessian_input;
+    hessian_input.jacobian_task = input.jacobian_task;
+    hessian_input.desired_twist = input.desired_twist;
+    hessian_input.q_current = input.q_current;
+    hessian_input.posture_velocity_reference = input.posture_velocity_reference;
+    hessian_input.previous_qdot_reference = input.previous_qdot_reference;
+    hessian_input.posture_joint_weights = input.posture_joint_weights;
+    hessian_input.manipulability_gradient = input.manipulability_gradient;
+    hessian_input.shell_jacobian = input.shell_jacobian;
+    hessian_input.shell_desired_rate = input.shell_desired_rate;
+    hessian_input.shell_weight_scale = input.shell_weight_scale;
+    hessian_input.tangential_jacobian = input.tangential_jacobian;
+    hessian_input.tangential_desired_velocity = input.tangential_desired_velocity;
+    hessian_input.tangential_weight_scale = input.tangential_weight_scale;
+    if (!HessianBuilder::build(
+            hessian_input, config.hessian, out_problem.hessian, out_problem.gradient)) {
+        if (error != nullptr) {
+            *error = "Failed to build Hessian/gradient.";
+        }
+        return false;
+    }
+
     // Constraint rows in standard form l <= A x <= u:
     //   block 1 (dof rows): qd_min <= qdot <= qd_max
     //   block 2 (task_dim rows): -s_max <= s <= s_max
+    //   optional block: 0 <= r <= r_max
     //   block 3: joint-limit CBF (on qdot block only)
-    //   block 4: optional obstacle dampers (on qdot block only)
+    //   block 4: optional obstacle dampers (on qdot and obstacle slack)
     const int base_bound_rows = nv;
     const int nc = base_bound_rows + joint_limit_rows + obstacle_rows;
 
     out_problem.constraint_matrix = Eigen::MatrixXd::Zero(nc, nv);
     out_problem.lower_bound = Eigen::VectorXd::Constant(nc, -kInfinity);
     out_problem.upper_bound = Eigen::VectorXd::Constant(nc, kInfinity);
+    if (obstacle_slack_dim > 0) {
+        out_problem.hessian.conservativeResize(nv, nv);
+        out_problem.gradient.conservativeResize(nv);
+        out_problem.hessian.bottomRows(obstacle_slack_dim).setZero();
+        out_problem.hessian.rightCols(obstacle_slack_dim).setZero();
+        out_problem.gradient.tail(obstacle_slack_dim).setZero();
+        out_problem.hessian
+            .block(obstacle_slack_offset, obstacle_slack_offset,
+                   obstacle_slack_dim, obstacle_slack_dim)
+            .diagonal()
+            .array() += 2.0 * std::max(0.0, config.obstacle_slack_weight);
+    }
 
     // Base variable bounds (joint velocity + slack bounds).
     for (int i = 0; i < dof; ++i) {
@@ -209,6 +235,14 @@ bool ReactiveQpBuilder::build(
         out_problem.constraint_matrix(row, col) = 1.0;
         out_problem.lower_bound(row) = -std::abs(config.slack_abs_bound);
         out_problem.upper_bound(row) = std::abs(config.slack_abs_bound);
+    }
+    for (int i = 0; i < obstacle_slack_dim; ++i) {
+        const int row = obstacle_slack_offset + i;
+        const int col = obstacle_slack_offset + i;
+        out_problem.constraint_matrix(row, col) = 1.0;
+        out_problem.lower_bound(row) = 0.0;
+        out_problem.upper_bound(row) =
+            std::max(0.0, config.obstacle_slack_abs_bound);
     }
 
     int next_row = base_bound_rows;
@@ -254,6 +288,12 @@ bool ReactiveQpBuilder::build(
             return false;
         }
         out_problem.constraint_matrix.block(next_row, 0, written, dof) = A_qdot.topRows(written);
+        if (use_obstacle_slack) {
+            for (int i = 0; i < written; ++i) {
+                out_problem.constraint_matrix(next_row + i,
+                                              obstacle_slack_offset + i) = 1.0;
+            }
+        }
         out_problem.lower_bound.segment(next_row, written) = lb.head(written);
         out_problem.upper_bound.segment(next_row, written) = ub.head(written);
         next_row += written;

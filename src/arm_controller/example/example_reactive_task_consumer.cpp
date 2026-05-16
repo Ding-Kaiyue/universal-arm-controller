@@ -21,7 +21,8 @@ constexpr const char* kPointcloudTopic = "/camera_driver/obstacle_pointcloud";
 constexpr const char* kEsdfServiceName = "/camera_driver/query_distance_field";
 
 struct RuntimeMapConfig {
-    std::string map_source{"camera_driver_esdf"};
+    std::string distance_field_source{"camera_driver_esdf"};
+    std::string collision_map_source{"camera_driver_pointcloud"};
     std::string pointcloud_topic{kPointcloudTopic};
     std::string esdf_service_name{kEsdfServiceName};
 };
@@ -132,8 +133,11 @@ RuntimeMapConfig loadRuntimeMapConfig() {
             return cfg;
         }
 
-        if (rtc["map_source"]) {
-            cfg.map_source = rtc["map_source"].as<std::string>();
+        if (rtc["distance_field_source"]) {
+            cfg.distance_field_source = rtc["distance_field_source"].as<std::string>();
+        }
+        if (rtc["collision_map_source"]) {
+            cfg.collision_map_source = rtc["collision_map_source"].as<std::string>();
         }
         if (const YAML::Node pointcloud = rtc["camera_driver_pointcloud"];
             pointcloud && pointcloud.IsMap() && pointcloud["pointcloud_topic"]) {
@@ -155,40 +159,40 @@ bool runMapPrecheck(
     const rclcpp::Node::SharedPtr& node,
     const RuntimeMapConfig& cfg,
     const std::chrono::seconds timeout) {
-    if (cfg.map_source == "camera_driver_pointcloud") {
-        std::cout << "ReactiveTask map_source=camera_driver_pointcloud\n";
-        std::cout << "Waiting for realtime pointcloud topic:\n"
-                  << "  - " << cfg.pointcloud_topic << "\n";
-        return waitForPublishers(node, {cfg.pointcloud_topic}, timeout);
-    }
-
-    if (cfg.map_source == "camera_driver_esdf") {
-        std::cout << "ReactiveTask map_source=camera_driver_esdf\n";
+    bool ok = true;
+    if (cfg.distance_field_source == "camera_driver_esdf") {
+        std::cout << "ReactiveTask distance_field_source=camera_driver_esdf\n";
         std::cout << "Waiting for ESDF query service:\n"
                   << "  - " << cfg.esdf_service_name << "\n";
-        return waitForEsdfService(node, cfg.esdf_service_name, timeout);
+        ok = waitForEsdfService(node, cfg.esdf_service_name, timeout) && ok;
+    } else if (cfg.distance_field_source == "dummy") {
+        std::cout << "ReactiveTask distance_field_source=dummy\n";
+    } else {
+        std::cerr << "[WARN] unknown distance_field_source='"
+                  << cfg.distance_field_source << "', skipping ESDF precheck.\n";
     }
 
-    if (cfg.map_source == "dummy") {
-        std::cout << "ReactiveTask map_source=dummy\n";
-        std::cout << "No camera_driver precheck is required in dummy mode.\n";
-        return true;
+    if (cfg.collision_map_source == "camera_driver_pointcloud") {
+        std::cout << "ReactiveTask collision_map_source=camera_driver_pointcloud\n";
+        std::cout << "Waiting for realtime obstacle pointcloud topic:\n"
+                  << "  - " << cfg.pointcloud_topic << "\n";
+        ok = waitForPublishers(node, {cfg.pointcloud_topic}, timeout) && ok;
+    } else if (cfg.collision_map_source == "dummy") {
+        std::cout << "ReactiveTask collision_map_source=dummy\n";
+    } else {
+        std::cerr << "[WARN] unknown collision_map_source='"
+                  << cfg.collision_map_source
+                  << "', skipping pointcloud precheck.\n";
     }
-
-    std::cerr << "[WARN] unknown map_source='" << cfg.map_source
-              << "', skipping map precheck.\n";
-    return true;
+    return ok;
 }
 
 std::string timeoutHint(const RuntimeMapConfig& cfg) {
-    if (cfg.map_source == "camera_driver_pointcloud") {
-        return "Check controller log for map_source=camera_driver_pointcloud and active_cells.";
+    if (cfg.collision_map_source == "camera_driver_pointcloud") {
+        return "Check controller log for collision_map_source=camera_driver_pointcloud, active_cells, local_trajopt obstacle count, and camera_driver pointcloud publishing.";
     }
-    if (cfg.map_source == "camera_driver_esdf") {
-        return "Check controller log for map_source=camera_driver_esdf and service_ready.";
-    }
-    if (cfg.map_source == "dummy") {
-        return "Check controller log for dummy obstacle mode and controller execution state.";
+    if (cfg.distance_field_source == "camera_driver_esdf") {
+        return "Check controller log for distance_field_source=camera_driver_esdf and service_ready.";
     }
     return "Check controller log for ReactiveTask map initialization.";
 }
@@ -204,7 +208,10 @@ int main(int argc, char** argv) {
     auto node = rclcpp::Node::make_shared("example_reactive_task_consumer");
     const RuntimeMapConfig map_cfg = loadRuntimeMapConfig();
 
-    std::cout << "Loaded reactive_task_config.yaml map_source=" << map_cfg.map_source << "\n";
+    std::cout << "Loaded reactive_task_config.yaml distance_field_source="
+              << map_cfg.distance_field_source
+              << " collision_map_source=" << map_cfg.collision_map_source
+              << "\n";
     if (!runMapPrecheck(node, map_cfg, std::chrono::seconds(8))) {
         std::cerr << "[ERROR] map precheck failed within timeout.\n"
                   << "Please start universial_arm_controller_node and camera_driver first.\n";
@@ -224,8 +231,12 @@ int main(int argc, char** argv) {
     const std::string mapping = "left_arm";
 
     // target_pose = [x, y, z, qx, qy, qz, qw]
+    // const std::vector<double> target = {
+    //     -0.1, -0.6, 0.58, -0.4546, 0.4546, -0.5417, 0.5417};
+    // const std::vector<double> target = {
+    //     -0.093, -0.559, 0.555, -0.520, 0.289, -0.388, 0.704};
     const std::vector<double> target = {
-        -0.1, -0.6, 0.58, -0.4546, 0.4546, -0.5417, 0.5417};
+        -0.179, -0.815, 0.502, -0.159, 0.484, -0.593, 0.623};
 
     std::cout << "========== ReactiveTask safety run ==========\n";
     std::cout << "mapping: " << mapping << "\n";

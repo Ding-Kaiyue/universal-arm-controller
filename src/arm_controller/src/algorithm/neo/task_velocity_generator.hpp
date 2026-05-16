@@ -7,6 +7,8 @@
 namespace arm_controller::algorithm::reactive_qp {
 
 struct TaskVelocityConfig {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     // 位置误差反馈增益
     Eigen::Vector3d kp_pos{3.0, 3.0, 3.0};
 
@@ -23,6 +25,8 @@ struct TaskVelocityConfig {
 };
 
 struct TaskVelocityInput {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     // 当前末端位姿（建议统一在base/world坐标系）
     Eigen::Isometry3d T_current = Eigen::Isometry3d::Identity();
 
@@ -40,6 +44,8 @@ struct TaskVelocityInput {
 };
 
 struct TaskVelocityOutput {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     Eigen::Matrix<double, 6, 1> v_des =
         Eigen::Matrix<double, 6, 1>::Zero();
 

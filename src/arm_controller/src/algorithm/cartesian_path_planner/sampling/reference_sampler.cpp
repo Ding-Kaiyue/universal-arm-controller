@@ -10,6 +10,7 @@ TimedCartesianSample ReferenceSampler::sample(
     const TimedCartesianTrajectory& traj,
     double t_query) const {
     TimedCartesianSample out;
+    out.is_cartesian_tracking_target = false;
     if (traj.empty()) {
         return out;
     }

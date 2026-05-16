@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <limits>
+#include <queue>
 #include <unordered_map>
 
 #include <sensor_msgs/point_cloud2_iterator.hpp>
@@ -18,6 +19,7 @@ CameraDriverPointcloudMapAdapter::CameraDriverPointcloudMapAdapter(
     config_.observation_margin_m = std::max(0.0, config_.observation_margin_m);
     config_.isolated_min_neighbor_count = std::max(0, config_.isolated_min_neighbor_count);
     config_.isolated_neighbor_radius_cells = std::max(1, config_.isolated_neighbor_radius_cells);
+    config_.min_cluster_cell_count = std::max(1, config_.min_cluster_cell_count);
     search_radius_cells_ = std::max(
         1,
         static_cast<int>(std::ceil(config_.max_distance_m / config_.voxel_size_m)));
@@ -39,13 +41,14 @@ CameraDriverPointcloudMapAdapter::CameraDriverPointcloudMapAdapter(
 
     RCLCPP_INFO(
         node_->get_logger(),
-        "[ReactiveTask] camera_driver pointcloud adapter enabled: cloud_topic=%s voxel=%.3f max_dist=%.3f margin=%.3f isolated_neighbors>=%d radius=%d",
+        "[ReactiveTask] camera_driver pointcloud adapter enabled: cloud_topic=%s voxel=%.3f max_dist=%.3f margin=%.3f isolated_neighbors>=%d radius=%d min_cluster_cells=%d",
         config_.pointcloud_topic.c_str(),
         config_.voxel_size_m,
         config_.max_distance_m,
         config_.observation_margin_m,
         config_.isolated_min_neighbor_count,
-        config_.isolated_neighbor_radius_cells);
+        config_.isolated_neighbor_radius_cells,
+        config_.min_cluster_cell_count);
 }
 
 void CameraDriverPointcloudMapAdapter::onPointcloud(
@@ -108,6 +111,10 @@ void CameraDriverPointcloudMapAdapter::onPointcloud(
         occupied_cells.emplace(key, cell.sum / static_cast<double>(cell.count));
     }
 
+    if (config_.min_cluster_cell_count > 1) {
+        occupied_cells = filterSmallClusters(occupied_cells);
+    }
+
     {
         std::lock_guard<std::mutex> lock(cloud_mutex_);
         occupied_cells_ = std::move(occupied_cells);
@@ -161,6 +168,68 @@ int CameraDriverPointcloudMapAdapter::countOccupiedNeighbors(
         }
     }
     return neighbor_count;
+}
+
+CameraDriverPointcloudMapAdapter::OccupancyMap
+CameraDriverPointcloudMapAdapter::filterSmallClusters(
+    const OccupancyMap& occupied_cells) const {
+    if (config_.min_cluster_cell_count <= 1 ||
+        occupied_cells.size() < static_cast<std::size_t>(config_.min_cluster_cell_count)) {
+        return occupied_cells;
+    }
+
+    OccupancyMap filtered;
+    filtered.reserve(occupied_cells.size());
+    std::set<CellKey> visited;
+    std::vector<CellKey> component;
+    std::queue<CellKey> frontier;
+
+    for (const auto& [seed_key, seed_center] : occupied_cells) {
+        (void)seed_center;
+        if (visited.find(seed_key) != visited.end()) {
+            continue;
+        }
+
+        component.clear();
+        frontier.push(seed_key);
+        visited.insert(seed_key);
+        while (!frontier.empty()) {
+            const CellKey key = frontier.front();
+            frontier.pop();
+            component.push_back(key);
+
+            for (int dx = -1; dx <= 1; ++dx) {
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dz = -1; dz <= 1; ++dz) {
+                        if (dx == 0 && dy == 0 && dz == 0) {
+                            continue;
+                        }
+                        const CellKey neighbor_key{key.x + dx, key.y + dy, key.z + dz};
+                        if (visited.find(neighbor_key) != visited.end()) {
+                            continue;
+                        }
+                        if (occupied_cells.find(neighbor_key) == occupied_cells.end()) {
+                            continue;
+                        }
+                        visited.insert(neighbor_key);
+                        frontier.push(neighbor_key);
+                    }
+                }
+            }
+        }
+
+        if (component.size() < static_cast<std::size_t>(config_.min_cluster_cell_count)) {
+            continue;
+        }
+        for (const auto& key : component) {
+            const auto it = occupied_cells.find(key);
+            if (it != occupied_cells.end()) {
+                filtered.emplace(key, it->second);
+            }
+        }
+    }
+
+    return filtered;
 }
 
 bool CameraDriverPointcloudMapAdapter::pointWithinObservedBounds(
@@ -239,10 +308,10 @@ DistanceFieldQueryResult CameraDriverPointcloudMapAdapter::queryDistanceAndGradi
     return result;
 }
 
-std::vector<DistanceFieldQueryResult>
+DistanceFieldQueryResultList
 CameraDriverPointcloudMapAdapter::queryDistanceAndGradientBatch(
-    const std::vector<Eigen::Vector3d>& positions) const {
-    std::vector<DistanceFieldQueryResult> results;
+    const Vector3dList& positions) const {
+    DistanceFieldQueryResultList results;
     results.reserve(positions.size());
     for (const auto& p : positions) {
         results.push_back(queryDistanceAndGradient(p));
@@ -253,6 +322,22 @@ CameraDriverPointcloudMapAdapter::queryDistanceAndGradientBatch(
 std::size_t CameraDriverPointcloudMapAdapter::activeCellCount() const {
     std::lock_guard<std::mutex> lock(cloud_mutex_);
     return occupied_cells_.size();
+}
+
+Vector3dList CameraDriverPointcloudMapAdapter::occupiedCellCenters(
+    const std::size_t max_count) const {
+    std::lock_guard<std::mutex> lock(cloud_mutex_);
+    Vector3dList centers;
+    centers.reserve(max_count == 0u ? occupied_cells_.size()
+                                    : std::min(max_count, occupied_cells_.size()));
+    for (const auto& [key, center] : occupied_cells_) {
+        (void)key;
+        centers.push_back(center);
+        if (max_count > 0u && centers.size() >= max_count) {
+            break;
+        }
+    }
+    return centers;
 }
 
 }  // namespace arm_controller::algorithm::cartesian_path_planner

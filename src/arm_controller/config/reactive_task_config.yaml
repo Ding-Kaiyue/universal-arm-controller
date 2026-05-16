@@ -23,6 +23,7 @@ neo_example:
       task_tracking_weight: 2.0
       joint_velocity_weight:  0.002 # 5.0e-3
       slack_weight: 100.0
+      qdot_smoothing_weight: 0.08
       posture_weight: 0.008  # 0.01
       manipulability_weight: 0.0002 # 0.01
 
@@ -73,25 +74,33 @@ neo_joint_preference:
 
 reactive_task_controller:
   max_control_ticks: 240
-  neo_control_cycle_sec: 0.01
+  controller:
+    type: neo
+    frequency_hz: 100.0
+  global_planner:
+    type: rrt_connect
+    planning_latency_sec: 0.06
+  local_planner:
+    type: trajopt
+    frequency_hz: 20.0
+    horizon_steps: 10
+    enable_collision_cost: true
+    enable_collision_constraint: true
+    max_obstacle_spheres: 32
+    obstacle_selection_radius_m: 0.25
+    obstacle_padding_m: 0.005
   goal_position_tolerance: 0.01
   goal_orientation_tolerance_rad: 0.10
-  terminal_goal_capture_enable: true
-  terminal_goal_capture_pos_err_threshold_m: 0.30
-  terminal_goal_capture_ori_err_threshold_rad: 0.30
-  terminal_goal_capture_no_progress_cycles: 60
-  terminal_goal_capture_suppress_replanning: true
-  terminal_goal_capture_relax_obstacle_damper_when_far: true
-  terminal_goal_capture_obstacle_near_distance_m: 0.10
-
   request:
-    safe_distance: 0.05 # desired ellipsoid-obstacle clearance
+    safe_distance: 0.045 # desired ellipsoid-obstacle clearance
+    planning_safe_distance: 0.065 # extra clearance for the planned reference path
     hard_clearance: 0.0 # true collision threshold used by safety checks
     goal_tolerance: 0.03
     map_margin_xyz: [0.60, 0.60, 0.60]
     whole_body_segment_check_step_m: 0.10
 
-  map_source: camera_driver_esdf
+  distance_field_source: camera_driver_esdf
+  collision_map_source: camera_driver_pointcloud
 
   camera_driver_pointcloud:
     pointcloud_topic: /camera_driver/obstacle_pointcloud
@@ -101,10 +110,11 @@ reactive_task_controller:
     observation_margin_m: 0.15
     isolated_min_neighbor_count: 4
     isolated_neighbor_radius_cells: 1
+    min_cluster_cell_count: 20
 
   camera_driver_esdf:
     service_name: /camera_driver/query_distance_field
-    request_timeout_ms: 200
+    request_timeout_ms: 25
     startup_wait_timeout_ms: 1000
     cache_max_entries: 8192
 
@@ -113,14 +123,6 @@ reactive_task_controller:
     radius: 0.035
     center_left_arm: [0.25, -0.52, 0.60]
     center_right_arm: [0.07, 0.52, 0.72]
-
-  replanner:
-    segment_sample_step_m: 0.02
-    replan_every_control_ticks: 40 # 40
-    control_cycle_sec: 0.10
-    prediction_horizon_ticks: 10
-    planning_latency_sec: 0.06
-    handoff_blend_points: 8
 
   planner:
     common:
@@ -133,19 +135,30 @@ reactive_task_controller:
       joint_space_sampling_local_window_rad: 0.35
       joint_space_sampling_search_stages: 2
       joint_space_sampling_window_scale: 1.5
-      joint_space_sampling_allow_full_joint_limit_fallback: false
-      joint_space_shortcut_trials: 150
+      joint_space_sampling_allow_full_joint_limit_fallback: true
+      # Keep the raw OMPL RRT-Connect topology for TrajOpt. TrajOpt does the
+      # local smoothing/optimization, so global shortcutting should not collapse
+      # an obstacle-aware path back to a start-goal segment.
+      joint_space_shortcut_trials: 0
       joint_space_sampling_solution_pool_size: 8
-      prefer_clearance_shell: true
-      preferred_clearance_shell_margin_m: 0.0
-      preferred_clearance_shell_weight: 12.0
       joint_space_path_length_weight: 1.0
       joint_space_joint_motion_weight: 0.10
-      enable_joint_trajectory_post_optimization: true
-      joint_trajectory_postopt_iterations: 2
+      joint_space_clearance_deficit_weight: 2.5
+      joint_space_early_clearance_deficit_weight: 4.0
+      joint_space_min_clearance_deficit_weight: 18.0
+      joint_space_early_min_clearance_deficit_weight: 28.0
+      joint_space_clearance_reward_weight: 4.0
+      joint_space_clearance_reward_cap_m: 0.12
+      joint_space_preferred_min_margin_m: 0.020
+      joint_space_min_margin_preference_weight: 60.0
+      joint_space_start_recovery_enable: true
+      joint_space_start_recovery_samples: 96
+      joint_space_start_recovery_target_margin_m: 0.020
+      joint_space_sampling_time_budget_sec: 1.50
+      enable_joint_trajectory_post_optimization: false
+      joint_trajectory_postopt_iterations: 0
       joint_trajectory_postopt_samples_per_waypoint: 12
       joint_trajectory_postopt_perturbation_rad: 0.05
-      joint_trajectory_shell_weight: 8.0
       joint_trajectory_orientation_weight: 3.0
       joint_trajectory_smoothness_weight: 0.25
       joint_trajectory_position_weight: 1.0

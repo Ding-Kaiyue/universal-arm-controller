@@ -6,6 +6,7 @@
 namespace arm_controller::algorithm::reactive_qp {
 
 namespace {
+constexpr double kSelfNearestRejectPaddingM = 0.05;
 
 double effectiveEllipsoidRadiusAlongNormal(
     const Eigen::Matrix3d& R_world_link,
@@ -20,16 +21,21 @@ double effectiveEllipsoidRadiusAlongNormal(
 }
 
 struct PreparedEllipsoidQuery {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
     const LinkCollisionEllipsoid* ellipsoid{nullptr};
     const Eigen::Isometry3d* link_pose_world{nullptr};
     Eigen::Vector3d point_world{Eigen::Vector3d::Zero()};
     std::size_t original_index{0};
 };
 
-std::vector<PreparedEllipsoidQuery> prepareEllipsoidQueries(
-    const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
-    const std::vector<LinkCollisionEllipsoid>& link_ellipsoids) {
-    std::vector<PreparedEllipsoidQuery> prepared;
+using PreparedEllipsoidQueryList =
+    std::vector<PreparedEllipsoidQuery, Eigen::aligned_allocator<PreparedEllipsoidQuery>>;
+
+PreparedEllipsoidQueryList prepareEllipsoidQueries(
+    const BodyObstacleConstraintBuilder::LinkPoseMap& link_poses_world,
+    const LinkCollisionEllipsoidList& link_ellipsoids) {
+    PreparedEllipsoidQueryList prepared;
     prepared.reserve(link_ellipsoids.size());
     for (std::size_t i = 0; i < link_ellipsoids.size(); ++i) {
         const auto& e = link_ellipsoids[i];
@@ -53,12 +59,42 @@ std::vector<PreparedEllipsoidQuery> prepareEllipsoidQueries(
     return prepared;
 }
 
+bool pointInsideInflatedRobotEllipsoid(
+    const Eigen::Vector3d& point_world,
+    const PreparedEllipsoidQueryList& prepared_queries,
+    const double padding_m) {
+    if (!point_world.allFinite()) {
+        return false;
+    }
+    for (const PreparedEllipsoidQuery& prepared : prepared_queries) {
+        if (prepared.ellipsoid == nullptr || prepared.link_pose_world == nullptr ||
+            !prepared.ellipsoid->radii.allFinite()) {
+            continue;
+        }
+        const Eigen::Vector3d radii =
+            (prepared.ellipsoid->radii +
+             Eigen::Vector3d::Constant(std::max(0.0, padding_m)))
+                .cwiseMax(Eigen::Vector3d::Constant(1e-4));
+        const Eigen::Vector3d center_world =
+            (*prepared.link_pose_world) * prepared.ellipsoid->center_in_link;
+        const Eigen::Vector3d delta_link =
+            prepared.link_pose_world->linear().transpose() *
+            (point_world - center_world);
+        const double normalized_sq =
+            delta_link.cwiseQuotient(radii).squaredNorm();
+        if (std::isfinite(normalized_sq) && normalized_sq <= 1.0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int appendPreparedEllipsoidConstraints(
     const Eigen::VectorXd& q_current,
-    const std::vector<PreparedEllipsoidQuery>& prepared_queries,
-    const std::vector<DistanceQueryResult>& distance_queries,
+    const PreparedEllipsoidQueryList& prepared_queries,
+    const DistanceQueryResultList& distance_queries,
     const arm_controller::kinematics::JacobianProvider& jacobian_provider,
-    std::vector<ObstacleConstraintInput>& out_constraints) {
+    ObstacleConstraintInputList& out_constraints) {
     const int dof = static_cast<int>(q_current.size());
     int appended = 0;
 
@@ -79,6 +115,14 @@ int appendPreparedEllipsoidConstraints(
             continue;
         }
         n_world /= gn;
+        const Eigen::Vector3d nearest_obstacle_point =
+            prepared.point_world - dq.distance * n_world;
+        if (pointInsideInflatedRobotEllipsoid(
+                nearest_obstacle_point,
+                prepared_queries,
+                kSelfNearestRejectPaddingM)) {
+            continue;
+        }
 
         const double r_eff = effectiveEllipsoidRadiusAlongNormal(
             T_world_link.linear(), e.radii, n_world);
@@ -94,13 +138,16 @@ int appendPreparedEllipsoidConstraints(
 
         ObstacleConstraintInput c;
         c.normal_jacobian = n_world.transpose() * J_point.topRows(3);
+        c.linear_jacobian = J_point.topRows(3);
+        c.normal_world = n_world;
         c.distance = dq.distance - r_eff;
         c.debug_name = e.debug_name.empty()
                            ? ("link_ellipsoid_" + e.link_name + "_" +
                               std::to_string(prepared.original_index))
                            : e.debug_name;
 
-        if (!std::isfinite(c.distance) || !c.normal_jacobian.allFinite()) {
+        if (!std::isfinite(c.distance) || !c.normal_jacobian.allFinite() ||
+            !c.linear_jacobian.allFinite() || !c.normal_world.allFinite()) {
             continue;
         }
         out_constraints.push_back(std::move(c));
@@ -114,13 +161,13 @@ int appendPreparedEllipsoidConstraints(
 
 int BodyObstacleConstraintBuilder::appendLinkSphereConstraints(
     const Eigen::VectorXd& q_current,
-    const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
-    const std::vector<LinkCollisionSphere>& link_spheres,
+    const LinkPoseMap& link_poses_world,
+    const LinkCollisionSphereList& link_spheres,
     const arm_controller::kinematics::JacobianProvider& jacobian_provider,
     std::shared_ptr<const DistanceFieldInterface> distance_field,
-    std::vector<ObstacleConstraintInput>& out_constraints,
+    ObstacleConstraintInputList& out_constraints,
     std::string* error) {
-    std::vector<LinkCollisionEllipsoid> ellipsoids;
+    LinkCollisionEllipsoidList ellipsoids;
     ellipsoids.reserve(link_spheres.size());
     for (const auto& s : link_spheres) {
         LinkCollisionEllipsoid e;
@@ -142,11 +189,11 @@ int BodyObstacleConstraintBuilder::appendLinkSphereConstraints(
 
 int BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
     const Eigen::VectorXd& q_current,
-    const std::unordered_map<std::string, Eigen::Isometry3d>& link_poses_world,
-    const std::vector<LinkCollisionEllipsoid>& link_ellipsoids,
+    const LinkPoseMap& link_poses_world,
+    const LinkCollisionEllipsoidList& link_ellipsoids,
     const arm_controller::kinematics::JacobianProvider& jacobian_provider,
     std::shared_ptr<const DistanceFieldInterface> distance_field,
-    std::vector<ObstacleConstraintInput>& out_constraints,
+    ObstacleConstraintInputList& out_constraints,
     std::string* error) {
     if (q_current.size() <= 0) {
         if (error != nullptr) {
@@ -161,7 +208,7 @@ int BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
         return 0;
     }
 
-    const std::vector<PreparedEllipsoidQuery> prepared_queries =
+    const PreparedEllipsoidQueryList prepared_queries =
         prepareEllipsoidQueries(link_poses_world, link_ellipsoids);
     if (prepared_queries.empty()) {
         if (error != nullptr) {
@@ -170,16 +217,22 @@ int BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
         return 0;
     }
 
-    std::vector<Eigen::Vector3d> query_points;
+    cartesian_path_planner::Vector3dList query_points;
     query_points.reserve(prepared_queries.size());
     for (const auto& prepared : prepared_queries) {
         query_points.push_back(prepared.point_world);
     }
 
-    const std::vector<cartesian_path_planner::DistanceFieldQueryResult> field_queries =
+    const cartesian_path_planner::DistanceFieldQueryResultList field_queries =
         distance_field->queryDistanceAndGradientBatch(query_points);
+    if (field_queries.size() != query_points.size()) {
+        if (error != nullptr) {
+            *error = "Distance-field batch query size mismatch.";
+        }
+        return 0;
+    }
 
-    std::vector<DistanceQueryResult> distance_queries;
+    DistanceQueryResultList distance_queries;
     distance_queries.reserve(prepared_queries.size());
     for (const auto& query : field_queries) {
         DistanceQueryResult out;
