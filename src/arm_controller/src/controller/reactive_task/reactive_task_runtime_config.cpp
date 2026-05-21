@@ -390,6 +390,14 @@ bool loadRuntimeConfigFromYaml(
         cfg.planner_common.joint_space_sampling_search_stages =
             std::max(1, common["joint_space_sampling_search_stages"].as<int>());
       }
+      if (common["enable_two_way_bypass"]) {
+        cfg.planner_common.enable_two_way_bypass =
+            common["enable_two_way_bypass"].as<bool>();
+      }
+      if (common["two_way_bypass_offset_m"]) {
+        cfg.planner_common.two_way_bypass_offset_m =
+            std::max(0.0, common["two_way_bypass_offset_m"].as<double>());
+      }
       if (common["joint_space_sampling_window_scale"]) {
         cfg.planner_common.joint_space_sampling_window_scale = std::max(
             1.0, common["joint_space_sampling_window_scale"].as<double>());

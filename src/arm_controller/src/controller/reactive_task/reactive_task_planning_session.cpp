@@ -125,6 +125,7 @@ bool ReactiveTaskController::preparePlanningSession(
   session->request.R_start = session->fk_start_rotation;
   session->request.p_goal = goal.translation();
   session->request.R_goal = goal.linear();
+  session->request.bypass_axis_hint = Eigen::Vector3d::UnitZ();
   session->request.q_start_seed = session->q_start;
   session->request.q_min = session->ctx->joint_limits.q_min;
   session->request.q_max = session->ctx->joint_limits.q_max;

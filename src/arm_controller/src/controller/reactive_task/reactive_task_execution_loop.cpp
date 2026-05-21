@@ -30,6 +30,8 @@ constexpr double kReferenceFullSpeedPositionError = 0.035;
 constexpr double kReferenceFreezePositionError = 0.090;
 constexpr double kReferenceFullSpeedOrientationError = 0.12;
 constexpr double kReferenceFreezeOrientationError = 0.35;
+constexpr double kObstacleStallReplanProgressLimit = 0.985;
+constexpr double kObstacleStallReplanGuidanceGate = 0.85;
 
 double minDistanceToLocalReference(
     const Eigen::Vector3d &point,
@@ -340,13 +342,43 @@ bool ReactiveTaskController::runPlanningControlLoop(
     phase_input.hard_collision_margin_cycles =
         runtime->exec_ctx.hard_collision_margin_cycles;
 
-    const rt::ExecutionStatusOutput phase_decision =
+    rt::ExecutionStatusOutput phase_decision =
         execution_state_machine_.evaluate(phase_input);
     const bool goal_reached =
         reference_finished &&
         pos_err_goal <= runtime_cfg_.goal_position_tolerance &&
         ori_err_goal <= runtime_cfg_.goal_orientation_tolerance_rad &&
         !runtime->exec_ctx.active_segment_is_recovery;
+    const int obstacle_stall_replan_cycle_limit =
+        std::max(50, runtime->no_progress_cycle_limit / 2);
+    const double obstacle_stall_replan_margin =
+        std::min(0.010, std::max(0.003, 0.15 * session.control_safe_distance));
+    const bool close_to_obstacle_boundary =
+        (std::isfinite(whole_body_status.min_margin) &&
+         whole_body_status.min_margin <= obstacle_stall_replan_margin) ||
+        runtime->exec_ctx.last_obstacle_guidance_gate >=
+            kObstacleStallReplanGuidanceGate;
+    const bool blocked_before_goal =
+        runtime->exec_ctx.phase == rt::ExecutionPhase::Track &&
+        !reference_finished &&
+        path_progress < kObstacleStallReplanProgressLimit &&
+        runtime->exec_ctx.no_progress_cycles >= obstacle_stall_replan_cycle_limit &&
+        close_to_obstacle_boundary;
+    if (blocked_before_goal && phase_decision.phase == rt::ExecutionPhase::Track) {
+      phase_decision.phase = rt::ExecutionPhase::Hold;
+      phase_decision.freeze_reference_progress = true;
+      phase_decision.allow_lookahead = false;
+      phase_decision.use_anchor_pose_only = true;
+      phase_decision.transition_reason = "obstacle_stall_replan";
+      phase_decision.phase_changed = true;
+      RCLCPP_WARN(
+          node_->get_logger(),
+          "[%s] global_replan_trigger: stalled near obstacle for %d cycles "
+          "(path=%.3f min_margin=%.4f gate=%.3f); stopping arm before RRTConnect",
+          mapping.c_str(), runtime->exec_ctx.no_progress_cycles, path_progress,
+          whole_body_status.min_margin,
+          runtime->exec_ctx.last_obstacle_guidance_gate);
+    }
     if (phase_decision.phase_changed) {
       const rt::ExecutionPhase previous_phase = runtime->exec_ctx.phase;
       if (phase_decision.phase == rt::ExecutionPhase::Hold &&
@@ -619,7 +651,18 @@ bool ReactiveTaskController::runPlanningControlLoop(
               const Eigen::VectorXd &planner_q_goal,
               const int planner_tick,
               const double request_time_sec) {
-            (void)request_time_sec;
+            const double output_age_sec =
+                runtime->exec_ctx.tracked_reference_time_sec - request_time_sec;
+            const double max_usable_age_sec =
+                std::max(0.12, 2.0 * runtime_cfg_.local_planner.update_period_sec);
+            if (std::isfinite(output_age_sec) &&
+                output_age_sec > max_usable_age_sec) {
+              RCLCPP_DEBUG(
+                  node_->get_logger(),
+                  "[%s] local_trajopt async result dropped: stale age=%.3f max=%.3f",
+                  mapping.c_str(), output_age_sec, max_usable_age_sec);
+              return;
+            }
             runtime->exec_ctx.last_local_planner_target_pose =
                 local_planner_output.target_pose;
             runtime->exec_ctx.last_local_planner_target_twist =
@@ -730,23 +773,18 @@ bool ReactiveTaskController::runPlanningControlLoop(
           };
 
       if (terminal_goal_tracking) {
-        const bool terminal_coast_active =
-            try_use_local_planner_trajectory(true);
-        if (!terminal_coast_active) {
-          tracking_target_pose = Eigen::Isometry3d::Identity();
-          tracking_target_pose.linear() = session.request.R_goal;
-          tracking_target_pose.translation() = session.request.p_goal;
-          tracking_target_twist.setZero();
-        }
-        if (!terminal_coast_active && terminal_joint_anchor_sample_valid) {
+        tracking_target_pose = Eigen::Isometry3d::Identity();
+        tracking_target_pose.linear() = session.request.R_goal;
+        tracking_target_pose.translation() = session.request.p_goal;
+        tracking_target_twist.setZero();
+        local_trajopt_tracking = false;
+        if (terminal_joint_anchor_sample_valid) {
           local_planner_joint_target_storage =
               terminal_joint_anchor_sample.ik_joint_target;
           local_planner_joint_target_dt_sec = 1.0;
         }
         if (!runtime->exec_ctx.last_reference_finished) {
-          if (!terminal_coast_active) {
-            clear_local_planner_tracking();
-          }
+          clear_local_planner_tracking();
           ++runtime->exec_ctx.local_planner_generation;
         }
         if (runtime->exec_ctx.pending_local_planner_valid &&
@@ -1252,7 +1290,8 @@ bool ReactiveTaskController::runPlanningControlLoop(
     }
     const bool primary_recovery_active = watchdog_.shouldApplyPrimaryRecovery(
         runtime->exec_ctx, pos_err_goal, ori_err_goal,
-        runtime->no_motion_cycle_limit, runtime->no_progress_cycle_limit);
+        runtime->no_motion_cycle_limit, runtime->no_progress_cycle_limit) &&
+        !phase_flags.terminal_goal_tracking;
     watchdog_.applyPrimaryRecoveryBoost(primary_recovery_active,
                                         session.ctx->qd_max, qdot_eigen);
     runtime->exec_ctx.previous_qdot_reference = qdot_eigen;
@@ -1368,6 +1407,7 @@ bool ReactiveTaskController::runPlanningControlLoop(
       diag_input.task_pred = &task_pred;
       diag_input.task_residual = &task_residual;
       diagnostics_publisher_.publishRuntimeCycle(diag_input);
+      diagnostics_publisher_.publishExecutionTrace(mapping, fk_now.ee_position);
     }
 
     if (!send_joint_velocities(mapping, qdot_cmd)) {

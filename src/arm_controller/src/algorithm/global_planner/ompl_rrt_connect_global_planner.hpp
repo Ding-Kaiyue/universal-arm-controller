@@ -33,11 +33,16 @@ private:
         double mean_clearance_reward{0.0};
         std::string worst_link_name;
         std::string early_worst_link_name;
+        Eigen::Vector3d via_point{Eigen::Vector3d::Zero()};
+        Eigen::Vector3d via_point2{Eigen::Vector3d::Zero()};
+        int via_count{0};
         int source_stage{0};
         double score{std::numeric_limits<double>::infinity()};
     };
 
     cp::PathPlanningOutput planPath(const cp::PathPlanningInput& input) const;
+    cp::PathPlanningOutput planDirectPath(const cp::PathPlanningInput& input) const;
+    cp::PathPlanningOutput planTwoWayBypassPath(const cp::PathPlanningInput& input) const;
     cp::TimedJointTrajectory buildJointSpaceTrajectory(
         const std::vector<Eigen::VectorXd>& joint_path) const;
     std::vector<Eigen::VectorXd> optimizeJointTrajectory(
@@ -49,7 +54,8 @@ private:
     void shortcutJointPath(
         std::vector<Eigen::VectorXd>& joint_path,
         const cp::PathPlanningInput& input,
-        int shortcut_trials) const;
+        int shortcut_trials,
+        double safe_distance) const;
     static double jointDistance(
         const Eigen::VectorXd& a,
         const Eigen::VectorXd& b);

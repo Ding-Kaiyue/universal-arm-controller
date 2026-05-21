@@ -235,8 +235,12 @@ int main(int argc, char** argv) {
     //     -0.1, -0.6, 0.58, -0.4546, 0.4546, -0.5417, 0.5417};
     // const std::vector<double> target = {
     //     -0.093, -0.559, 0.555, -0.520, 0.289, -0.388, 0.704};
+    // const std::vector<double> target = {
+    //     -0.179, -0.815, 0.502, -0.159, 0.484, -0.593, 0.623};
+    // const std::vector<double> target = {
+    //     0.206, -0.256, 0.544, -0.276, 0.152, -0.250, 0.916};
     const std::vector<double> target = {
-        -0.179, -0.815, 0.502, -0.159, 0.484, -0.593, 0.623};
+         0.270, -0.286, 0.647, -0.200, 0.159, -0.329, 0.909};
 
     std::cout << "========== ReactiveTask safety run ==========\n";
     std::cout << "mapping: " << mapping << "\n";

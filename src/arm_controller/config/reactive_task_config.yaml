@@ -1,7 +1,7 @@
 neo_example:
   task_velocity:
-    kp_pos: [1.2, 1.2, 1.2]
-    ko_ori: [1.2, 1.2, 1.2]
+    kp_pos: [1.5, 1.5, 1.5]
+    ko_ori: [1.5, 1.5, 1.5]
     max_linear_speed: 0.35
     max_angular_speed: 0.35
     position_deadband: 1.0e-4
@@ -20,7 +20,7 @@ neo_example:
     slack_abs_bound: 1.0
 
     hessian:
-      task_tracking_weight: 2.0
+      task_tracking_weight: 5.0
       joint_velocity_weight:  0.002 # 5.0e-3
       slack_weight: 100.0
       qdot_smoothing_weight: 0.08
@@ -83,21 +83,22 @@ reactive_task_controller:
   local_planner:
     type: trajopt
     frequency_hz: 20.0
-    horizon_steps: 10
+    horizon_steps: 16
+    dt_sec: 0.08
     enable_collision_cost: true
     enable_collision_constraint: true
-    max_obstacle_spheres: 32
+    max_obstacle_spheres: 24
     obstacle_selection_radius_m: 0.25
     obstacle_padding_m: 0.005
   goal_position_tolerance: 0.01
   goal_orientation_tolerance_rad: 0.10
   request:
-    safe_distance: 0.045 # desired ellipsoid-obstacle clearance
-    planning_safe_distance: 0.065 # extra clearance for the planned reference path
+    safe_distance: 0.025 # desired ellipsoid-obstacle clearance
+    planning_safe_distance: 0.05 # extra clearance for the planned reference path
     hard_clearance: 0.0 # true collision threshold used by safety checks
     goal_tolerance: 0.03
     map_margin_xyz: [0.60, 0.60, 0.60]
-    whole_body_segment_check_step_m: 0.10
+    whole_body_segment_check_step_m: 0.03
 
   distance_field_source: camera_driver_esdf
   collision_map_source: camera_driver_pointcloud
@@ -129,11 +130,13 @@ reactive_task_controller:
       default_segment_speed: 0.15
       use_joint_space_sampling: true
       joint_space_sampling_max_iterations: 6000
-      joint_space_sampling_step_rad: 0.12
+      joint_space_sampling_step_rad: 0.06
       joint_space_sampling_goal_bias: 0.25
       joint_space_sampling_connect_threshold_rad: 0.18
       joint_space_sampling_local_window_rad: 0.35
       joint_space_sampling_search_stages: 2
+      enable_two_way_bypass: true
+      two_way_bypass_offset_m: 0.12
       joint_space_sampling_window_scale: 1.5
       joint_space_sampling_allow_full_joint_limit_fallback: true
       # Keep the raw OMPL RRT-Connect topology for TrajOpt. TrajOpt does the
@@ -178,5 +181,5 @@ reactive_task_controller:
 
   mit:
     kp: 0.0
-    kd: 0.01
+    kd: 0.016
     max_motors: 6

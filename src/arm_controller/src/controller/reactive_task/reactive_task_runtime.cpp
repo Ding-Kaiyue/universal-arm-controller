@@ -5,7 +5,9 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstring>
+#include <sstream>
 #include <thread>
 
 ReactiveTaskController::~ReactiveTaskController() {
@@ -67,6 +69,43 @@ bool ReactiveTaskController::send_joint_velocities(
             batch_velocities[i] = vel_deg;
             batch_positions[i] = 0.0;
             batch_efforts[i] = (i < gravity_torques.size()) ? gravity_torques[i] : 0.0;
+        }
+
+        const double qdot_norm = [&]() {
+            double sum = 0.0;
+            for (const double v : joint_velocities) {
+                sum += v * v;
+            }
+            return std::sqrt(sum);
+        }();
+        if (qdot_norm > 0.05) {
+            std::ostringstream oss;
+            oss << "neo MIT cmd count=" << command_count
+                << " kp=" << runtime_cfg_.mit_kp
+                << " kd=" << runtime_cfg_.mit_kd
+                << " qdot_norm=" << qdot_norm
+                << " vel_deg=[";
+            for (std::size_t i = 0; i < command_count; ++i) {
+                if (i > 0) {
+                    oss << ", ";
+                }
+                oss << batch_velocities[i];
+            }
+            oss << "] tau=[";
+            for (std::size_t i = 0; i < command_count; ++i) {
+                if (i > 0) {
+                    oss << ", ";
+                }
+                oss << batch_efforts[i];
+            }
+            oss << "]";
+            RCLCPP_INFO_THROTTLE(
+                node_->get_logger(),
+                *node_->get_clock(),
+                500,
+                "[%s] %s",
+                mapping.c_str(),
+                oss.str().c_str());
         }
 
         return hardware_driver->send_realtime_mit_command(

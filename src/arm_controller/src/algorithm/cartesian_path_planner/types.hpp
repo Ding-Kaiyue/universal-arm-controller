@@ -140,6 +140,7 @@ struct PathPlanningInput {
 
     Eigen::Vector3d p_start{Eigen::Vector3d::Zero()};
     Eigen::Vector3d p_goal{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d bypass_axis_hint{Eigen::Vector3d::Zero()};
 
     Eigen::Matrix3d R_start{Eigen::Matrix3d::Identity()};
     Eigen::Matrix3d R_goal{Eigen::Matrix3d::Identity()};

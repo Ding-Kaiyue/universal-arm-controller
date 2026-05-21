@@ -73,6 +73,10 @@ public:
         const cp::TimedCartesianSample& sample,
         const Eigen::Vector3d& ee_position);
 
+    void publishExecutionTrace(
+        const std::string& mapping,
+        const Eigen::Vector3d& ee_position);
+
     void clearTrajectory(const std::string& mapping);
 
     void clearVisuals(const std::string& mapping);
@@ -94,6 +98,8 @@ private:
         trajectory_marker_pub_;
     std::mutex collision_ellipsoid_marker_mutex_;
     std::map<std::string, std::size_t> collision_ellipsoid_marker_counts_;
+    std::mutex execution_trace_mutex_;
+    std::map<std::string, std::vector<Eigen::Vector3d>> execution_traces_;
 };
 
 }  // namespace arm_controller::controller::reactive_task

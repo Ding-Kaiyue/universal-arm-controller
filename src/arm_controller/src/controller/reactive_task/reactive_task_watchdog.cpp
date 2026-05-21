@@ -96,8 +96,6 @@ void ReactiveTaskWatchdog::update(
          input.path_progress > exec_ctx.best_path_progress + cfg_.path_progress_eps)) {
         exec_ctx.best_path_progress = input.path_progress;
         has_progress = true;
-    } else {
-        exec_ctx.best_path_progress = std::max(exec_ctx.best_path_progress, input.path_progress);
     }
     if (has_progress) {
         exec_ctx.no_progress_cycles = 0;
@@ -115,7 +113,8 @@ void ReactiveTaskWatchdog::update(
     const bool obstacle_recovery_context =
         input.phase == ExecutionPhase::Hold ||
         input.obstacle_guidance_gate >= 0.70;
-    if (exec_ctx.no_motion_cycles >= no_motion_cycle_limit && !obstacle_recovery_context) {
+    if (exec_ctx.no_motion_cycles >= no_motion_cycle_limit &&
+        !obstacle_recovery_context) {
         output->no_motion_abort = true;
         output->no_motion_error = "no_joint_motion";
     }

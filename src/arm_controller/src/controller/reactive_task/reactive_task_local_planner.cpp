@@ -211,8 +211,7 @@ tesseract_common::ContactManagersPluginInfo makeBulletContactManagerInfo() {
   tesseract_common::PluginInfo continuous_info;
   continuous_info.class_name = "BulletCastBVHManagerFactory";
   info.continuous_plugin_infos.default_plugin = kContinuousContactManager;
-  info.continuous_plugin_infos.plugins[kContinuousContactManager] =
-      continuous_info;
+  info.continuous_plugin_infos.plugins[kContinuousContactManager] = continuous_info;
   return info;
 }
 
@@ -303,6 +302,31 @@ bool ReactiveTaskLocalPlanner::compute(const Input &input,
     output->error = "tesseract_trajopt skipped: insufficient distinct joint waypoints";
     return false;
   }
+  if (local_seed_waypoints.size() >
+      static_cast<std::size_t>(kMaxTrajOptStates)) {
+    std::vector<LocalWaypoint, Eigen::aligned_allocator<LocalWaypoint>>
+        compact_waypoints;
+    compact_waypoints.reserve(kMaxTrajOptStates);
+    for (int i = 0; i < kMaxTrajOptStates; ++i) {
+      const double alpha =
+          static_cast<double>(i) /
+          static_cast<double>(std::max(1, kMaxTrajOptStates - 1));
+      const std::size_t index = std::min<std::size_t>(
+          local_seed_waypoints.size() - 1u,
+          static_cast<std::size_t>(
+              std::llround(alpha * static_cast<double>(
+                                       local_seed_waypoints.size() - 1u))));
+      if (!compact_waypoints.empty() &&
+          (local_seed_waypoints[index].q - compact_waypoints.back().q).norm() <
+              1e-6) {
+        continue;
+      }
+      compact_waypoints.push_back(local_seed_waypoints[index]);
+    }
+    if (compact_waypoints.size() >= 2u) {
+      local_seed_waypoints = std::move(compact_waypoints);
+    }
+  }
   std::vector<Eigen::VectorXd, Eigen::aligned_allocator<Eigen::VectorXd>>
       joint_corridor_waypoints;
   joint_corridor_waypoints.reserve(local_seed_waypoints.size());
@@ -369,13 +393,10 @@ bool ReactiveTaskLocalPlanner::compute(const Input &input,
         kTrajOptProfile));
   }
 
-  const int interpolation_steps =
-      std::clamp(std::max(static_cast<int>(local_seed_waypoints.size()), 2),
-                 2,
-                 kMaxTrajOptStates);
-  tesseract_planning::CompositeInstruction seed_program =
-      tesseract_planning::generateInterpolatedProgram(
-          program, env, M_PI, 0.50, M_PI, interpolation_steps);
+  // Keep the rolling problem sparse. generateInterpolatedProgram's min_steps
+  // is per segment, so a 10-sample local window can expand to 100+ TrajOpt
+  // states and return stale references.
+  tesseract_planning::CompositeInstruction seed_program = program;
 
   auto move_profile =
       std::make_shared<tesseract_planning::TrajOptDefaultMoveProfile>();

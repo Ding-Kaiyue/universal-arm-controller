@@ -13,6 +13,8 @@ struct PlannerCommonConfig {
     double joint_space_sampling_connect_threshold_rad{0.25};
     double joint_space_sampling_local_window_rad{0.35};
     int joint_space_sampling_search_stages{3};
+    bool enable_two_way_bypass{true};
+    double two_way_bypass_offset_m{0.18};
     double joint_space_sampling_window_scale{2.0};
     bool joint_space_sampling_allow_full_joint_limit_fallback{true};
     int joint_space_shortcut_trials{100};

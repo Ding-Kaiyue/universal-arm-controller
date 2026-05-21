@@ -23,6 +23,18 @@ std::string markerNamespace(const std::string& mapping, const char* name) {
     return "reactive_task/" + scope + "/" + name;
 }
 
+void setMarkerColor(
+    visualization_msgs::msg::Marker& marker,
+    const float r,
+    const float g,
+    const float b,
+    const float a) {
+    marker.color.r = r;
+    marker.color.g = g;
+    marker.color.b = b;
+    marker.color.a = a;
+}
+
 }  // namespace
 
 ReactiveTaskDiagnosticsPublisher::ReactiveTaskDiagnosticsPublisher(
@@ -170,14 +182,40 @@ void ReactiveTaskDiagnosticsPublisher::publishTrajectory(
     visualization_msgs::msg::MarkerArray array_msg;
     const auto stamp = node_->now();
 
-    (void)global_trajectory;
     visualization_msgs::msg::Marker path_marker;
     path_marker.header.frame_id = "world";
     path_marker.header.stamp = stamp;
     path_marker.ns = markerNamespace(mapping, "active_path");
     path_marker.id = 0;
-    path_marker.action = visualization_msgs::msg::Marker::DELETE;
+    path_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    path_marker.action = visualization_msgs::msg::Marker::ADD;
+    path_marker.pose.orientation.w = 1.0;
+    path_marker.scale.x = 0.012;
+    setMarkerColor(path_marker, 0.15f, 0.45f, 1.0f, 0.9f);
+    const int point_count = global_trajectory.activeSegmentPointCount();
+    path_marker.points.reserve(static_cast<std::size_t>(std::max(0, point_count)));
+    for (int i = 0; i < point_count; ++i) {
+        cp::TimedCartesianSample path_sample;
+        if (global_trajectory.sample(i, path_sample)) {
+            path_marker.points.push_back(toPointMsg(path_sample.T_target.translation()));
+        }
+    }
+    if (path_marker.points.size() < 2u) {
+        path_marker.action = visualization_msgs::msg::Marker::DELETE;
+    }
     array_msg.markers.push_back(path_marker);
+
+    {
+        std::lock_guard<std::mutex> lock(execution_trace_mutex_);
+        execution_traces_[mapping].clear();
+    }
+    visualization_msgs::msg::Marker executed_path_marker;
+    executed_path_marker.header.frame_id = "world";
+    executed_path_marker.header.stamp = stamp;
+    executed_path_marker.ns = markerNamespace(mapping, "executed_path");
+    executed_path_marker.id = 0;
+    executed_path_marker.action = visualization_msgs::msg::Marker::DELETE;
+    array_msg.markers.push_back(executed_path_marker);
 
     visualization_msgs::msg::Marker target_marker;
     target_marker.header.frame_id = "world";
@@ -220,6 +258,53 @@ void ReactiveTaskDiagnosticsPublisher::publishTrajectory(
     trajectory_marker_pub_->publish(array_msg);
 }
 
+void ReactiveTaskDiagnosticsPublisher::publishExecutionTrace(
+    const std::string& mapping,
+    const Eigen::Vector3d& ee_position) {
+    if (!trajectory_marker_pub_ || !ee_position.allFinite()) {
+        return;
+    }
+
+    std::vector<Eigen::Vector3d> trace;
+    {
+        std::lock_guard<std::mutex> lock(execution_trace_mutex_);
+        std::vector<Eigen::Vector3d>& stored_trace = execution_traces_[mapping];
+        if (stored_trace.empty() ||
+            (stored_trace.back() - ee_position).norm() >= 0.003) {
+            stored_trace.push_back(ee_position);
+        }
+        constexpr std::size_t kMaxTracePoints = 2000u;
+        if (stored_trace.size() > kMaxTracePoints) {
+            stored_trace.erase(
+                stored_trace.begin(),
+                stored_trace.begin() +
+                    static_cast<std::ptrdiff_t>(stored_trace.size() - kMaxTracePoints));
+        }
+        trace = stored_trace;
+    }
+
+    visualization_msgs::msg::Marker marker;
+    marker.header.frame_id = "world";
+    marker.header.stamp = node_->now();
+    marker.ns = markerNamespace(mapping, "executed_path");
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    marker.action = trace.size() >= 2u
+                        ? visualization_msgs::msg::Marker::ADD
+                        : visualization_msgs::msg::Marker::DELETE;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = 0.010;
+    setMarkerColor(marker, 0.0f, 0.95f, 0.35f, 0.95f);
+    marker.points.reserve(trace.size());
+    for (const Eigen::Vector3d& p : trace) {
+        marker.points.push_back(toPointMsg(p));
+    }
+
+    visualization_msgs::msg::MarkerArray array_msg;
+    array_msg.markers.push_back(marker);
+    trajectory_marker_pub_->publish(array_msg);
+}
+
 void ReactiveTaskDiagnosticsPublisher::clearTrajectory(const std::string& mapping) {
     if (!trajectory_marker_pub_) {
         return;
@@ -228,10 +313,15 @@ void ReactiveTaskDiagnosticsPublisher::clearTrajectory(const std::string& mappin
     visualization_msgs::msg::MarkerArray array_msg;
     const std::string namespaces[] = {
         markerNamespace(mapping, "active_path"),
+        markerNamespace(mapping, "executed_path"),
         markerNamespace(mapping, "target_point"),
         markerNamespace(mapping, "actual_point"),
     };
-    for (int i = 0; i < 3; ++i) {
+    {
+        std::lock_guard<std::mutex> lock(execution_trace_mutex_);
+        execution_traces_.erase(mapping);
+    }
+    for (int i = 0; i < 4; ++i) {
         visualization_msgs::msg::Marker marker;
         marker.header.frame_id = "world";
         marker.header.stamp = node_->now();
