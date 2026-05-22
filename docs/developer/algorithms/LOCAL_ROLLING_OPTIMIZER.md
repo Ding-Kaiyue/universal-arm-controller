@@ -43,7 +43,7 @@ Global Planner / Global Trajectory
 - 处理移动底盘或全身动力学优化
 
 > [!NOTE]
-> 当前实现对应代码中的 `ReactiveTaskLocalPlanner`。它使用 Tesseract 表达机器人环境、运动指令和 profile，再通过 Tesseract 暴露的 TrajOpt planner 求解局部轨迹优化问题。
+> 当前 arm-only 实现对应代码中的 `ArmLocalPlanner`，它实现 `LocalReferencePlanner` 接口。内部使用 Tesseract 表达机器人环境、运动指令和 profile，再通过 Tesseract 暴露的 TrajOpt planner 求解局部轨迹优化问题。
 
 ---
 
@@ -193,7 +193,7 @@ $$
 
 ### 5.1 种子轨迹
 
-`ReactiveTaskLocalPlanner::compute()` 先构造局部 seed waypoints：
+`ArmLocalPlanner::compute()` 先构造局部 seed waypoints：
 
 1. 当前或预测起点 $\mathbf{q}_{start}$
 2. 短视距窗口内带 IK joint target 的全局参考点
@@ -384,7 +384,7 @@ base environment 会按机器人与障碍 slot 配置缓存。缓存键包含：
 
 ### 7.1 输出内容
 
-局部优化成功后，`ReactiveTaskLocalPlanner::Output` 会包含：
+局部优化成功后，`ArmLocalPlanner::Output` 会包含：
 
 - `target_pose`：下一步局部优化末端目标
 - `target_twist`：由相邻优化 pose 差分得到的目标 twist
@@ -492,13 +492,16 @@ pending_local_planner_future = std::async(...)
 核心类：
 
 ```cpp
-ReactiveTaskLocalPlanner
+LocalReferencePlanner
+    ^
+    |
+ArmLocalPlanner
 ```
 
 核心入口：
 
 ```cpp
-bool ReactiveTaskLocalPlanner::compute(
+bool ArmLocalPlanner::compute(
     const Input& input,
     Output* output) const;
 ```
@@ -631,14 +634,14 @@ NEO:
 
 当前 Local TrajOpt 更适合作为过渡实现：它利用现有 Tesseract / TrajOpt 能力，快速获得短窗口平滑与几何避障能力，但本质上仍是一个异步、低频、局部批优化模块。
 
-后续更合理的方向不是继续围绕 TrajOpt 做大量补丁，而是借鉴 **REMANI-Planner** 的在线滚动优化思想，先实现适用于固定基座机械臂的 arm-only 在线局部规划器，再逐步扩展到底盘-机械臂联合规划：
+后续方向不是复现 **REMANI-Planner**，而是在现有 reactive_task / NEO 管线基础上渐进扩展。REMANI-Planner 可以作为在线滚动优化思想的参考，但系统主线仍应保留当前已经打通的“全局参考 -> 局部参考优化 -> NEO 实时安全跟踪”架构，并逐步把局部规划能力从 arm-only 扩展到底盘-机械臂联合场景：
 
-- 将局部规划从“异步批量优化一段参考”改为“随控制循环持续更新的滚动优化问题”
-- 在优化变量中显式表达时间、速度、加速度以及必要的动力学 / 运动学约束
+- 在现有 Local TrajOpt 后端上继续保留清晰的局部规划接口，避免把底盘、双臂和障碍逻辑硬编码进单一实现
+- 将局部规划从“异步批量优化一段参考”逐步演进为“可热启动、可过期丢弃、可持续更新的滚动优化问题”
+- 在局部参考中更明确地表达时间、速度、加速度以及必要的运动学约束
 - 让避障、平滑、目标跟踪和可执行性在同一个在线局部规划问题中共同建模
-- 减少对 obstacle slot、固定障碍球数量和 TrajOpt environment 重建 / clone 机制的依赖
-- 支持更自然的动态障碍更新、旧问题热启动和过期计算取消
-- 当前阶段优先优化机械臂关节轨迹 $\mathbf{q}_{arm}(t)$，接口设计上预留底盘状态 $\mathbf{x}_{base}(t)$，便于后续扩展为移动机械臂的 whole-body planner
-- 底盘加入后，局部规划变量可从 arm-only 状态扩展为 $\mathbf{x}(t) = [x_{base}, y_{base}, \theta_{base}, \mathbf{q}_{arm}]$，使底盘位姿、机械臂构型、避障和末端目标在同一个滚动优化问题中协同求解
+- 逐步减少对 obstacle slot、固定障碍球数量和 TrajOpt environment 重建 / clone 机制的依赖
+- 当前阶段继续优先优化机械臂关节轨迹 $\mathbf{q}_{arm}(t)$，同时在接口和数据结构中预留底盘状态 $\mathbf{x}_{base}(t)$
+- 底盘加入后，局部参考可以从 arm-only 状态扩展为 $\mathbf{x}(t) = [x_{base}, y_{base}, \theta_{base}, \mathbf{q}_{arm}]$，但仍由现有 NEO / safety filter 体系负责最终实时安全跟踪和命令约束
 
-因此，本模块当前的定位应理解为：**在 REMANI-style 在线局部规划器落地之前，为 NEO 提供一个可运行、可调试的短窗口局部参考优化层；未来演进时应先形成 arm-only 在线局部规划器，再自然扩展到底盘-机械臂联合规划**。
+因此，本模块当前的定位应理解为：**在现有系统基础上提供一个可运行、可调试的短窗口局部参考优化层；未来演进时不追求直接替换为 REMANI，而是保留 reactive_task / NEO 的实时控制管线，逐步增强局部规划后端并扩展到底盘-机械臂联合参考生成**。

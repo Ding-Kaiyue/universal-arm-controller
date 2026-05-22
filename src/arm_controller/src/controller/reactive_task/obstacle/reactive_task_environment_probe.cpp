@@ -1,4 +1,4 @@
-#include "controller/reactive_task/reactive_task_environment_probe.hpp"
+#include "controller/reactive_task/obstacle/reactive_task_environment_probe.hpp"
 
 #include <cmath>
 

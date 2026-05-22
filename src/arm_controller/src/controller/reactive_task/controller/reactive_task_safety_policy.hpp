@@ -11,8 +11,9 @@
 #include "algorithm/neo/obstacle_damper.hpp"
 #include "algorithm/neo/reactive_qp_builder.hpp"
 #include "arm_controller/kinematics/jacobian_provider.hpp"
-#include "controller/reactive_task/reactive_task_execution_context.hpp"
-#include "controller/reactive_task/reactive_task_terminal_policy.hpp"
+#include "controller/reactive_task/controller/reactive_task_execution_context.hpp"
+#include "controller/reactive_task/controller/reactive_task_terminal_policy.hpp"
+#include "controller/reactive_task/controller/reactive_task_types.hpp"
 
 namespace arm_controller::controller::reactive_task {
 
@@ -32,8 +33,7 @@ public:
         ReactiveTaskExecutionContext* exec_ctx{nullptr};
         rq::ReactiveQpBuildConfig base_qp_build_cfg;
         rq::ReactiveQpBuildInput qp_input;
-        Eigen::VectorXd q_now;
-        Eigen::VectorXd qd_max;
+        ArmState arm_state;
         const arm_controller::kinematics::ForwardKinematicsOutput::LinkPoseMap*
             link_poses{nullptr};
         const rq::LinkCollisionEllipsoidList* collision_ellipsoids{nullptr};

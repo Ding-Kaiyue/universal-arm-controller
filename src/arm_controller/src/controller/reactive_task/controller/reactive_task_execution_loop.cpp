@@ -1,6 +1,6 @@
-#include "reactive_task_controller.hpp"
+#include "controller/reactive_task/reactive_task_controller.hpp"
 
-#include "reactive_task_planning_helpers.hpp"
+#include "controller/reactive_task/global_planner/reactive_task_planning_helpers.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -33,82 +33,6 @@ constexpr double kReferenceFreezeOrientationError = 0.35;
 constexpr double kObstacleStallReplanProgressLimit = 0.985;
 constexpr double kObstacleStallReplanGuidanceGate = 0.85;
 
-double minDistanceToLocalReference(
-    const Eigen::Vector3d &point,
-    const Eigen::Isometry3d &current_pose,
-    const cp::TimedCartesianSampleList &reference_samples,
-    const std::shared_ptr<arm_controller::kinematics::PinocchioForwardKinematics>
-        &fk_provider,
-    const rq::LinkCollisionEllipsoidList *collision_ellipsoids,
-    const arm_controller::kinematics::ForwardKinematicsOutput::LinkPoseMap
-        *current_link_poses) {
-  double best = (point - current_pose.translation()).norm();
-  if (collision_ellipsoids != nullptr && current_link_poses != nullptr) {
-    for (const auto &ellipsoid : *collision_ellipsoids) {
-      const auto pose_it = current_link_poses->find(ellipsoid.link_name);
-      if (pose_it == current_link_poses->end()) {
-        continue;
-      }
-      const Eigen::Vector3d ellipsoid_center =
-          pose_it->second * ellipsoid.center_in_link;
-      if (ellipsoid_center.allFinite()) {
-        best = std::min(best, (point - ellipsoid_center).norm());
-      }
-    }
-  }
-  if (!fk_provider) {
-    return best;
-  }
-  std::vector<std::string> collision_link_names;
-  if (collision_ellipsoids != nullptr) {
-    collision_link_names.reserve(collision_ellipsoids->size());
-    for (const auto &ellipsoid : *collision_ellipsoids) {
-      if (!ellipsoid.link_name.empty() &&
-          std::find(collision_link_names.begin(), collision_link_names.end(),
-                    ellipsoid.link_name) == collision_link_names.end()) {
-        collision_link_names.push_back(ellipsoid.link_name);
-      }
-    }
-  }
-  for (const auto &sample : reference_samples) {
-    if (!sample.has_ik_joint_target || sample.ik_joint_target.size() <= 0 ||
-        !sample.ik_joint_target.allFinite()) {
-      continue;
-    }
-    arm_controller::kinematics::LinkPoseResultList link_poses;
-    Eigen::Isometry3d ee_pose = Eigen::Isometry3d::Identity();
-    if (!fk_provider->computeLinkPoses(
-            sample.ik_joint_target,
-            collision_link_names,
-            link_poses,
-            nullptr,
-            nullptr,
-            &ee_pose)) {
-      continue;
-    }
-    best = std::min(best, (point - ee_pose.translation()).norm());
-    if (collision_ellipsoids == nullptr || link_poses.empty()) {
-      continue;
-    }
-    for (const auto &ellipsoid : *collision_ellipsoids) {
-      const auto pose_it = std::find_if(
-          link_poses.begin(), link_poses.end(),
-          [&ellipsoid](const arm_controller::kinematics::LinkPoseResult &pose) {
-            return pose.link_name == ellipsoid.link_name;
-          });
-      if (pose_it == link_poses.end()) {
-        continue;
-      }
-      const Eigen::Vector3d ellipsoid_center =
-          pose_it->pose * ellipsoid.center_in_link;
-      if (ellipsoid_center.allFinite()) {
-        best = std::min(best, (point - ellipsoid_center).norm());
-      }
-    }
-  }
-  return best;
-}
-
 std::string formatVector(const Eigen::VectorXd &v) {
   std::ostringstream oss;
   oss << v.transpose().format(Eigen::IOFormat(4, 0, ", ", ", ", "[", "]"));
@@ -130,6 +54,198 @@ double progressGateFromError(const double error,
   const double x =
       (freeze_error - error) / std::max(1e-6, freeze_error - full_speed_error);
   return std::clamp(x, 0.0, 1.0);
+}
+
+struct LocalPlannerStartState {
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  Eigen::VectorXd q;
+  Eigen::Isometry3d pose{Eigen::Isometry3d::Identity()};
+};
+
+struct LocalPlannerBuildResult {
+  rt::ArmLocalPlanner::Input input;
+  rt::ObstacleSelectionOutput obstacle_selection;
+};
+
+LocalPlannerStartState makeLocalPlannerStartState(
+    const Eigen::VectorXd &q_now,
+    const Eigen::Isometry3d &current_pose,
+    const bool previous_qdot_reference_valid,
+    const Eigen::VectorXd &previous_qdot_reference,
+    const double prediction_dt,
+    const rq::JointLimitData &joint_limits,
+    const std::shared_ptr<arm_controller::kinematics::PinocchioForwardKinematics>
+        &fk_provider) {
+  LocalPlannerStartState start;
+  start.q = q_now;
+  start.pose = current_pose;
+
+  if (previous_qdot_reference_valid &&
+      previous_qdot_reference.size() == q_now.size()) {
+    start.q = q_now + prediction_dt * previous_qdot_reference;
+    start.q = start.q.cwiseMax(joint_limits.q_min).cwiseMin(joint_limits.q_max);
+  }
+
+  if (!fk_provider) {
+    return start;
+  }
+
+  static const std::vector<std::string> kNoLinkPoseQueries;
+  arm_controller::kinematics::LinkPoseResultList predicted_link_poses;
+  Eigen::Isometry3d predicted_pose = Eigen::Isometry3d::Identity();
+  if (fk_provider->computeLinkPoses(
+          start.q,
+          kNoLinkPoseQueries,
+          predicted_link_poses,
+          nullptr,
+          nullptr,
+          &predicted_pose) &&
+      predicted_pose.matrix().allFinite()) {
+    start.pose = predicted_pose;
+  } else {
+    start.q = q_now;
+    start.pose = current_pose;
+  }
+
+  return start;
+}
+
+cp::TimedCartesianSampleList sampleLocalPlannerReference(
+    const cp::GlobalTrajectoryManager *global_trajectory,
+    const double continuous_sample_time_sec,
+    const double prediction_dt,
+    const int horizon_steps,
+    const double dt_sec) {
+  cp::TimedCartesianSampleList samples;
+  if (global_trajectory == nullptr) {
+    return samples;
+  }
+
+  const int sample_count = std::max(1, horizon_steps);
+  samples.reserve(static_cast<std::size_t>(sample_count));
+  for (int k = 0; k < sample_count; ++k) {
+    const double sample_time =
+        continuous_sample_time_sec + prediction_dt +
+        dt_sec * static_cast<double>(k + 1);
+    cp::TimedCartesianSample sample;
+    if (!global_trajectory->sampleByElapsedTime(sample_time, sample)) {
+      break;
+    }
+    samples.push_back(sample);
+  }
+  return samples;
+}
+
+rt::ArmLocalPlanner::Input::JointToPoseFn makeJointToPoseFn(
+    const std::shared_ptr<arm_controller::kinematics::PinocchioForwardKinematics>
+        &fk_provider) {
+  return [fk = fk_provider](const Eigen::VectorXd &q,
+                            Eigen::Isometry3d *pose) -> bool {
+    if (!fk || pose == nullptr) {
+      return false;
+    }
+    static const std::vector<std::string> kNoLinkPoseQueries;
+    arm_controller::kinematics::LinkPoseResultList link_poses;
+    Eigen::Isometry3d ee_pose = Eigen::Isometry3d::Identity();
+    if (!fk->computeLinkPoses(
+            q,
+            kNoLinkPoseQueries,
+            link_poses,
+            nullptr,
+            nullptr,
+            &ee_pose)) {
+      return false;
+    }
+    *pose = ee_pose;
+    return true;
+  };
+}
+
+LocalPlannerBuildResult buildLocalPlannerInput(
+    const std::string &mapping,
+    const cp::GlobalTrajectoryManager *global_trajectory,
+    const rt::ArmLocalPlanner::Config &local_planner_cfg,
+    const rt::ArmState &arm_state,
+    const arm_controller::kinematics::ForwardKinematicsOutput &fk_now,
+    const rt::LocalReferenceOutput &local_reference_output,
+    const bool reference_finished,
+    const double prediction_dt,
+    const bool previous_qdot_reference_valid,
+    const Eigen::VectorXd &previous_qdot_reference,
+    const std::shared_ptr<arm_controller::kinematics::PinocchioForwardKinematics>
+        &fk_provider,
+    const rq::LinkCollisionEllipsoidList &collision_ellipsoids,
+    const std::string &robot_type,
+    const std::string &planning_group,
+    const std::string &base_link,
+    const std::string &tip_link,
+    const std::string &urdf_path,
+    const std::string &srdf_path,
+    const rt::ReactiveTaskObstacleSelector &obstacle_selector,
+    const std::shared_ptr<cp::CameraDriverPointcloudMapAdapter>
+        &pointcloud_map) {
+  LocalPlannerBuildResult result;
+  const Eigen::VectorXd &q_now = arm_state.q;
+
+  const LocalPlannerStartState start = makeLocalPlannerStartState(
+      q_now,
+      fk_now.ee_pose,
+      previous_qdot_reference_valid,
+      previous_qdot_reference,
+      prediction_dt,
+      arm_state.joint_limits,
+      fk_provider);
+
+  result.input.current_pose = start.pose;
+  result.input.reference_samples = sampleLocalPlannerReference(
+      global_trajectory,
+      local_reference_output.continuous_sample_time_sec,
+      prediction_dt,
+      local_planner_cfg.horizon_steps,
+      local_planner_cfg.dt_sec);
+  result.input.reference_finished = reference_finished;
+  result.input.joint_names = arm_state.joint_names;
+  result.input.q_current = start.q;
+  result.input.q_goal = start.q;
+  result.input.robot_type = robot_type;
+  result.input.planning_group = planning_group;
+  result.input.base_link = base_link;
+  result.input.tip_link = tip_link;
+  result.input.urdf_path = urdf_path;
+  result.input.srdf_path = srdf_path;
+  result.input.joint_to_pose = makeJointToPoseFn(fk_provider);
+
+  rt::ObstacleSelectionInput obstacle_input;
+  obstacle_input.enabled = kReactiveObstacleAvoidanceEnabled;
+  obstacle_input.obstacle_name_prefix = "camera_obstacle_" + mapping;
+  obstacle_input.pointcloud_map = pointcloud_map;
+  obstacle_input.obstacle_padding_m = local_planner_cfg.obstacle_padding_m;
+  obstacle_input.obstacle_selection_radius_m =
+      local_planner_cfg.obstacle_selection_radius_m;
+  obstacle_input.max_obstacle_spheres =
+      local_planner_cfg.max_obstacle_spheres;
+  obstacle_input.current_pose = fk_now.ee_pose;
+  obstacle_input.reference_samples = result.input.reference_samples;
+  obstacle_input.fk_provider = fk_provider;
+  obstacle_input.collision_ellipsoids = &collision_ellipsoids;
+  obstacle_input.current_link_poses = &fk_now.link_poses;
+  result.obstacle_selection = obstacle_selector.select(obstacle_input);
+  result.input.sphere_obstacles =
+      std::move(result.obstacle_selection.obstacles);
+
+  if (!result.input.reference_samples.empty()) {
+    const cp::TimedCartesianSample &lookahead_sample =
+        result.input.reference_samples.back();
+    if (lookahead_sample.has_ik_joint_target &&
+        lookahead_sample.ik_joint_target.size() == q_now.size() &&
+        lookahead_sample.ik_joint_target.allFinite()) {
+      result.input.q_goal = lookahead_sample.ik_joint_target;
+      result.input.q_goal_valid = true;
+    }
+  }
+
+  return result;
 }
 } // namespace
 
@@ -496,12 +612,8 @@ bool ReactiveTaskController::runPlanningControlLoop(
         runtime->exec_ctx.previous_qdot_reference_valid =
             runtime->exec_ctx.previous_qdot_reference.size() == q_now.size() &&
             runtime->exec_ctx.previous_qdot_reference.allFinite();
-        runtime->exec_ctx.last_local_planner_output_valid = false;
-        runtime->exec_ctx.local_planner_trajectory_valid = false;
-        runtime->exec_ctx.local_planner_target_poses.clear();
-        runtime->exec_ctx.local_planner_target_twists.clear();
-        runtime->exec_ctx.local_planner_joint_targets.clear();
-        ++runtime->exec_ctx.local_planner_generation;
+        runtime->exec_ctx.local_planner.clearTracking();
+        runtime->exec_ctx.local_planner_runner.advanceGeneration();
         if (!runtime->global_trajectory->sampleByElapsedTime(0.0, runtime->sample)) {
           RCLCPP_WARN(node_->get_logger(),
                       "[%s] Hold committed but initial sample failed",
@@ -578,252 +690,48 @@ bool ReactiveTaskController::runPlanningControlLoop(
     const bool terminal_goal_tracking =
         phase_flags.path_follow_active && reference_finished;
     phase_flags.terminal_goal_tracking = terminal_goal_tracking;
-    Eigen::Isometry3d tracking_target_pose = runtime->sample.T_target;
-    Eigen::Matrix<double, 6, 1> tracking_target_twist =
-        runtime->sample.target_twist;
-    Eigen::VectorXd local_planner_joint_target_storage;
-    double local_planner_joint_target_dt_sec = 0.0;
-    bool local_trajopt_tracking = false;
     auto clear_local_planner_tracking = [&]() {
       runtime->exec_ctx.previous_nominal_twist.setZero();
       runtime->exec_ctx.previous_nominal_twist_valid = true;
-      runtime->exec_ctx.last_local_planner_output_valid = false;
-      runtime->exec_ctx.local_planner_trajectory_valid = false;
-      runtime->exec_ctx.local_planner_target_poses.clear();
-      runtime->exec_ctx.local_planner_target_twists.clear();
-      runtime->exec_ctx.local_planner_joint_targets.clear();
-      runtime->exec_ctx.local_planner_start_index = 0u;
+      runtime->exec_ctx.local_planner.clearTracking();
     };
-    auto try_use_local_planner_trajectory =
-        [&](const bool terminal_coast) -> bool {
-      if (!runtime->exec_ctx.local_planner_trajectory_valid ||
-          runtime->exec_ctx.local_planner_target_poses.empty()) {
-        return false;
-      }
-      const double local_elapsed =
-          std::max(0.0, runtime->exec_ctx.tracked_reference_time_sec -
-                            runtime->exec_ctx.local_planner_start_time_sec);
-      const std::size_t elapsed_index =
-          static_cast<std::size_t>(std::floor(
-              local_elapsed /
-              std::max(1e-3, runtime->exec_ctx.local_planner_dt_sec))) +
-          1u;
-      const std::size_t sample_index = std::min<std::size_t>(
-          runtime->exec_ctx.local_planner_target_poses.size() - 1u,
-          runtime->exec_ctx.local_planner_start_index + elapsed_index);
-      if (terminal_coast &&
-          sample_index + 1u >=
-              runtime->exec_ctx.local_planner_target_poses.size()) {
-        return false;
-      }
-      const bool trajopt_target_accepted =
-          runtime->exec_ctx.local_planner_target_poses[sample_index]
-              .matrix()
-              .allFinite();
-      if (!trajopt_target_accepted) {
-        RCLCPP_WARN_THROTTLE(
-            node_->get_logger(), *node_->get_clock(), 1000,
-            "[%s] local_trajopt target rejected: non-finite optimized pose",
-            mapping.c_str());
-        return false;
-      }
-      tracking_target_pose =
-          runtime->exec_ctx.local_planner_target_poses[sample_index];
-      tracking_target_twist =
-          runtime->exec_ctx.local_planner_target_twists[sample_index];
-      local_trajopt_tracking = true;
-      if (sample_index < runtime->exec_ctx.local_planner_joint_targets.size() &&
-          runtime->exec_ctx.local_planner_joint_targets[sample_index].size() ==
-              q_now.size() &&
-          runtime->exec_ctx.local_planner_joint_targets[sample_index]
-              .allFinite()) {
-        local_planner_joint_target_storage =
-            runtime->exec_ctx.local_planner_joint_targets[sample_index];
-        local_planner_joint_target_dt_sec =
-            std::max(1e-3, runtime->exec_ctx.local_planner_dt_sec);
-      }
-      return true;
-    };
+    rt::ArmState current_arm_state;
+    current_arm_state.joint_names = session.ctx->joint_names;
+    current_arm_state.q = q_now;
+    current_arm_state.qd_min = session.ctx->qd_min;
+    current_arm_state.qd_max = session.ctx->qd_max;
+    current_arm_state.joint_limits = session.ctx->joint_limits;
+    if (runtime->exec_ctx.previous_qdot_reference_valid &&
+        runtime->exec_ctx.previous_qdot_reference.size() == q_now.size()) {
+      current_arm_state.qd = runtime->exec_ctx.previous_qdot_reference;
+    }
     if (phase_flags.path_follow_active) {
-      auto apply_local_planner_output =
-          [&](rt::ReactiveTaskLocalPlanner::Output local_planner_output,
-              const Eigen::VectorXd &planner_q_now,
-              const Eigen::VectorXd &planner_q_goal,
-              const int planner_tick,
-              const double request_time_sec) {
-            const double output_age_sec =
-                runtime->exec_ctx.tracked_reference_time_sec - request_time_sec;
-            const double max_usable_age_sec =
-                std::max(0.12, 2.0 * runtime_cfg_.local_planner.update_period_sec);
-            if (std::isfinite(output_age_sec) &&
-                output_age_sec > max_usable_age_sec) {
-              RCLCPP_DEBUG(
-                  node_->get_logger(),
-                  "[%s] local_trajopt async result dropped: stale age=%.3f max=%.3f",
-                  mapping.c_str(), output_age_sec, max_usable_age_sec);
-              return;
-            }
-            runtime->exec_ctx.last_local_planner_target_pose =
-                local_planner_output.target_pose;
-            runtime->exec_ctx.last_local_planner_target_twist =
-                local_planner_output.target_twist;
-            runtime->exec_ctx.last_local_planner_joint_target.resize(0);
-            runtime->exec_ctx.last_local_planner_joint_target_dt_sec = 0.0;
-            if (local_planner_output.has_optimized_joint_target &&
-                local_planner_output.optimized_joint_target.size() ==
-                    planner_q_now.size() &&
-                local_planner_output.optimized_joint_target.allFinite()) {
-              runtime->exec_ctx.last_local_planner_joint_target =
-                  local_planner_output.optimized_joint_target;
-              runtime->exec_ctx.last_local_planner_joint_target_dt_sec =
-                  local_planner_output.optimized_joint_target_time_sec;
-            }
-            runtime->exec_ctx.last_local_planner_update_time_sec =
-                runtime->exec_ctx.tracked_reference_time_sec;
-            runtime->exec_ctx.last_local_planner_output_valid = true;
-            const double local_trajectory_dt_sec =
-                std::max(1e-3, local_planner_output.trajectory_dt_sec);
-            runtime->exec_ctx.previous_nominal_twist =
-                local_planner_output.nominal_twist;
-            runtime->exec_ctx.local_planner_target_poses =
-                std::move(local_planner_output.target_poses);
-            runtime->exec_ctx.local_planner_target_twists =
-                std::move(local_planner_output.target_twists);
-            runtime->exec_ctx.local_planner_joint_targets =
-                std::move(local_planner_output.optimized_joint_trajectory);
-            runtime->exec_ctx.local_planner_start_index = 0u;
-            if (!runtime->exec_ctx.local_planner_joint_targets.empty()) {
-              double best_distance_sq =
-                  std::numeric_limits<double>::infinity();
-              const bool has_current_velocity =
-                  runtime->exec_ctx.previous_qdot_reference_valid &&
-                  runtime->exec_ctx.previous_qdot_reference.size() == q_now.size() &&
-                  runtime->exec_ctx.previous_qdot_reference.norm() > 1e-4;
-              for (std::size_t i = 0u;
-                   i < runtime->exec_ctx.local_planner_joint_targets.size();
-                   ++i) {
-                const Eigen::VectorXd &q_ref =
-                    runtime->exec_ctx.local_planner_joint_targets[i];
-                if (q_ref.size() != q_now.size() || !q_ref.allFinite()) {
-                  continue;
-                }
-                const Eigen::VectorXd delta = q_ref - q_now;
-                double score = delta.squaredNorm();
-                if (has_current_velocity) {
-                  const double along_velocity =
-                      delta.dot(runtime->exec_ctx.previous_qdot_reference);
-                  if (along_velocity > 0.0) {
-                    score *= 0.75;
-                  } else {
-                    score *= 1.35;
-                  }
-                }
-                if (score < best_distance_sq) {
-                  best_distance_sq = score;
-                  runtime->exec_ctx.local_planner_start_index = i;
-                }
-              }
-            }
-            const std::size_t remaining_local_samples =
-                runtime->exec_ctx.local_planner_joint_targets.size() >
-                        runtime->exec_ctx.local_planner_start_index
-                    ? runtime->exec_ctx.local_planner_joint_targets.size() -
-                          runtime->exec_ctx.local_planner_start_index
-                    : 0u;
-            if (remaining_local_samples < 8u &&
-                runtime->exec_ctx.local_planner_joint_targets.size() >= 8u) {
-              runtime->exec_ctx.last_local_planner_output_valid = false;
-              runtime->exec_ctx.last_local_planner_joint_target.resize(0);
-              runtime->exec_ctx.last_local_planner_joint_target_dt_sec = 0.0;
-              runtime->exec_ctx.local_planner_trajectory_valid = false;
-              runtime->exec_ctx.local_planner_target_poses.clear();
-              runtime->exec_ctx.local_planner_target_twists.clear();
-              runtime->exec_ctx.local_planner_joint_targets.clear();
-              runtime->exec_ctx.local_planner_start_index = 0u;
-              RCLCPP_DEBUG(
-                  node_->get_logger(),
-                  "[%s] local_trajopt async result dropped: stale handoff remaining=%zu",
-                  mapping.c_str(),
-                  remaining_local_samples);
-              return;
-            }
-            runtime->exec_ctx.local_planner_start_time_sec =
-                runtime->exec_ctx.tracked_reference_time_sec;
-            runtime->exec_ctx.local_planner_dt_sec = local_trajectory_dt_sec;
-            runtime->exec_ctx.local_planner_trajectory_valid =
-                !runtime->exec_ctx.local_planner_target_poses.empty() &&
-                runtime->exec_ctx.local_planner_target_poses.size() ==
-                    runtime->exec_ctx.local_planner_target_twists.size() &&
-                runtime->exec_ctx.local_planner_target_poses.size() ==
-                    runtime->exec_ctx.local_planner_joint_targets.size();
-            runtime->exec_ctx.previous_nominal_twist_valid = true;
-            if (!runtime->exec_ctx.local_planner_joint_targets.empty()) {
-              RCLCPP_INFO_THROTTLE(
-                  node_->get_logger(), *node_->get_clock(), 1000,
-                  "[%s] local_trajopt joint trace tick=%d steps=%zu dt=%.4f start_index=%zu q_now=%s q_first=%s q_last=%s q_goal=%s",
-                  mapping.c_str(), planner_tick,
-                  runtime->exec_ctx.local_planner_joint_targets.size(),
-                  runtime->exec_ctx.local_planner_dt_sec,
-                  runtime->exec_ctx.local_planner_start_index,
-                  formatVector(planner_q_now).c_str(),
-                  formatVector(runtime->exec_ctx.local_planner_joint_targets.front()).c_str(),
-                  formatVector(runtime->exec_ctx.local_planner_joint_targets.back()).c_str(),
-                  formatVector(planner_q_goal).c_str());
-            }
-          };
-
       if (terminal_goal_tracking) {
-        tracking_target_pose = Eigen::Isometry3d::Identity();
-        tracking_target_pose.linear() = session.request.R_goal;
-        tracking_target_pose.translation() = session.request.p_goal;
-        tracking_target_twist.setZero();
-        local_trajopt_tracking = false;
-        if (terminal_joint_anchor_sample_valid) {
-          local_planner_joint_target_storage =
-              terminal_joint_anchor_sample.ik_joint_target;
-          local_planner_joint_target_dt_sec = 1.0;
-        }
-        if (!runtime->exec_ctx.last_reference_finished) {
-          clear_local_planner_tracking();
-          ++runtime->exec_ctx.local_planner_generation;
-        }
-        if (runtime->exec_ctx.pending_local_planner_valid &&
-            runtime->exec_ctx.pending_local_planner_future.valid() &&
-            runtime->exec_ctx.pending_local_planner_future.wait_for(
-                std::chrono::seconds(0)) == std::future_status::ready) {
-          (void)runtime->exec_ctx.pending_local_planner_future.get();
-          runtime->exec_ctx.pending_local_planner_valid = false;
-          RCLCPP_DEBUG(node_->get_logger(),
-                       "[%s] local_trajopt async result dropped: terminal goal tracking",
-                       mapping.c_str());
-        }
-      } else if (runtime->exec_ctx.pending_local_planner_valid &&
-          runtime->exec_ctx.pending_local_planner_future.valid() &&
-          runtime->exec_ctx.pending_local_planner_future.wait_for(
-              std::chrono::seconds(0)) == std::future_status::ready) {
-        rt::ReactiveTaskLocalPlanner::Output local_planner_output =
-            runtime->exec_ctx.pending_local_planner_future.get();
-        runtime->exec_ctx.pending_local_planner_valid = false;
-        const bool output_is_current =
-            runtime->exec_ctx.pending_local_planner_generation ==
-            runtime->exec_ctx.local_planner_generation;
-        if (!output_is_current) {
-          RCLCPP_DEBUG(node_->get_logger(),
-                       "[%s] local_trajopt async result dropped: stale generation",
-                       mapping.c_str());
-        } else if (!local_planner_output.ok) {
-          RCLCPP_WARN(node_->get_logger(),
-                      "[%s] local_trajopt failed at tick %d: %s",
-                      mapping.c_str(),
-                      runtime->exec_ctx.pending_local_planner_tick,
-                      local_planner_output.error.c_str());
-        } else if (local_planner_output.used) {
-          apply_local_planner_output(
-              std::move(local_planner_output),
-              runtime->exec_ctx.pending_local_planner_q_start,
-              runtime->exec_ctx.pending_local_planner_q_goal,
-              runtime->exec_ctx.pending_local_planner_tick,
-              runtime->exec_ctx.pending_local_planner_request_time_sec);
+        runtime->exec_ctx.local_planner_runner.handleTerminalTracking(
+            &runtime->exec_ctx.local_planner,
+            !runtime->exec_ctx.last_reference_finished,
+            mapping,
+            node_->get_logger());
+      } else {
+        rt::AsyncLocalPlannerRunner::ApplyReadyInput apply_ready_input;
+        apply_ready_input.mapping = mapping;
+        apply_ready_input.logger = node_->get_logger();
+        apply_ready_input.clock = node_->get_clock();
+        apply_ready_input.current_qdot_reference =
+            runtime->exec_ctx.previous_qdot_reference;
+        apply_ready_input.current_qdot_reference_valid =
+            runtime->exec_ctx.previous_qdot_reference_valid;
+        apply_ready_input.now_sec = runtime->exec_ctx.tracked_reference_time_sec;
+        apply_ready_input.max_usable_age_sec =
+            std::max(0.12,
+                     2.0 * runtime_cfg_.local_planner.update_period_sec);
+        const rt::AsyncLocalPlannerRunner::ApplyReadyResult apply_result =
+            runtime->exec_ctx.local_planner_runner.applyReady(
+                &runtime->exec_ctx.local_planner, std::move(apply_ready_input));
+        if (apply_result.accepted) {
+          runtime->exec_ctx.previous_nominal_twist =
+              apply_result.nominal_twist;
+          runtime->exec_ctx.previous_nominal_twist_valid = true;
         }
       }
 
@@ -831,239 +739,96 @@ bool ReactiveTaskController::runPlanningControlLoop(
           std::max(1e-3, runtime_cfg_.local_planner.update_period_sec);
       const bool local_planner_due =
           !terminal_goal_tracking &&
-          !runtime->exec_ctx.pending_local_planner_valid &&
-          (!runtime->exec_ctx.last_local_planner_output_valid ||
-           (runtime->exec_ctx.tracked_reference_time_sec -
-            runtime->exec_ctx.last_local_planner_update_time_sec) >=
-               local_planner_period_sec - 1e-9);
+          runtime->exec_ctx.local_planner_runner.dueForRequest(
+              runtime->exec_ctx.local_planner,
+              runtime->exec_ctx.tracked_reference_time_sec,
+              local_planner_period_sec);
       if (local_planner_due) {
         const double local_planner_prediction_dt = std::clamp(
             std::max(runtime_cfg_.global_trajectory.planning_latency_sec,
                      runtime_cfg_.local_planner.update_period_sec),
             0.0,
             0.15);
-        Eigen::VectorXd q_local_planner_start = q_now;
-        if (runtime->exec_ctx.previous_qdot_reference_valid &&
-            runtime->exec_ctx.previous_qdot_reference.size() == q_now.size()) {
-          q_local_planner_start =
-              q_now + local_planner_prediction_dt *
-                          runtime->exec_ctx.previous_qdot_reference;
-          q_local_planner_start =
-              q_local_planner_start.cwiseMax(session.ctx->joint_limits.q_min)
-                  .cwiseMin(session.ctx->joint_limits.q_max);
-        }
-        Eigen::Isometry3d local_planner_start_pose = fk_now.ee_pose;
-        {
-          static const std::vector<std::string> kNoLinkPoseQueries;
-          arm_controller::kinematics::LinkPoseResultList predicted_link_poses;
-          Eigen::Isometry3d predicted_ee_pose = Eigen::Isometry3d::Identity();
-          if (session.ctx->fk_provider->computeLinkPoses(
-                  q_local_planner_start,
-                  kNoLinkPoseQueries,
-                  predicted_link_poses,
-                  nullptr,
-                  nullptr,
-                  &predicted_ee_pose) &&
-              predicted_ee_pose.matrix().allFinite()) {
-            local_planner_start_pose = predicted_ee_pose;
-          } else {
-            q_local_planner_start = q_now;
-            local_planner_start_pose = fk_now.ee_pose;
-          }
-        }
-        cp::TimedCartesianSampleList local_reference_samples;
-        local_reference_samples.reserve(static_cast<std::size_t>(
-            std::max(1, runtime_cfg_.local_planner.horizon_steps)));
-        for (int k = 0;
-             k < std::max(1, runtime_cfg_.local_planner.horizon_steps);
-             ++k) {
-          const double local_reference_sample_time =
-              local_reference_output.continuous_sample_time_sec +
-              local_planner_prediction_dt +
-              runtime_cfg_.local_planner.dt_sec *
-                  static_cast<double>(k + 1);
-          cp::TimedCartesianSample local_reference_sample;
-          if (!runtime->global_trajectory->sampleByElapsedTime(local_reference_sample_time,
-                                                       local_reference_sample)) {
-            break;
-          }
-          local_reference_samples.push_back(local_reference_sample);
-        }
-
-        rt::ReactiveTaskLocalPlanner::Input local_planner_input;
-        local_planner_input.current_pose = local_planner_start_pose;
-        local_planner_input.reference_samples = std::move(local_reference_samples);
-        local_planner_input.reference_finished = reference_finished;
-        local_planner_input.joint_names = session.ctx->joint_names;
-        local_planner_input.q_current = q_local_planner_start;
-        local_planner_input.q_goal = q_local_planner_start;
-        local_planner_input.robot_type = session.ctx->robot_type;
-        local_planner_input.planning_group = session.ctx->planning_group;
-        local_planner_input.base_link = session.ctx->base_link;
-        local_planner_input.tip_link = session.ctx->tip_link;
-        local_planner_input.urdf_path = session.ctx->urdf_path;
-        local_planner_input.srdf_path = session.ctx->srdf_path;
         std::shared_ptr<cp::CameraDriverPointcloudMapAdapter> pointcloud_map;
         {
           std::lock_guard<std::mutex> lock(live_distance_field_mutex_);
           pointcloud_map = camera_driver_pointcloud_map_;
         }
-        if (kReactiveObstacleAvoidanceEnabled && pointcloud_map) {
-          const auto occupied_centers =
-              pointcloud_map->occupiedCellCenters(0u);
-          const double obstacle_voxel_radius =
-              0.5 * std::sqrt(3.0) * pointcloud_map->voxelSize();
-          const double obstacle_padding =
-              std::max(0.0, runtime_cfg_.local_planner.obstacle_padding_m);
-          const double obstacle_radius =
-              obstacle_voxel_radius + obstacle_padding;
-          struct ObstacleCandidate {
-            EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-            Eigen::Vector3d center{Eigen::Vector3d::Zero()};
-            double distance_to_reference{0.0};
-          };
-          std::vector<ObstacleCandidate, Eigen::aligned_allocator<ObstacleCandidate>>
-              obstacle_candidates;
-          obstacle_candidates.reserve(occupied_centers.size());
-          const double selection_radius =
-              std::max(0.01,
-                       runtime_cfg_.local_planner.obstacle_selection_radius_m);
-          for (const auto &center : occupied_centers) {
-            if (!center.allFinite()) {
-              continue;
-            }
-            const double distance_to_reference = minDistanceToLocalReference(
-                center, fk_now.ee_pose, local_planner_input.reference_samples,
-                session.ctx->fk_provider, &session.ctx->collision_ellipsoids,
-                &fk_now.link_poses);
-            if (distance_to_reference <= selection_radius) {
-              obstacle_candidates.push_back(
-                  ObstacleCandidate{center, distance_to_reference});
-            }
-          }
-          std::sort(obstacle_candidates.begin(), obstacle_candidates.end(),
-                    [](const ObstacleCandidate &a,
-                       const ObstacleCandidate &b) {
-                      return a.distance_to_reference < b.distance_to_reference;
-                    });
-          const std::size_t obstacle_limit =
-              static_cast<std::size_t>(
-                  std::max(0, runtime_cfg_.local_planner.max_obstacle_spheres));
-          const std::size_t obstacle_count =
-              std::min(obstacle_limit, obstacle_candidates.size());
-          local_planner_input.sphere_obstacles.reserve(obstacle_count);
-          for (std::size_t i = 0; i < obstacle_count; ++i) {
-            rt::ReactiveTaskLocalPlanner::SphereObstacle obstacle;
-            obstacle.name =
-                "camera_obstacle_" + mapping + "_" + std::to_string(i);
-            obstacle.center = obstacle_candidates[i].center;
-            obstacle.radius = obstacle_radius;
-            local_planner_input.sphere_obstacles.push_back(std::move(obstacle));
-          }
+        LocalPlannerBuildResult local_planner_build = buildLocalPlannerInput(
+            mapping,
+            runtime->global_trajectory.get(),
+            runtime_cfg_.local_planner,
+            current_arm_state,
+            fk_now,
+            local_reference_output,
+            reference_finished,
+            local_planner_prediction_dt,
+            runtime->exec_ctx.previous_qdot_reference_valid,
+            runtime->exec_ctx.previous_qdot_reference,
+            session.ctx->fk_provider,
+            session.ctx->collision_ellipsoids,
+            session.ctx->robot_type,
+            session.ctx->planning_group,
+            session.ctx->base_link,
+            session.ctx->tip_link,
+            session.ctx->urdf_path,
+            session.ctx->srdf_path,
+            obstacle_selector_,
+            pointcloud_map);
+        rt::ArmLocalPlanner::Input &local_planner_input =
+            local_planner_build.input;
+        if (pointcloud_map) {
+          const rt::ObstacleSelectionOutput &obstacle_selection =
+              local_planner_build.obstacle_selection;
           RCLCPP_INFO_THROTTLE(
               node_->get_logger(), *node_->get_clock(), 1000,
               "[%s] local_trajopt obstacles: selected=%zu candidates=%zu cells=%zu radius=%.3f voxel_radius=%.3f padding=%.3f selection_radius=%.3f",
               mapping.c_str(), local_planner_input.sphere_obstacles.size(),
-              obstacle_candidates.size(), occupied_centers.size(),
-              obstacle_radius, obstacle_voxel_radius, obstacle_padding,
-              selection_radius);
-        }
-        local_planner_input.joint_to_pose =
-            [fk = session.ctx->fk_provider](const Eigen::VectorXd &q,
-                                            Eigen::Isometry3d *pose) -> bool {
-          if (!fk || pose == nullptr) {
-            return false;
-          }
-          static const std::vector<std::string> kNoLinkPoseQueries;
-          arm_controller::kinematics::LinkPoseResultList link_poses;
-          Eigen::Isometry3d ee_pose = Eigen::Isometry3d::Identity();
-          if (!fk->computeLinkPoses(
-                  q,
-                  kNoLinkPoseQueries,
-                  link_poses,
-                  nullptr,
-                  nullptr,
-                  &ee_pose)) {
-            return false;
-          }
-          *pose = ee_pose;
-          return true;
-        };
-        if (!local_planner_input.reference_samples.empty()) {
-          const cp::TimedCartesianSample &lookahead_sample =
-              local_planner_input.reference_samples.back();
-          if (lookahead_sample.has_ik_joint_target &&
-              lookahead_sample.ik_joint_target.size() == q_now.size() &&
-              lookahead_sample.ik_joint_target.allFinite()) {
-            local_planner_input.q_goal = lookahead_sample.ik_joint_target;
-            local_planner_input.q_goal_valid = true;
-          }
+              obstacle_selection.candidate_count, obstacle_selection.cell_count,
+              obstacle_selection.obstacle_radius,
+              obstacle_selection.voxel_radius,
+              obstacle_selection.padding,
+              obstacle_selection.selection_radius);
         }
 
         if (local_planner_input.q_goal_valid) {
-          ++runtime->exec_ctx.local_planner_generation;
-          runtime->exec_ctx.pending_local_planner_generation =
-              runtime->exec_ctx.local_planner_generation;
-          runtime->exec_ctx.pending_local_planner_tick =
-              runtime->exec_ctx.planner_tick;
-          runtime->exec_ctx.pending_local_planner_request_time_sec =
-              runtime->exec_ctx.tracked_reference_time_sec;
-          runtime->exec_ctx.pending_local_planner_q_start =
-              local_planner_input.q_current;
-          runtime->exec_ctx.pending_local_planner_q_goal =
-              local_planner_input.q_goal;
-          auto local_planner_job_input = std::move(local_planner_input);
-          runtime->exec_ctx.pending_local_planner_future =
-              std::async(
-                  std::launch::async,
-                  [this, input = std::move(local_planner_job_input)]()
-                      mutable {
-                    rt::ReactiveTaskLocalPlanner::Output output;
-                    if (!local_planner_.compute(input, &output)) {
-                      output.ok = false;
-                    }
-                    return output;
-                  });
-          runtime->exec_ctx.pending_local_planner_valid = true;
-        }
-      }
-      if (!terminal_goal_tracking &&
-          try_use_local_planner_trajectory(false)) {
-      } else if (!terminal_goal_tracking &&
-                 runtime->exec_ctx.last_local_planner_output_valid) {
-        const bool trajopt_target_accepted =
-            runtime->exec_ctx.last_local_planner_target_pose.matrix().allFinite();
-        if (trajopt_target_accepted) {
-          tracking_target_pose = runtime->exec_ctx.last_local_planner_target_pose;
-          tracking_target_twist = runtime->exec_ctx.last_local_planner_target_twist;
-          local_trajopt_tracking = true;
-        } else {
-          RCLCPP_WARN_THROTTLE(
-              node_->get_logger(), *node_->get_clock(), 1000,
-              "[%s] local_trajopt fallback target rejected: non-finite optimized pose",
-              mapping.c_str());
-        }
-        if (trajopt_target_accepted &&
-            runtime->exec_ctx.last_local_planner_joint_target.size() ==
-                q_now.size() &&
-            runtime->exec_ctx.last_local_planner_joint_target.allFinite()) {
-          local_planner_joint_target_storage =
-              runtime->exec_ctx.last_local_planner_joint_target;
-          local_planner_joint_target_dt_sec =
-              runtime->exec_ctx.last_local_planner_joint_target_dt_sec;
+          runtime->exec_ctx.local_planner_runner.start(
+              local_planner_,
+              std::move(local_planner_input),
+              runtime->exec_ctx.planner_tick,
+              runtime->exec_ctx.tracked_reference_time_sec);
         }
       }
     } else {
       clear_local_planner_tracking();
-      ++runtime->exec_ctx.local_planner_generation;
+      runtime->exec_ctx.local_planner_runner.advanceGeneration();
     }
-    phase_flags.local_trajopt_tracking = local_trajopt_tracking;
+
+    rt::ReactiveTaskControlTargetBuilder::Input control_target_input;
+    control_target_input.mapping = mapping;
+    control_target_input.logger = node_->get_logger();
+    control_target_input.clock = node_->get_clock();
+    control_target_input.phase_flags = phase_flags;
+    control_target_input.terminal_goal_tracking = terminal_goal_tracking;
+    control_target_input.sample = runtime->sample;
+    control_target_input.goal_position = session.request.p_goal;
+    control_target_input.goal_rotation = session.request.R_goal;
+    control_target_input.terminal_joint_anchor_sample =
+        terminal_joint_anchor_sample;
+    control_target_input.terminal_joint_anchor_sample_valid =
+        terminal_joint_anchor_sample_valid;
+    control_target_input.arm_state = current_arm_state;
+    control_target_input.tracked_reference_time_sec =
+        runtime->exec_ctx.tracked_reference_time_sec;
+    control_target_input.local_planner = &runtime->exec_ctx.local_planner;
+    const rt::ControlTarget control_target =
+        control_target_builder_.build(control_target_input);
+    phase_flags.local_trajopt_tracking = control_target.local_planner_tracking;
     const rt::ReactiveTaskTerminalPolicy::CommandTargetOutput command_target =
         terminal_policy_.buildCommandTarget(
             runtime->exec_ctx, phase_flags, session.request.p_goal,
-            session.request.R_goal, runtime->sample, tracking_target_pose,
-            tracking_target_twist, fk_now.ee_pose, reference_finished,
+            session.request.R_goal, runtime->sample, control_target.pose,
+            control_target.twist, fk_now.ee_pose, reference_finished,
             clearance_direction, clearance_direction_valid,
             whole_body_status.min_margin);
     rq::TaskVelocityInput task_in;
@@ -1077,10 +842,7 @@ bool ReactiveTaskController::runPlanningControlLoop(
     terminal_policy_.shapeTaskVelocity(phase_flags, task_out,
                                        reactive_cfg_.task_velocity);
     rt::ReactiveTaskNeoPipeline::PrepareInput neo_pipeline_input;
-    neo_pipeline_input.q_now = q_now;
-    neo_pipeline_input.qd_min = session.ctx->qd_min;
-    neo_pipeline_input.qd_max = session.ctx->qd_max;
-    neo_pipeline_input.joint_limits = session.ctx->joint_limits;
+    neo_pipeline_input.arm_state = current_arm_state;
     neo_pipeline_input.jacobian_provider = session.ctx->jacobian_provider.get();
     neo_pipeline_input.task_out = &task_out;
     neo_pipeline_input.phase_flags = &phase_flags;
@@ -1093,10 +855,9 @@ bool ReactiveTaskController::runPlanningControlLoop(
         path_follow_joint_anchor_sample_valid;
     neo_pipeline_input.current_sample = &runtime->sample;
     neo_pipeline_input.local_planner_joint_target =
-        local_planner_joint_target_storage.size() == q_now.size()
-            ? &local_planner_joint_target_storage
-            : nullptr;
-    neo_pipeline_input.local_planner_joint_target_dt_sec = local_planner_joint_target_dt_sec;
+        control_target.localPlannerJointTarget(q_now.size());
+    neo_pipeline_input.local_planner_joint_target_dt_sec =
+        control_target.local_planner_joint_target_dt_sec;
     neo_pipeline_input.manipulability_gradient =
         session.ctx->manipulability_gradient.get();
     neo_pipeline_input.manipulability_cfg = &reactive_cfg_.manipulability;
@@ -1119,8 +880,7 @@ bool ReactiveTaskController::runPlanningControlLoop(
     safety_input.exec_ctx = &runtime->exec_ctx;
     safety_input.base_qp_build_cfg = qp_build_cfg;
     safety_input.qp_input = qp_input;
-    safety_input.q_now = q_now;
-    safety_input.qd_max = session.ctx->qd_max;
+    safety_input.arm_state = current_arm_state;
     safety_input.link_poses = &fk_now.link_poses;
     safety_input.collision_ellipsoids = &session.ctx->collision_ellipsoids;
     safety_input.jacobian_provider = session.ctx->jacobian_provider.get();
@@ -1153,8 +913,7 @@ bool ReactiveTaskController::runPlanningControlLoop(
           std::make_unique<arm_controller::algorithm::reactive_qp::ReactiveQpSolver>();
     }
     neo_solve_input.solver = runtime->solver.get();
-    neo_solve_input.qd_min = session.ctx->qd_min;
-    neo_solve_input.qd_max = session.ctx->qd_max;
+    neo_solve_input.arm_state = current_arm_state;
     neo_solve_input.task_jacobian = &neo_pipeline_output.J_task;
     neo_solve_input.desired_twist = &task_out.v_des;
     neo_solve_input.logger = node_->get_logger();
@@ -1396,12 +1155,10 @@ bool ReactiveTaskController::runPlanningControlLoop(
       diag_input.active_safety_distance = active_safety_distance;
       diag_input.obstacle_guidance_gate = obstacle_guidance_gate;
       diag_input.obstacle_min_distance = obstacle_min_distance;
-      diag_input.local_plan_sampled_steps = static_cast<int>(
-          runtime->exec_ctx.local_planner_target_poses.size());
+      diag_input.local_plan_sampled_steps =
+          runtime->exec_ctx.local_planner.sampledSteps();
       diag_input.local_plan_dt_sec =
-          runtime->exec_ctx.local_planner_trajectory_valid
-              ? runtime->exec_ctx.local_planner_dt_sec
-              : 0.0;
+          runtime->exec_ctx.local_planner.diagnosticDtSec();
       diag_input.qdot = &qdot_eigen;
       diag_input.v_des = &task_out.v_des;
       diag_input.task_pred = &task_pred;

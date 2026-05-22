@@ -5,13 +5,16 @@
 
 #include <limits>
 #include <string>
+#include <vector>
 
 #include "algorithm/cartesian_path_planner/global_trajectory/global_trajectory_manager.hpp"
 #include "algorithm/cartesian_path_planner/types.hpp"
+#include "algorithm/neo/joint_limit_adapter.hpp"
 
 namespace arm_controller::controller::reactive_task {
 
 namespace cp = arm_controller::algorithm::cartesian_path_planner;
+namespace rq = arm_controller::algorithm::reactive_qp;
 
 enum class ExecutionPhase {
     Track,
@@ -30,6 +33,73 @@ inline const char* toString(const ExecutionPhase phase) {
     }
     return "unknown";
 }
+
+struct ArmState {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    std::vector<std::string> joint_names;
+    Eigen::VectorXd q;
+    Eigen::VectorXd qd;
+    Eigen::VectorXd qd_min;
+    Eigen::VectorXd qd_max;
+    rq::JointLimitData joint_limits;
+};
+
+struct BaseState {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    bool available{false};
+    Eigen::Vector3d pose_xy_yaw{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d twist_xy_yaw{Eigen::Vector3d::Zero()};
+    std::string world_frame{"world"};
+    std::string base_frame{"base_link"};
+};
+
+struct RobotState {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    double timestamp_sec{0.0};
+    BaseState base;
+    ArmState left_arm;
+    ArmState right_arm;
+};
+
+struct ControlTarget {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    Eigen::Isometry3d pose{Eigen::Isometry3d::Identity()};
+    Eigen::Matrix<double, 6, 1> twist{Eigen::Matrix<double, 6, 1>::Zero()};
+    Eigen::VectorXd local_planner_joint_target;
+    double local_planner_joint_target_dt_sec{0.0};
+    bool local_planner_tracking{false};
+
+    void setPoseTwist(
+        const Eigen::Isometry3d& target_pose,
+        const Eigen::Matrix<double, 6, 1>& target_twist) {
+        pose = target_pose;
+        twist = target_twist;
+    }
+
+    void clearLocalPlannerJointTarget() {
+        local_planner_joint_target.resize(0);
+        local_planner_joint_target_dt_sec = 0.0;
+    }
+
+    void setLocalPlannerJointTarget(
+        const Eigen::VectorXd& joint_target,
+        const double dt_sec) {
+        local_planner_joint_target = joint_target;
+        local_planner_joint_target_dt_sec = dt_sec;
+    }
+
+    const Eigen::VectorXd* localPlannerJointTarget(
+        const Eigen::Index expected_size) const {
+        return local_planner_joint_target.size() == expected_size &&
+                       local_planner_joint_target.allFinite()
+                   ? &local_planner_joint_target
+                   : nullptr;
+    }
+};
 
 struct WholeBodyStatusSnapshot {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW

@@ -7,7 +7,7 @@
 
 #include "algorithm/cartesian_path_planner/collision/whole_body_ellipsoid_collision_checker.hpp"
 #include "algorithm/cartesian_path_planner/map/distance_field_interface.hpp"
-#include "reactive_task_types.hpp"
+#include "controller/reactive_task/controller/reactive_task_types.hpp"
 
 namespace arm_controller::controller::reactive_task {
 

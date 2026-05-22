@@ -1,4 +1,4 @@
-#include "controller/reactive_task/reactive_task_diagnostics_publisher.hpp"
+#include "controller/reactive_task/diagnostics/reactive_task_diagnostics_publisher.hpp"
 
 #include <algorithm>
 #include <cmath>

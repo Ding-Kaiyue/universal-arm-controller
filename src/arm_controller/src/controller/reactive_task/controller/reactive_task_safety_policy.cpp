@@ -1,4 +1,4 @@
-#include "controller/reactive_task/reactive_task_safety_policy.hpp"
+#include "controller/reactive_task/controller/reactive_task_safety_policy.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -21,7 +21,7 @@ bool ReactiveTaskSafetyPolicy::apply(const Input& input, Output* output) const {
         input.collision_ellipsoids != nullptr && input.jacobian_provider != nullptr && input.map) {
         std::string obstacle_error;
         const int generated = rq::BodyObstacleConstraintBuilder::appendLinkEllipsoidConstraints(
-            input.q_now,
+            input.arm_state.q,
             *input.link_poses,
             *input.collision_ellipsoids,
             *input.jacobian_provider,

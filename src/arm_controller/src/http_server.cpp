@@ -1,13 +1,19 @@
 #include "arm_controller/arm_controller_api.hpp"
+#if ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS
 #include "controller/movej/movej_ipc_interface.hpp"
 #include "controller/movel/movel_ipc_interface.hpp"
 #include "controller/movec/movec_ipc_interface.hpp"
+#include "controller/reactive_task/reactive_task_ipc_interface.hpp"
+#endif
+#if ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
 #include "controller/joint_velocity/joint_velocity_ipc_interface.hpp"
 #include "controller/cartesian_velocity/cartesian_velocity_ipc_interface.hpp"
 #include "controller/mink_servo/mink_servo_ipc_interface.hpp"
-#include "controller/reactive_task/reactive_task_ipc_interface.hpp"
+#endif
+#if ARM_CONTROLLER_ENABLE_TEACH_CONTROLLERS
 #include "controller/trajectory_record/trajectory_record_ipc_interface.hpp"
 #include "controller/trajectory_replay/trajectory_replay_ipc_interface.hpp"
+#endif
 #include "controller/basic_ops/basic_ops_ipc_interface.hpp"
 #include <iostream>
 #include <thread>
@@ -567,15 +573,21 @@ private:
     int server_socket_ = -1;
     int port_;
     bool running_ = false;
+#if ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS
     arm_controller::movej::MoveJIPCInterface movej_;
     arm_controller::movel::MoveLIPCInterface movel_;
     arm_controller::movec::MoveCIPCInterface movec_;
+    arm_controller::reactive_task::ReactiveTaskIPCInterface reactive_task_;
+#endif
+#if ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
     arm_controller::joint_velocity::JointVelocityIPCInterface joint_velocity_;
     arm_controller::cartesian_velocity::CartesianVelocityIPCInterface cartesian_velocity_;
     arm_controller::mink_servo::MinkServoIPCInterface mink_servo_;
-    arm_controller::reactive_task::ReactiveTaskIPCInterface reactive_task_;
+#endif
+#if ARM_CONTROLLER_ENABLE_TEACH_CONTROLLERS
     arm_controller::trajectory_record::TrajectoryRecordIPCInterface trajectory_record_;
     arm_controller::trajectory_replay::TrajectoryReplayIPCInterface trajectory_replay_;
+#endif
     arm_controller::basic_ops::BasicOpsIPCInterface basic_ops_;
 
 public:
@@ -760,6 +772,7 @@ private:
         std::string http_status;
 
         try {
+#if ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS
             if (method == "POST" && path == "/movej") {
                 response_body = handleMoveJ(body);
                 http_status = "HTTP/1.1 200 OK";
@@ -769,7 +782,13 @@ private:
             } else if (method == "POST" && path == "/movec") {
                 response_body = handleMoveC(body);
                 http_status = "HTTP/1.1 200 OK";
-            } else if (method == "POST" && path == "/joint_velocity") {
+            } else if (method == "POST" && path == "/reactive_task") {
+                response_body = handleReactiveTask(body);
+                http_status = "HTTP/1.1 200 OK";
+            } else
+#endif
+#if ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
+            if (method == "POST" && path == "/joint_velocity") {
                 response_body = handleJointVelocity(body);
                 http_status = "HTTP/1.1 200 OK";
             } else if (method == "POST" && path == "/cartesian_velocity") {
@@ -778,16 +797,18 @@ private:
             } else if (method == "POST" && path == "/mink_servo") {
                 response_body = handleMinkServo(body);
                 http_status = "HTTP/1.1 200 OK";
-            } else if (method == "POST" && path == "/reactive_task") {
-                response_body = handleReactiveTask(body);
-                http_status = "HTTP/1.1 200 OK";
-            } else if (method == "POST" && path == "/trajectory_record") {
+            } else
+#endif
+#if ARM_CONTROLLER_ENABLE_TEACH_CONTROLLERS
+            if (method == "POST" && path == "/trajectory_record") {
                 response_body = handleTrajectoryRecord(body);
                 http_status = "HTTP/1.1 200 OK";
             } else if (method == "POST" && path == "/trajectory_replay") {
                 response_body = handleTrajectoryReplay(body);
                 http_status = "HTTP/1.1 200 OK";
-            } else if (method == "POST" && path == "/gripper_control") {
+            } else
+#endif
+            if (method == "POST" && path == "/gripper_control") {
                 response_body = handleGripperControl(body);
                 http_status = "HTTP/1.1 200 OK";
             } else if (method == "POST" && path == "/motor_enable") {
@@ -820,6 +841,7 @@ private:
         return response.str();
     }
 
+#if ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS
     std::string handleMoveJ(const std::string& body) {
         try {
             auto req = RequestParser::parseMoveJ(body);
@@ -936,7 +958,9 @@ private:
             return SimpleJSON::error(e.what());
         }
     }
+#endif
 
+#if ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
     std::string handleJointVelocity(const std::string& body) {
         try {
             auto req = RequestParser::parseJointVelocity(body);
@@ -1118,7 +1142,9 @@ private:
             return SimpleJSON::error(e.what());
         }
     }
+#endif
 
+#if ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS
     std::string handleReactiveTask(const std::string& body) {
         try {
             auto req = RequestParser::parseMinkServo(body);
@@ -1133,7 +1159,9 @@ private:
             return SimpleJSON::error(e.what());
         }
     }
+#endif
 
+#if ARM_CONTROLLER_ENABLE_TEACH_CONTROLLERS
     std::string handleTrajectoryRecord(const std::string& body) {
         try {
             auto req = RequestParser::parseTeach(body);
@@ -1203,6 +1231,7 @@ private:
             return SimpleJSON::error(e.what());
         }
     }
+#endif
 
     std::string handleGripperControl(const std::string& body) {
         try {
@@ -1295,20 +1324,27 @@ int main(int /*argc*/, char** /*argv*/) {
 
     std::cout << "🚀 Server running on http://127.0.0.1:8080\n";
     std::cout << "   ===== Available Endpoints =====\n";
+#if ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS
     std::cout << "   POST /movej                 - Joint space point-to-point motion\n";
     std::cout << "   POST /movel                 - Cartesian linear motion\n";
     std::cout << "   POST /movec                 - Cartesian circular motion\n";
+    std::cout << "   POST /reactive_task         - One-shot pose command (A* + NEO)\n";
+#endif
+#if ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
     std::cout << "   POST /joint_velocity        - Joint velocity control\n";
     std::cout << "   POST /cartesian_velocity    - Cartesian velocity control\n";
     std::cout << "   POST /mink_servo            - Pose servo control (Mink mode)\n";
-    std::cout << "   POST /reactive_task         - One-shot pose command (A* + NEO)\n";
+#endif
+#if ARM_CONTROLLER_ENABLE_TEACH_CONTROLLERS
     std::cout << "   POST /trajectory_record     - Trajectory record control\n";
     std::cout << "   POST /trajectory_replay     - Trajectory replay control\n";
+#endif
     std::cout << "   POST /gripper_control       - Gripper open/close (IPC basic op)\n";
     std::cout << "   POST /motor_enable          - Motor enable (IPC basic op)\n";
     std::cout << "   POST /motor_disable         - Motor disable (IPC basic op)\n";
     std::cout << "   GET  /health                - Health check\n\n";
     std::cout << "Example requests:\n";
+#if ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS
     std::cout << "  MoveJ:\n";
     std::cout << "    curl -X POST http://127.0.0.1:8080/movej \\\n";
     std::cout << "      -H 'Content-Type: application/json' \\\n";
@@ -1317,6 +1353,12 @@ int main(int /*argc*/, char** /*argv*/) {
     std::cout << "    curl -X POST http://127.0.0.1:8080/movel \\\n";
     std::cout << "      -H 'Content-Type: application/json' \\\n";
     std::cout << "      -d '{\"x\": 0.5, \"y\": 0.3, \"z\": 0.4, \"qx\": 0, \"qy\": 0, \"qz\": 0, \"qw\": 1, \"mapping\": \"left_arm\"}'\n\n";
+    std::cout << "  ReactiveTask:\n";
+    std::cout << "    curl -X POST http://127.0.0.1:8080/reactive_task \\\n";
+    std::cout << "      -H 'Content-Type: application/json' \\\n";
+    std::cout << "      -d '{\"target_pose\": [0.45, 0.20, 0.35, 0, 0, 0, 1], \"mapping\": \"left_arm\"}'\n\n";
+#endif
+#if ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
     std::cout << "  JointVelocity:\n";
     std::cout << "    curl -X POST http://127.0.0.1:8080/joint_velocity \\\n";
     std::cout << "      -H 'Content-Type: application/json' \\\n";
@@ -1325,11 +1367,7 @@ int main(int /*argc*/, char** /*argv*/) {
     std::cout << "    curl -X POST http://127.0.0.1:8080/mink_servo \\\n";
     std::cout << "      -H 'Content-Type: application/json' \\\n";
     std::cout << "      -d '{\"target_pose\": [0.45, 0.20, 0.35, 0, 0, 0, 1], \"mapping\": \"left_arm\", \"duration_ms\": 1000, \"interval_ms\": 10}'\n\n";
-    std::cout << "  ReactiveTask:\n";
-    std::cout << "    curl -X POST http://127.0.0.1:8080/reactive_task \\\n";
-    std::cout << "      -H 'Content-Type: application/json' \\\n";
-    std::cout << "      -d '{\"target_pose\": [0.45, 0.20, 0.35, 0, 0, 0, 1], \"mapping\": \"left_arm\"}'\n\n";
-
+#endif
     // 保持运行
     while (true) {
         std::this_thread::sleep_for(std::chrono::seconds(1));

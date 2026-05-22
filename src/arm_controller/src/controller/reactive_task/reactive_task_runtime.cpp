@@ -1,4 +1,4 @@
-#include "reactive_task_controller.hpp"
+#include "controller/reactive_task/reactive_task_controller.hpp"
 
 #include "arm_controller/ipc/command_queue_ipc.hpp"
 #include "arm_controller/ipc/ipc_context.hpp"

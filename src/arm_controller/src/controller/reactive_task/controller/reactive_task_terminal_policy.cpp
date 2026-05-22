@@ -1,4 +1,4 @@
-#include "controller/reactive_task/reactive_task_terminal_policy.hpp"
+#include "controller/reactive_task/controller/reactive_task_terminal_policy.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -78,14 +78,15 @@ void ReactiveTaskTerminalPolicy::shapeTaskVelocity(
 
 Eigen::VectorXd ReactiveTaskTerminalPolicy::buildPostureReference(
     const PostureReferenceInput& input) const {
-    Eigen::VectorXd posture_qdot_ref = Eigen::VectorXd::Zero(input.q_now.size());
+    const Eigen::VectorXd& q_now = input.arm_state.q;
+    Eigen::VectorXd posture_qdot_ref = Eigen::VectorXd::Zero(q_now.size());
     if (input.joint_preference_cfg == nullptr) {
         return posture_qdot_ref;
     }
 
     if (input.flags.path_follow_active) {
         if (input.local_planner_joint_target != nullptr &&
-            input.local_planner_joint_target->size() == input.q_now.size() &&
+            input.local_planner_joint_target->size() == q_now.size() &&
             input.local_planner_joint_target->allFinite()) {
             const double dt =
                 input.flags.terminal_goal_tracking
@@ -96,7 +97,7 @@ Eigen::VectorXd ReactiveTaskTerminalPolicy::buildPostureReference(
             const double path_follow_posture_joint_speed_cap =
                 input.flags.terminal_goal_tracking ? 0.35 : 0.35;
             posture_qdot_ref =
-                path_follow_posture_gain * (*input.local_planner_joint_target - input.q_now) / dt;
+                path_follow_posture_gain * (*input.local_planner_joint_target - q_now) / dt;
             for (int i = 0; i < posture_qdot_ref.size(); ++i) {
                 posture_qdot_ref(i) = std::clamp(
                     posture_qdot_ref(i),
@@ -111,13 +112,13 @@ Eigen::VectorXd ReactiveTaskTerminalPolicy::buildPostureReference(
 
         const cp::TimedCartesianSample* branch_hold_sample = nullptr;
         if (input.flags.terminal_goal_tracking && input.current_sample != nullptr &&
-            sampleHasFiniteJointTarget(*input.current_sample, input.q_now.size())) {
+            sampleHasFiniteJointTarget(*input.current_sample, q_now.size())) {
             branch_hold_sample = input.current_sample;
         } else if (input.path_follow_joint_anchor_sample_valid && input.path_follow_joint_anchor_sample != nullptr &&
-            sampleHasFiniteJointTarget(*input.path_follow_joint_anchor_sample, input.q_now.size())) {
+            sampleHasFiniteJointTarget(*input.path_follow_joint_anchor_sample, q_now.size())) {
             branch_hold_sample = input.path_follow_joint_anchor_sample;
         } else if (input.current_sample != nullptr &&
-                   sampleHasFiniteJointTarget(*input.current_sample, input.q_now.size())) {
+                   sampleHasFiniteJointTarget(*input.current_sample, q_now.size())) {
             branch_hold_sample = input.current_sample;
         }
         if (branch_hold_sample != nullptr) {
@@ -127,7 +128,7 @@ Eigen::VectorXd ReactiveTaskTerminalPolicy::buildPostureReference(
                 input.flags.terminal_goal_tracking ? 0.22 : 0.10;
             posture_qdot_ref =
                 path_follow_posture_gain * input.joint_preference_cfg->posture_k *
-                (branch_hold_sample->ik_joint_target - input.q_now);
+                (branch_hold_sample->ik_joint_target - q_now);
             for (int i = 0; i < posture_qdot_ref.size(); ++i) {
                 posture_qdot_ref(i) = std::clamp(
                     posture_qdot_ref(i),

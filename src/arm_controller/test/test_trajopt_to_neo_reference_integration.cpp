@@ -3,7 +3,7 @@
 #include <algorithm>
 
 #include "algorithm/global_planner/ompl_rrt_connect_global_planner.hpp"
-#include "controller/reactive_task/reactive_task_local_planner.hpp"
+#include "controller/reactive_task/local_planner/reactive_task_local_planner.hpp"
 #include "reactive_task_real_arm_test_helpers.hpp"
 
 namespace cp = arm_controller::algorithm::cartesian_path_planner;
@@ -130,15 +130,15 @@ TEST(TrajOptToNeoReferenceIntegrationTest, RrtConnectAndTrajOptAvoidObservedObst
     Eigen::Isometry3d current_pose = Eigen::Isometry3d::Identity();
     ASSERT_TRUE(arm.computePose(q_current, &current_pose));
 
-    rt::ReactiveTaskLocalPlanner::Config local_cfg;
+    rt::ArmLocalPlanner::Config local_cfg;
     local_cfg.horizon_steps = 8;
     local_cfg.dt_sec = 0.05;
     local_cfg.update_period_sec = 0.05;
     local_cfg.enable_collision_cost = true;
     local_cfg.enable_collision_constraint = true;
-    rt::ReactiveTaskLocalPlanner local_planner(local_cfg);
+    rt::ArmLocalPlanner local_planner(local_cfg);
 
-    rt::ReactiveTaskLocalPlanner::Input local_input;
+    rt::ArmLocalPlanner::Input local_input;
     local_input.current_pose = current_pose;
     local_input.joint_names = arm.joint_names;
     local_input.q_current = q_current;
@@ -164,12 +164,12 @@ TEST(TrajOptToNeoReferenceIntegrationTest, RrtConnectAndTrajOptAvoidObservedObst
         }
         local_input.reference_samples.push_back(std::move(sample));
     }
-    local_input.sphere_obstacles.push_back(rt::ReactiveTaskLocalPlanner::SphereObstacle{
+    local_input.sphere_obstacles.push_back(rt::ArmLocalPlanner::SphereObstacle{
         "camera_observed_obstacle",
         kObservedObstacleCenter,
         kObservedObstacleRadius});
 
-    rt::ReactiveTaskLocalPlanner::Output local_output;
+    rt::ArmLocalPlanner::Output local_output;
     ASSERT_TRUE(local_planner.compute(local_input, &local_output))
         << local_output.error;
     ASSERT_TRUE(local_output.ok) << local_output.error;

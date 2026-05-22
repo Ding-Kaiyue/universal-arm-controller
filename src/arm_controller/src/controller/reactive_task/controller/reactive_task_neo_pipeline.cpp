@@ -1,4 +1,4 @@
-#include "controller/reactive_task/reactive_task_neo_pipeline.hpp"
+#include "controller/reactive_task/controller/reactive_task_neo_pipeline.hpp"
 
 #include <algorithm>
 
@@ -17,18 +17,18 @@ bool ReactiveTaskNeoPipeline::prepare(const PrepareInput& input, PrepareOutput* 
 
     *output = PrepareOutput{};
     output->J =
-        input.jacobian_provider->computeJacobian(input.q_now, "", Eigen::Vector3d::Zero());
-    if (output->J.rows() != 6 || output->J.cols() != input.q_now.size()) {
+        input.jacobian_provider->computeJacobian(input.arm_state.q, "", Eigen::Vector3d::Zero());
+    if (output->J.rows() != 6 || output->J.cols() != input.arm_state.q.size()) {
         return false;
     }
 
     output->J_task = output->J;
 
-    output->manipulability_gradient = Eigen::VectorXd::Zero(input.q_now.size());
+    output->manipulability_gradient = Eigen::VectorXd::Zero(input.arm_state.q.size());
     if (input.manipulability_gradient != nullptr && input.manipulability_cfg != nullptr) {
         double log_m = 0.0;
         const bool ok_manip = input.manipulability_gradient->compute(
-            input.q_now,
+            input.arm_state.q,
             *input.manipulability_cfg,
             output->manipulability_gradient,
             &log_m);
@@ -37,10 +37,10 @@ bool ReactiveTaskNeoPipeline::prepare(const PrepareInput& input, PrepareOutput* 
         }
     }
 
-    output->posture_joint_weights = Eigen::VectorXd::Ones(input.q_now.size());
+    output->posture_joint_weights = Eigen::VectorXd::Ones(input.arm_state.q.size());
     const bool has_local_joint_target =
         input.local_planner_joint_target != nullptr &&
-        input.local_planner_joint_target->size() == input.q_now.size() &&
+        input.local_planner_joint_target->size() == input.arm_state.q.size() &&
         input.local_planner_joint_target->allFinite();
     if (has_local_joint_target) {
         const bool tracking_local_trajopt_branch =
@@ -52,8 +52,7 @@ bool ReactiveTaskNeoPipeline::prepare(const PrepareInput& input, PrepareOutput* 
     }
     ReactiveTaskTerminalPolicy::PostureReferenceInput posture_input;
     posture_input.flags = *input.phase_flags;
-    posture_input.q_now = input.q_now;
-    posture_input.qd_max = input.qd_max;
+    posture_input.arm_state = input.arm_state;
     posture_input.path_follow_joint_anchor_sample =
         input.path_follow_joint_anchor_sample_valid ? input.path_follow_joint_anchor_sample : nullptr;
     posture_input.path_follow_joint_anchor_sample_valid =
@@ -65,20 +64,20 @@ bool ReactiveTaskNeoPipeline::prepare(const PrepareInput& input, PrepareOutput* 
     ReactiveTaskTerminalPolicy terminal_policy;
     output->posture_qdot_ref = terminal_policy.buildPostureReference(posture_input);
 
-    output->qp_input.q_current = input.q_now;
+    output->qp_input.q_current = input.arm_state.q;
     output->qp_input.jacobian_task = output->J_task;
     output->qp_input.desired_twist = input.task_out->v_des;
     output->qp_input.manipulability_gradient = output->manipulability_gradient;
     output->qp_input.posture_velocity_reference = output->posture_qdot_ref;
     if (input.exec_ctx->previous_qdot_reference_valid &&
-        input.exec_ctx->previous_qdot_reference.size() == input.q_now.size()) {
+        input.exec_ctx->previous_qdot_reference.size() == input.arm_state.q.size()) {
         output->qp_input.previous_qdot_reference = input.exec_ctx->previous_qdot_reference;
     }
     output->qp_input.posture_joint_weights = output->posture_joint_weights;
-    output->qp_input.qd_min = input.qd_min;
-    output->qp_input.qd_max = input.qd_max;
-    output->qp_input.joint_limits.q_min = input.joint_limits.q_min;
-    output->qp_input.joint_limits.q_max = input.joint_limits.q_max;
+    output->qp_input.qd_min = input.arm_state.qd_min;
+    output->qp_input.qd_max = input.arm_state.qd_max;
+    output->qp_input.joint_limits.q_min = input.arm_state.joint_limits.q_min;
+    output->qp_input.joint_limits.q_max = input.arm_state.joint_limits.q_max;
     output->ok = true;
     return true;
 }
@@ -116,7 +115,7 @@ bool ReactiveTaskNeoPipeline::solve(const SolveInput& input, SolveOutput* output
         return false;
     }
 
-    const int dof = static_cast<int>(input.qd_min.size());
+    const int dof = static_cast<int>(input.arm_state.qd_min.size());
     output->qdot_cmd.assign(static_cast<std::size_t>(dof), 0.0);
     output->qdot_eigen = Eigen::VectorXd::Zero(dof);
     for (int i = 0; i < dof; ++i) {
@@ -132,7 +131,7 @@ bool ReactiveTaskNeoPipeline::solve(const SolveInput& input, SolveOutput* output
     }
     for (int i = 0; i < dof; ++i) {
         output->qdot_eigen(i) =
-            std::clamp(output->qdot_eigen(i), input.qd_min(i), input.qd_max(i));
+            std::clamp(output->qdot_eigen(i), input.arm_state.qd_min(i), input.arm_state.qd_max(i));
         output->qdot_cmd[static_cast<std::size_t>(i)] = output->qdot_eigen(i);
     }
 

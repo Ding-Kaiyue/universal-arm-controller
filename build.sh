@@ -28,6 +28,7 @@ DEV_MEMORY_HINT_GB=32
 ENABLE_LTO_DEFAULT=OFF
 DEV_MODE=false
 BUILD_PROFILE="safe"
+BUILD_TARGET_PROFILE="workspace"
 
 # ===============================
 # Logging helpers
@@ -41,10 +42,20 @@ show_help() {
 Universal Arm Controller - Safe Build Script
 
 USAGE:
-  ./build.sh [OPTIONS] [-- COLCON_ARGS]
+  ./build.sh [PROFILE] [OPTIONS] [-- COLCON_ARGS]
+
+PROFILES:
+  workspace          Build the whole workspace with default options (default)
+  arm-full           Build only arm_controller with all controller families enabled
+  motion             Build only arm_controller with motion controllers enabled
+
+EXAMPLES:
+  ./build.sh motion
+  ./build.sh arm-full --dev
 
 OPTIONS:
   --dev              Developer build (LTO enabled, higher memory peak)
+  --profile NAME     Select a build profile explicitly
   --help             Show this help message
 
 DEFAULT BEHAVIOR:
@@ -85,6 +96,23 @@ COLCON_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    workspace|arm-full|motion)
+      BUILD_TARGET_PROFILE="$1"
+      shift
+      ;;
+    --profile)
+      shift
+      [[ $# -gt 0 ]] || error "--profile requires a value"
+      case "$1" in
+        workspace|arm-full|motion)
+          BUILD_TARGET_PROFILE="$1"
+          ;;
+        *)
+          error "Unknown build profile: $1 (use --help)"
+          ;;
+      esac
+      shift
+      ;;
     --dev)
       DEV_MODE=true
       ENABLE_LTO_DEFAULT=ON
@@ -174,10 +202,43 @@ if [[ -n "$CMAKE_PREFIX_PATH_ARG" ]]; then
   CMAKE_PREFIX_PATH_ARG="-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH_ARG}"
 fi
 
-BUILD_ARGS=(
+BASE_COLCON_ARGS=(
   "--executor" "sequential"
   "--parallel-workers" "1"
+)
+
+PROFILE_COLCON_ARGS=()
+PROFILE_CMAKE_ARGS=()
+
+case "$BUILD_TARGET_PROFILE" in
+  workspace)
+    ;;
+  arm-full)
+    PROFILE_COLCON_ARGS+=("--packages-select" "arm_controller" "--allow-overriding" "arm_controller")
+    PROFILE_CMAKE_ARGS+=(
+      "-DARM_CONTROLLER_BUILD_MOTION_CONTROLLERS=ON"
+      "-DARM_CONTROLLER_BUILD_VELOCITY_CONTROLLERS=ON"
+      "-DARM_CONTROLLER_BUILD_TEACH_CONTROLLERS=ON"
+    )
+    ;;
+  motion)
+    PROFILE_COLCON_ARGS+=("--packages-select" "arm_controller" "--allow-overriding" "arm_controller")
+    PROFILE_CMAKE_ARGS+=(
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+      "-DARM_CONTROLLER_BUILD_MOTION_CONTROLLERS=ON"
+      "-DARM_CONTROLLER_BUILD_VELOCITY_CONTROLLERS=OFF"
+      "-DARM_CONTROLLER_BUILD_TEACH_CONTROLLERS=OFF"
+      "-DBUILD_PYTHON_IPC_BINDINGS=OFF"
+    )
+    ;;
+  *)
+    error "Unknown build profile: ${BUILD_TARGET_PROFILE}"
+    ;;
+esac
+
+CMAKE_ARGS=(
   "--cmake-args"
+  "-Wno-dev"
   "-DCMAKE_BUILD_TYPE=Release"
   "-DCMAKE_BUILD_PARALLEL_LEVEL=1"
   "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=${ENABLE_LTO_DEFAULT}"
@@ -186,31 +247,35 @@ BUILD_ARGS=(
 )
 
 if [[ -n "$CMAKE_PREFIX_PATH_ARG" ]]; then
-  BUILD_ARGS+=("$CMAKE_PREFIX_PATH_ARG")
+  CMAKE_ARGS+=("$CMAKE_PREFIX_PATH_ARG")
 fi
+
+BUILD_ARGS=(
+  "${BASE_COLCON_ARGS[@]}"
+  "${PROFILE_COLCON_ARGS[@]}"
+)
 
 if [[ ${#COLCON_ARGS[@]} -gt 0 ]]; then
   BUILD_ARGS+=("${COLCON_ARGS[@]}")
 fi
 
+BUILD_ARGS+=(
+  "${CMAKE_ARGS[@]}"
+  "${PROFILE_CMAKE_ARGS[@]}"
+)
+
 # ===============================
 # Install layout conflict handling
 # ===============================
 if [[ -d install ]]; then
-  TMP_ERR=$(mktemp)
-  set +e
-  colcon build "${BUILD_ARGS[@]}" 1>/dev/null 2>"$TMP_ERR"
-  RET=$?
-  set -e
-
-  if [[ $RET -ne 0 ]] && grep -q "layout 'merged'" "$TMP_ERR"; then
+  INSTALL_LAYOUT_FILE="install/.colcon_install_layout"
+  if [[ -f "$INSTALL_LAYOUT_FILE" ]] && [[ "$(cat "$INSTALL_LAYOUT_FILE")" == "merged" ]]; then
     ts=$(date +%Y%m%d_%H%M%S)
     backup="install_backup_${ts}"
     warn "Install layout conflict detected."
     warn "Backing up existing install/ -> ${backup}"
     mv install "$backup"
   fi
-  rm -f "$TMP_ERR"
 fi
 
 # ===============================
@@ -218,6 +283,7 @@ fi
 # ===============================
 info "Starting build..."
 info "Build profile : ${BUILD_PROFILE}"
+info "Target profile: ${BUILD_TARGET_PROFILE}"
 info "LTO           : ${ENABLE_LTO_DEFAULT}"
 info "Total memory  : ${TOTAL_GB}GB"
 info ""

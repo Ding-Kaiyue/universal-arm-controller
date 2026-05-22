@@ -3,17 +3,13 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
-#include <future>
 #include <limits>
-#include <vector>
 
-#include "reactive_task_local_planner.hpp"
-#include "reactive_task_types.hpp"
+#include "controller/reactive_task/local_planner/reactive_task_async_local_planner_runner.hpp"
+#include "controller/reactive_task/local_planner/reactive_task_local_planner_runtime.hpp"
+#include "controller/reactive_task/controller/reactive_task_types.hpp"
 
 namespace arm_controller::controller::reactive_task {
-
-using JointVectorList =
-    std::vector<Eigen::VectorXd, Eigen::aligned_allocator<Eigen::VectorXd>>;
 
 struct ReactiveTaskExecutionContext {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -45,33 +41,8 @@ struct ReactiveTaskExecutionContext {
   Eigen::Matrix<double, 6, 1> previous_nominal_twist{
       Eigen::Matrix<double, 6, 1>::Zero()};
   bool previous_nominal_twist_valid{false};
-  Eigen::Isometry3d last_local_planner_target_pose{Eigen::Isometry3d::Identity()};
-  Eigen::Matrix<double, 6, 1> last_local_planner_target_twist{
-      Eigen::Matrix<double, 6, 1>::Zero()};
-  Eigen::VectorXd last_local_planner_joint_target;
-  double last_local_planner_joint_target_dt_sec{0.0};
-  double last_local_planner_update_time_sec{-std::numeric_limits<double>::infinity()};
-  bool last_local_planner_output_valid{false};
-  std::vector<Eigen::Isometry3d, Eigen::aligned_allocator<Eigen::Isometry3d>>
-      local_planner_target_poses;
-  std::vector<
-      Eigen::Matrix<double, 6, 1>,
-      Eigen::aligned_allocator<Eigen::Matrix<double, 6, 1>>>
-      local_planner_target_twists;
-  JointVectorList local_planner_joint_targets;
-  double local_planner_start_time_sec{0.0};
-  std::size_t local_planner_start_index{0};
-  double local_planner_dt_sec{0.05};
-  bool local_planner_trajectory_valid{false};
-  std::future<ReactiveTaskLocalPlanner::Output> pending_local_planner_future;
-  bool pending_local_planner_valid{false};
-  double pending_local_planner_request_time_sec{
-      -std::numeric_limits<double>::infinity()};
-  int pending_local_planner_tick{0};
-  int local_planner_generation{0};
-  int pending_local_planner_generation{0};
-  Eigen::VectorXd pending_local_planner_q_start;
-  Eigen::VectorXd pending_local_planner_q_goal;
+  LocalPlannerRuntime local_planner;
+  AsyncLocalPlannerRunner local_planner_runner;
 
   int path_follow_joint_anchor_index_state{0};
 

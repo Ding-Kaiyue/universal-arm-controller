@@ -1,6 +1,6 @@
-#include "reactive_task_controller.hpp"
+#include "controller/reactive_task/reactive_task_controller.hpp"
 
-#include "reactive_task_planning_helpers.hpp"
+#include "controller/reactive_task/global_planner/reactive_task_planning_helpers.hpp"
 
 #include <algorithm>
 #include <cmath>

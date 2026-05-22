@@ -13,8 +13,9 @@
 #include "algorithm/neo/reactive_qp_solver.hpp"
 #include "algorithm/neo/task_velocity_generator.hpp"
 #include "arm_controller/kinematics/jacobian_provider.hpp"
-#include "controller/reactive_task/reactive_task_execution_context.hpp"
-#include "controller/reactive_task/reactive_task_terminal_policy.hpp"
+#include "controller/reactive_task/controller/reactive_task_execution_context.hpp"
+#include "controller/reactive_task/controller/reactive_task_terminal_policy.hpp"
+#include "controller/reactive_task/controller/reactive_task_types.hpp"
 
 namespace arm_controller::controller::reactive_task {
 
@@ -26,10 +27,7 @@ public:
     struct PrepareInput {
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-        Eigen::VectorXd q_now;
-        Eigen::VectorXd qd_min;
-        Eigen::VectorXd qd_max;
-        rq::JointLimitData joint_limits;
+        ArmState arm_state;
         const arm_controller::kinematics::JacobianProvider* jacobian_provider{nullptr};
         const rq::TaskVelocityOutput* task_out{nullptr};
         const ReactiveTaskTerminalPolicy::PhaseFlags* phase_flags{nullptr};
@@ -64,8 +62,7 @@ public:
         const rq::ReactiveQpBuildInput* qp_input{nullptr};
         const rq::ReactiveQpBuildConfig* qp_build_cfg{nullptr};
         rq::ReactiveQpSolver* solver{nullptr};
-        Eigen::VectorXd qd_min;
-        Eigen::VectorXd qd_max;
+        ArmState arm_state;
         const Eigen::MatrixXd* task_jacobian{nullptr};
         const Eigen::Matrix<double, 6, 1>* desired_twist{nullptr};
         rclcpp::Logger logger{rclcpp::get_logger("reactive_task_neo_pipeline")};

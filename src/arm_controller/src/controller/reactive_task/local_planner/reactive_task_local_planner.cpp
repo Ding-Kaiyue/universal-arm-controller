@@ -11,7 +11,7 @@
  * @author Ding Kaiyue
  * @date 2026-05-20
  */
-#include "controller/reactive_task/reactive_task_local_planner.hpp"
+#include "controller/reactive_task/local_planner/reactive_task_local_planner.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -147,7 +147,7 @@ Eigen::Vector3d inactiveObstacleCenter(const int index) {
                         kInactiveObstacleOffsetM);
 }
 
-double obstacleSlotRadius(const ReactiveTaskLocalPlanner::Input &input) {
+double obstacleSlotRadius(const ArmLocalPlanner::Input &input) {
     double radius = 0.0;
     for (const auto &obstacle : input.sphere_obstacles) {
         if (std::isfinite(obstacle.radius) && obstacle.radius > radius) {
@@ -163,7 +163,7 @@ int quantizedObstacleRadiusMm(const double radius_m) {
 
 std::shared_ptr<tesseract_environment::Environment>makeWorkingEnvironment(
     const std::shared_ptr<const tesseract_environment::Environment> &base_env,
-    const ReactiveTaskLocalPlanner::Input &input,
+    const ArmLocalPlanner::Input &input,
     const int slot_count,
     std::string *error) {
     if (!base_env) {
@@ -224,17 +224,17 @@ tesseract_common::ContactManagersPluginInfo makeBulletContactManagerInfo() {
 
 } // namespace
 
-ReactiveTaskLocalPlanner::ReactiveTaskLocalPlanner()
-    : ReactiveTaskLocalPlanner(Config{}) {}
+ArmLocalPlanner::ArmLocalPlanner()
+    : ArmLocalPlanner(Config{}) {}
 
-ReactiveTaskLocalPlanner::ReactiveTaskLocalPlanner(Config cfg)
+ArmLocalPlanner::ArmLocalPlanner(Config cfg)
     : cfg_(std::move(cfg)) {}
 
-void ReactiveTaskLocalPlanner::configure(Config cfg) {
+void ArmLocalPlanner::configure(Config cfg) {
     cfg_ = std::move(cfg);
 }
 
-bool ReactiveTaskLocalPlanner::compute(const Input &input,
+bool ArmLocalPlanner::compute(const Input &input,
                                            Output *output) const {
     if (output == nullptr) {
         return false;
@@ -519,7 +519,7 @@ bool ReactiveTaskLocalPlanner::compute(const Input &input,
     return true;
 }
 
-std::shared_ptr<const void> ReactiveTaskLocalPlanner::getOrCreateTesseractEnvironment(const Input &input, std::string *error) const {
+std::shared_ptr<const void> ArmLocalPlanner::getOrCreateTesseractEnvironment(const Input &input, std::string *error) const {
     const std::string cache_key = makeEnvironmentCacheKey(input);
     {
         std::lock_guard<std::mutex> lock(tesseract_env_mutex_);
@@ -634,7 +634,7 @@ std::shared_ptr<const void> ReactiveTaskLocalPlanner::getOrCreateTesseractEnviro
     return env;
 }
 
-std::string ReactiveTaskLocalPlanner::makeEnvironmentCacheKey(const Input &input) const {
+std::string ArmLocalPlanner::makeEnvironmentCacheKey(const Input &input) const {
     std::ostringstream oss;
     oss << input.robot_type << '|' << input.planning_group << '|'
         << input.base_link << '|' << input.tip_link << '|' << input.urdf_path

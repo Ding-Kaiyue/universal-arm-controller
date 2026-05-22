@@ -1,6 +1,6 @@
 #pragma once
 
-#include "reactive_task_types.hpp"
+#include "controller/reactive_task/controller/reactive_task_types.hpp"
 
 namespace arm_controller::controller::reactive_task {
 

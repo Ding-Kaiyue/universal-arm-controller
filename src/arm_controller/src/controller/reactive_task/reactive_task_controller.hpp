@@ -27,16 +27,18 @@
 #include "algorithm/neo/task_velocity_generator.hpp"
 #include "arm_controller/kinematics/forward_kinematics.hpp"
 #include "arm_controller/kinematics/jacobian_provider.hpp"
-#include "controller/reactive_task/reactive_task_diagnostics_publisher.hpp"
-#include "controller/reactive_task/reactive_task_environment_probe.hpp"
-#include "controller/reactive_task/reactive_task_execution_context.hpp"
-#include "controller/reactive_task/reactive_task_execution_state_machine.hpp"
-#include "controller/reactive_task/reactive_task_local_reference_manager.hpp"
-#include "controller/reactive_task/reactive_task_local_planner.hpp"
-#include "controller/reactive_task/reactive_task_neo_pipeline.hpp"
-#include "controller/reactive_task/reactive_task_safety_policy.hpp"
-#include "controller/reactive_task/reactive_task_terminal_policy.hpp"
-#include "controller/reactive_task/reactive_task_watchdog.hpp"
+#include "controller/reactive_task/diagnostics/reactive_task_diagnostics_publisher.hpp"
+#include "controller/reactive_task/controller/reactive_task_control_target_builder.hpp"
+#include "controller/reactive_task/obstacle/reactive_task_environment_probe.hpp"
+#include "controller/reactive_task/controller/reactive_task_execution_context.hpp"
+#include "controller/reactive_task/controller/reactive_task_execution_state_machine.hpp"
+#include "controller/reactive_task/local_planner/reactive_task_local_reference_manager.hpp"
+#include "controller/reactive_task/local_planner/reactive_task_local_planner.hpp"
+#include "controller/reactive_task/controller/reactive_task_neo_pipeline.hpp"
+#include "controller/reactive_task/obstacle/reactive_task_obstacle_selector.hpp"
+#include "controller/reactive_task/controller/reactive_task_safety_policy.hpp"
+#include "controller/reactive_task/controller/reactive_task_terminal_policy.hpp"
+#include "controller/reactive_task/controller/reactive_task_watchdog.hpp"
 #include "controller_base/trajectory_controller_base.hpp"
 #include "hardware/hardware_manager.hpp"
 #include "trajectory_planning_v3/infrastructure/integration/moveit_adapter.hpp"
@@ -61,8 +63,8 @@ public:
   struct ControllerRuntimeConfig {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-    arm_controller::controller::reactive_task::ReactiveTaskLocalPlanner::
-        Config local_planner;
+    arm_controller::controller::reactive_task::ArmLocalPlanner::Config
+        local_planner;
     arm_controller::algorithm::cartesian_path_planner::GlobalTrajectoryConfig
         global_trajectory;
     arm_controller::algorithm::cartesian_path_planner::PlannerCommonConfig
@@ -252,10 +254,13 @@ private:
       diagnostics_publisher_;
   arm_controller::controller::reactive_task::ReactiveTaskEnvironmentProbe
       environment_probe_;
+  arm_controller::controller::reactive_task::ReactiveTaskControlTargetBuilder
+      control_target_builder_;
   arm_controller::controller::reactive_task::ReactiveTaskNeoPipeline
       neo_pipeline_;
-  arm_controller::controller::reactive_task::ReactiveTaskLocalPlanner
-      local_planner_;
+  arm_controller::controller::reactive_task::ArmLocalPlanner local_planner_;
+  arm_controller::controller::reactive_task::ReactiveTaskObstacleSelector
+      obstacle_selector_;
 
   std::map<std::string, bool> last_execution_success_;
 

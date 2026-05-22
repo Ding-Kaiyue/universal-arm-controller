@@ -14,6 +14,41 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <yaml-cpp/yaml.h>
 
+#ifndef ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS
+#define ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS 1
+#endif
+#ifndef ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
+#define ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS 1
+#endif
+#ifndef ARM_CONTROLLER_ENABLE_TEACH_CONTROLLERS
+#define ARM_CONTROLLER_ENABLE_TEACH_CONTROLLERS 1
+#endif
+
+namespace {
+
+bool is_controller_enabled_for_build(const std::string& key) {
+#if !ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
+    if (key == "JointVelocity" || key == "CartesianVelocity" ||
+        key == "MinkServo" || key == "CommandStreaming") {
+        return false;
+    }
+#endif
+#if !ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS
+    if (key == "MoveJ" || key == "MoveL" || key == "MoveC" ||
+        key == "ReactiveTask") {
+        return false;
+    }
+#endif
+#if !ARM_CONTROLLER_ENABLE_TEACH_CONTROLLERS
+    if (key == "TrajectoryRecord" || key == "TrajectoryReplay") {
+        return false;
+    }
+#endif
+    return true;
+}
+
+}  // namespace
+
 ControllerManagerNode::ControllerManagerNode()
     : Node("controller_manager_node")
 {
@@ -211,6 +246,13 @@ void ControllerManagerNode::init_controllers() {
         for (const auto& entry : yaml_config_["controllers"]) {
             std::string key = entry["key"].as<std::string>();
             std::string class_name = entry["class"].as<std::string>();
+
+            if (!is_controller_enabled_for_build(key)) {
+                RCLCPP_DEBUG(this->get_logger(),
+                             "[controllers] Skipping %s (class: %s): disabled by build profile",
+                             key.c_str(), class_name.c_str());
+                continue;
+            }
 
             // 从 YAML 提取默认 topic 值
             std::string default_input_topic, default_output_topic;

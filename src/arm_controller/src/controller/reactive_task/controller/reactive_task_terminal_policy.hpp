@@ -6,7 +6,7 @@
 #include "algorithm/cartesian_path_planner/types.hpp"
 #include "algorithm/neo/joint_preference_loader.hpp"
 #include "algorithm/neo/task_velocity_generator.hpp"
-#include "controller/reactive_task/reactive_task_execution_context.hpp"
+#include "controller/reactive_task/controller/reactive_task_execution_context.hpp"
 
 namespace arm_controller::controller::reactive_task {
 
@@ -34,8 +34,7 @@ public:
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
         PhaseFlags flags;
-        Eigen::VectorXd q_now;
-        Eigen::VectorXd qd_max;
+        ArmState arm_state;
         const cp::TimedCartesianSample* path_follow_joint_anchor_sample{nullptr};
         bool path_follow_joint_anchor_sample_valid{false};
         const cp::TimedCartesianSample* current_sample{nullptr};

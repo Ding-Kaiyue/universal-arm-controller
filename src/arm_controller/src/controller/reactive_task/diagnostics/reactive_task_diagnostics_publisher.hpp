@@ -13,7 +13,7 @@
 #include "algorithm/cartesian_path_planner/global_trajectory/global_trajectory_manager.hpp"
 #include "algorithm/neo/body_obstacle_constraint_builder.hpp"
 #include "arm_controller/kinematics/forward_kinematics.hpp"
-#include "reactive_task_types.hpp"
+#include "controller/reactive_task/controller/reactive_task_types.hpp"
 
 namespace arm_controller::controller::reactive_task {
 
