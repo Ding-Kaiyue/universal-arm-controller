@@ -48,9 +48,15 @@ PROFILES:
   workspace          Build the whole workspace with default options (default)
   arm-full           Build only arm_controller with all controller families enabled
   motion             Build only arm_controller with motion controllers enabled
+  velocity           Build only arm_controller with velocity controllers enabled
+  teach              Build only arm_controller with teach controllers enabled
+  motion-velocity    Build only arm_controller with motion + velocity controllers enabled
+  motion-teach       Build only arm_controller with motion + teach controllers enabled
+  velocity-teach     Build only arm_controller with velocity + teach controllers enabled
 
 EXAMPLES:
   ./build.sh motion
+  ./build.sh velocity
   ./build.sh arm-full --dev
 
 OPTIONS:
@@ -96,7 +102,7 @@ COLCON_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    workspace|arm-full|motion)
+    workspace|arm-full|motion|velocity|teach|motion-velocity|motion-teach|velocity-teach)
       BUILD_TARGET_PROFILE="$1"
       shift
       ;;
@@ -104,7 +110,7 @@ while [[ $# -gt 0 ]]; do
       shift
       [[ $# -gt 0 ]] || error "--profile requires a value"
       case "$1" in
-        workspace|arm-full|motion)
+        workspace|arm-full|motion|velocity|teach|motion-velocity|motion-teach|velocity-teach)
           BUILD_TARGET_PROFILE="$1"
           ;;
         *)
@@ -231,6 +237,56 @@ case "$BUILD_TARGET_PROFILE" in
       "-DBUILD_PYTHON_IPC_BINDINGS=OFF"
     )
     ;;
+  velocity)
+    PROFILE_COLCON_ARGS+=("--packages-select" "arm_controller" "--allow-overriding" "arm_controller")
+    PROFILE_CMAKE_ARGS+=(
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+      "-DARM_CONTROLLER_BUILD_MOTION_CONTROLLERS=OFF"
+      "-DARM_CONTROLLER_BUILD_VELOCITY_CONTROLLERS=ON"
+      "-DARM_CONTROLLER_BUILD_TEACH_CONTROLLERS=OFF"
+      "-DBUILD_PYTHON_IPC_BINDINGS=OFF"
+    )
+    ;;
+  teach)
+    PROFILE_COLCON_ARGS+=("--packages-select" "arm_controller" "--allow-overriding" "arm_controller")
+    PROFILE_CMAKE_ARGS+=(
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+      "-DARM_CONTROLLER_BUILD_MOTION_CONTROLLERS=OFF"
+      "-DARM_CONTROLLER_BUILD_VELOCITY_CONTROLLERS=OFF"
+      "-DARM_CONTROLLER_BUILD_TEACH_CONTROLLERS=ON"
+      "-DBUILD_PYTHON_IPC_BINDINGS=OFF"
+    )
+    ;;
+  motion-velocity)
+    PROFILE_COLCON_ARGS+=("--packages-select" "arm_controller" "--allow-overriding" "arm_controller")
+    PROFILE_CMAKE_ARGS+=(
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+      "-DARM_CONTROLLER_BUILD_MOTION_CONTROLLERS=ON"
+      "-DARM_CONTROLLER_BUILD_VELOCITY_CONTROLLERS=ON"
+      "-DARM_CONTROLLER_BUILD_TEACH_CONTROLLERS=OFF"
+      "-DBUILD_PYTHON_IPC_BINDINGS=OFF"
+    )
+    ;;
+  motion-teach)
+    PROFILE_COLCON_ARGS+=("--packages-select" "arm_controller" "--allow-overriding" "arm_controller")
+    PROFILE_CMAKE_ARGS+=(
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+      "-DARM_CONTROLLER_BUILD_MOTION_CONTROLLERS=ON"
+      "-DARM_CONTROLLER_BUILD_VELOCITY_CONTROLLERS=OFF"
+      "-DARM_CONTROLLER_BUILD_TEACH_CONTROLLERS=ON"
+      "-DBUILD_PYTHON_IPC_BINDINGS=OFF"
+    )
+    ;;
+  velocity-teach)
+    PROFILE_COLCON_ARGS+=("--packages-select" "arm_controller" "--allow-overriding" "arm_controller")
+    PROFILE_CMAKE_ARGS+=(
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+      "-DARM_CONTROLLER_BUILD_MOTION_CONTROLLERS=OFF"
+      "-DARM_CONTROLLER_BUILD_VELOCITY_CONTROLLERS=ON"
+      "-DARM_CONTROLLER_BUILD_TEACH_CONTROLLERS=ON"
+      "-DBUILD_PYTHON_IPC_BINDINGS=OFF"
+    )
+    ;;
   *)
     error "Unknown build profile: ${BUILD_TARGET_PROFILE}"
     ;;
@@ -240,6 +296,8 @@ CMAKE_ARGS=(
   "--cmake-args"
   "-Wno-dev"
   "-DCMAKE_BUILD_TYPE=Release"
+  "-DBUILD_TESTING=OFF"
+  "-DARM_CONTROLLER_ENABLE_COVERAGE=OFF"
   "-DCMAKE_BUILD_PARALLEL_LEVEL=1"
   "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=${ENABLE_LTO_DEFAULT}"
   "-DCMAKE_EXE_LINKER_FLAGS=${LINKER_FLAGS}"

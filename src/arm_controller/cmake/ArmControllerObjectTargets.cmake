@@ -1,0 +1,266 @@
+# Layered object libraries used by the aggregate arm_controller_lib target.
+
+add_library(arm_controller_runtime_objects OBJECT
+  src/controller_manager_section.cpp
+  src/trajectory_controller_section.cpp
+  src/hardware/hardware_manager.cpp
+  src/hardware/motor_data_recorder.cpp
+  src/hardware/recorder_manager.cpp
+  src/hardware/motor_data_reloader.cpp
+  src/dynamics/gravity_compensator.cpp
+  src/controller/controller_registry.cpp
+  src/utils/trajectory_converter.cpp
+  src/arm_controller_api.cpp
+  src/ipc/shm_manager.cpp
+  src/ipc/command_producer.cpp
+  src/ipc/controller_state_manager.cpp
+  src/ipc/ipc_context.cpp
+)
+arm_controller_configure_object_target(arm_controller_runtime_objects)
+arm_controller_apply_feature_definitions(arm_controller_runtime_objects)
+ament_target_dependencies(arm_controller_runtime_objects
+  ${ARM_CONTROLLER_COMMON_AMENT_DEPS}
+)
+target_link_libraries(arm_controller_runtime_objects
+  hardware_driver::hardware_driver_canfd
+  osqp::osqp
+  csaps::csaps
+  pinocchio::pinocchio
+  yaml-cpp
+)
+
+if(ARM_CONTROLLER_BUILD_VELOCITY_CONTROLLERS OR ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
+  add_library(arm_controller_kinematics_objects OBJECT
+    src/kinematics/forward_kinematics.cpp
+    src/kinematics/jacobian_provider.cpp
+  )
+  arm_controller_configure_object_target(arm_controller_kinematics_objects)
+  ament_target_dependencies(arm_controller_kinematics_objects
+    rclcpp
+    trajectory_planning_v3
+    Eigen3
+    pinocchio
+  )
+  target_link_libraries(arm_controller_kinematics_objects
+    pinocchio::pinocchio
+  )
+endif()
+
+if(ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
+  add_library(arm_controller_neo_objects OBJECT
+    src/algorithm/neo/hessian_builder.cpp
+    src/algorithm/neo/joint_preference_loader.cpp
+    src/algorithm/neo/joint_limit_damper.cpp
+    src/algorithm/neo/manipulability_gradient.cpp
+    src/algorithm/neo/manipulator_hessian_tensor.cpp
+    src/algorithm/neo/body_obstacle_constraint_builder.cpp
+    src/algorithm/neo/obstacle_damper.cpp
+    src/algorithm/neo/reactive_qp_builder.cpp
+    src/algorithm/neo/reactive_qp_problem.cpp
+    src/algorithm/neo/reactive_qp_solver.cpp
+    src/algorithm/neo/reactive_qp_validator.cpp
+    src/algorithm/neo/task_velocity_generator.cpp
+  )
+  arm_controller_configure_object_target(arm_controller_neo_objects)
+  ament_target_dependencies(arm_controller_neo_objects
+    rclcpp
+    Eigen3
+    pinocchio
+    trajectory_planning_v3
+  )
+  target_link_libraries(arm_controller_neo_objects
+    osqp::osqp
+    pinocchio::pinocchio
+  )
+endif()
+
+if(ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
+  add_library(arm_controller_planning_objects OBJECT
+    src/algorithm/cartesian_path_planner/collision/cartesian_collision_checker.cpp
+    src/algorithm/cartesian_path_planner/collision/clearance_evaluator.cpp
+    src/algorithm/cartesian_path_planner/collision/whole_body_ellipsoid_collision_checker.cpp
+    src/algorithm/cartesian_path_planner/core/trajectory_parameterizer.cpp
+    src/algorithm/global_planner/ompl_rrt_connect_global_planner.cpp
+    src/algorithm/cartesian_path_planner/map/dummy_distance_field.cpp
+    src/algorithm/cartesian_path_planner/map/camera_driver_pointcloud_map_adapter.cpp
+    src/algorithm/cartesian_path_planner/map/camera_driver_esdf_map_client.cpp
+    src/algorithm/cartesian_path_planner/global_trajectory/global_trajectory_manager.cpp
+    src/algorithm/cartesian_path_planner/smoothing/shortcut_smoother.cpp
+    src/algorithm/cartesian_path_planner/sampling/reference_sampler.cpp
+    src/algorithm/sphere_model/link_sphere_model.cpp
+  )
+  arm_controller_configure_object_target(arm_controller_planning_objects)
+  target_include_directories(arm_controller_planning_objects
+    SYSTEM PRIVATE
+      ${OMPL_INCLUDE_DIRS}
+  )
+  ament_target_dependencies(arm_controller_planning_objects
+    rclcpp
+    sensor_msgs
+    controller_interfaces
+    trajectory_interpolator
+    trajectory_planning_v3
+    Eigen3
+    pinocchio
+  )
+  target_link_libraries(arm_controller_planning_objects
+    pinocchio::pinocchio
+    ${OMPL_LIBRARIES}
+  )
+endif()
+
+add_library(arm_controller_core_controller_objects OBJECT
+  src/controller/system_start/system_start_controller.cpp
+  src/controller/hold_state/hold_state_controller.cpp
+  src/controller/move2initial/move2initial_controller.cpp
+  src/controller/move2initial/move2initial_interface.cpp
+  src/controller/move2start/move2start_controller.cpp
+  src/controller/move2start/move2start_interface.cpp
+  src/controller/ros2_action_control/ros2_action_control_controller.cpp
+  src/controller/basic_ops/basic_ops_ipc_interface.cpp
+  src/controller/basic_ops/basic_ops_ipc_service.cpp
+)
+arm_controller_configure_object_target(arm_controller_core_controller_objects)
+ament_target_dependencies(arm_controller_core_controller_objects
+  ${ARM_CONTROLLER_COMMON_AMENT_DEPS}
+)
+target_link_libraries(arm_controller_core_controller_objects
+  hardware_driver::hardware_driver_canfd
+  csaps::csaps
+  pinocchio::pinocchio
+  yaml-cpp
+)
+
+if(ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
+  add_library(arm_controller_motion_controller_objects OBJECT
+    src/controller/movec/movec_controller.cpp
+    src/controller/movec/movec_interface.cpp
+    src/controller/movec/movec_ipc_interface.cpp
+    src/controller/movej/movej_controller.cpp
+    src/controller/movej/movej_interface.cpp
+    src/controller/movej/movej_ipc_interface.cpp
+    src/controller/movel/movel_controller.cpp
+    src/controller/movel/movel_interface.cpp
+    src/controller/movel/movel_ipc_interface.cpp
+  )
+  arm_controller_configure_object_target(arm_controller_motion_controller_objects)
+  ament_target_dependencies(arm_controller_motion_controller_objects
+    ${ARM_CONTROLLER_COMMON_AMENT_DEPS}
+  )
+  target_link_libraries(arm_controller_motion_controller_objects
+    hardware_driver::hardware_driver_canfd
+    csaps::csaps
+    yaml-cpp
+  )
+endif()
+
+if(ARM_CONTROLLER_BUILD_VELOCITY_CONTROLLERS)
+  add_library(arm_controller_velocity_controller_objects OBJECT
+    src/utils/velocity_qp_solver.cpp
+    src/utils/velocity_abb_solver.cpp
+    src/utils/velocity_strict_solver.cpp
+    src/controller/joint_velocity/joint_velocity_controller.cpp
+    src/controller/joint_velocity/joint_velocity_interface.cpp
+    src/controller/joint_velocity/joint_velocity_ipc_interface.cpp
+    src/controller/command_streaming/command_streaming_controller.cpp
+    src/controller/command_streaming/command_streaming_interface.cpp
+    src/controller/command_streaming/command_streaming_ipc_interface.cpp
+    src/controller/cartesian_velocity/cartesian_velocity_controller.cpp
+    src/controller/cartesian_velocity/cartesian_velocity_interface.cpp
+    src/controller/cartesian_velocity/cartesian_velocity_ipc_interface.cpp
+  )
+  arm_controller_configure_object_target(arm_controller_velocity_controller_objects)
+  target_compile_definitions(arm_controller_velocity_controller_objects
+    PRIVATE
+      OSQP_EIGEN_OSQP_IS_V1
+      OSQP_EIGEN_OSQP_IS_V1_FINAL
+  )
+  ament_target_dependencies(arm_controller_velocity_controller_objects
+    ${ARM_CONTROLLER_COMMON_AMENT_DEPS}
+  )
+  target_link_libraries(arm_controller_velocity_controller_objects
+    hardware_driver::hardware_driver_canfd
+    osqp::osqp
+    pinocchio::pinocchio
+    yaml-cpp
+  )
+endif()
+
+if(ARM_CONTROLLER_BUILD_TEACH_CONTROLLERS)
+  add_library(arm_controller_teach_controller_objects OBJECT
+    src/controller/trajectory_record/trajectory_record_controller.cpp
+    src/controller/trajectory_record/trajectory_record_interface.cpp
+    src/controller/trajectory_record/trajectory_smoother.cpp
+    src/controller/trajectory_record/trajectory_record_ipc_interface.cpp
+    src/controller/trajectory_replay/trajectory_replay_controller.cpp
+    src/controller/trajectory_replay/trajectory_replay_command_section.cpp
+    src/controller/trajectory_replay/trajectory_replay_interface.cpp
+    src/controller/trajectory_replay/trajectory_segmenter.cpp
+    src/controller/trajectory_replay/trajectory_replay_ipc_interface.cpp
+  )
+  arm_controller_configure_object_target(arm_controller_teach_controller_objects)
+  ament_target_dependencies(arm_controller_teach_controller_objects
+    ${ARM_CONTROLLER_COMMON_AMENT_DEPS}
+  )
+  target_link_libraries(arm_controller_teach_controller_objects
+    hardware_driver::hardware_driver_canfd
+    csaps::csaps
+    yaml-cpp
+  )
+endif()
+
+if(ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
+  add_library(arm_controller_reactive_task_core_objects OBJECT
+    src/controller/reactive_task/reactive_task_controller.cpp
+    src/controller/reactive_task/controller/reactive_task_execution_state_machine.cpp
+    src/controller/reactive_task/reactive_task_mapping_context.cpp
+    src/controller/reactive_task/reactive_task_runtime.cpp
+    src/controller/reactive_task/global_planner/reactive_task_planning_execution.cpp
+    src/controller/reactive_task/global_planner/reactive_task_planning_session.cpp
+    src/controller/reactive_task/global_planner/reactive_task_planning_runtime.cpp
+    src/controller/reactive_task/controller/reactive_task_execution_loop.cpp
+    src/controller/reactive_task/config/reactive_task_runtime_config.cpp
+    src/controller/reactive_task/local_planner/reactive_task_async_local_planner_runner.cpp
+    src/controller/reactive_task/controller/reactive_task_control_target_builder.cpp
+    src/controller/reactive_task/diagnostics/reactive_task_diagnostics_publisher.cpp
+    src/controller/reactive_task/obstacle/reactive_task_environment_probe.cpp
+    src/controller/reactive_task/local_planner/reactive_task_local_planner_runtime.cpp
+    src/controller/reactive_task/local_planner/reactive_task_local_reference_manager.cpp
+    src/controller/reactive_task/obstacle/reactive_task_obstacle_selector.cpp
+    src/controller/reactive_task/controller/reactive_task_neo_pipeline.cpp
+    src/controller/reactive_task/controller/reactive_task_terminal_policy.cpp
+    src/controller/reactive_task/controller/reactive_task_safety_policy.cpp
+    src/controller/reactive_task/controller/reactive_task_watchdog.cpp
+    src/controller/reactive_task/reactive_task_interface.cpp
+    src/controller/reactive_task/reactive_task_ipc_interface.cpp
+  )
+  arm_controller_configure_object_target(arm_controller_reactive_task_core_objects)
+  ament_target_dependencies(arm_controller_reactive_task_core_objects
+    ${ARM_CONTROLLER_COMMON_AMENT_DEPS}
+  )
+  target_link_libraries(arm_controller_reactive_task_core_objects
+    hardware_driver::hardware_driver_canfd
+    osqp::osqp
+    csaps::csaps
+    pinocchio::pinocchio
+    yaml-cpp
+    ${OMPL_LIBRARIES}
+  )
+endif()
+
+if(ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
+  add_library(arm_controller_motion_local_planner_objects OBJECT
+    src/controller/reactive_task/local_planner/reactive_task_local_planner.cpp
+  )
+  arm_controller_configure_object_target(arm_controller_motion_local_planner_objects)
+  ament_target_dependencies(arm_controller_motion_local_planner_objects
+    Eigen3
+  )
+  target_link_libraries(arm_controller_motion_local_planner_objects
+    tesseract::tesseract_motion_planners_trajopt
+    tesseract::tesseract_motion_planners_trajopt_ifopt
+    tesseract::tesseract_environment
+    trajopt::trajopt
+    trajopt::trajopt_ifopt
+  )
+endif()

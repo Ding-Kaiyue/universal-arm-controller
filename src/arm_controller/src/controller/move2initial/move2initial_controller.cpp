@@ -33,11 +33,11 @@ void Move2InitialController::start(const std::string& mapping) {
         );
     }
 
-    is_active_ = true;
+    ModeControllerBase::start(mapping);
 }
 
 bool Move2InitialController::stop(const std::string& mapping) {
-    is_active_ = false;
+    ModeControllerBase::stop(mapping);
     RCLCPP_INFO(node_->get_logger(), "[%s] Move2InitialController deactivated", mapping.c_str());
     return true;
 }

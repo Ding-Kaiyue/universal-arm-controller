@@ -14,6 +14,7 @@ build/
 log/
 .colcon/
 *.log
+.clang-format*
 
 # === CMake / Make ===
 CMakeFiles/
@@ -56,7 +57,7 @@ Icon?
 # === Dependency / External ===
 *.so
 *.a
-*.o
+*.o 
 *.out
 *.obj
 *.exe

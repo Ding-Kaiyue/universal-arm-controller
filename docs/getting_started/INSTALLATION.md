@@ -229,7 +229,64 @@ cd ~/robotic_arm_ws
 # 使用官方 build.sh 脚本（推荐）
 # 该脚本会自动检查内存、优化编译参数
 ./src/universal-arm-controller/build.sh
+```
 
+`build.sh` 支持通过后缀参数选择启用的控制器构建模式。
+继承 `UtilityControllerBase` 的基础模式始终会被编译和注册，包括 `SystemStart`、`HoldState`、`Move2Initial`、`Move2Start`、`ROS2ActionControl`；下表只控制 motion、velocity、teach 这些功能族是否启用。
+
+| 构建模式 | 启用内容 |
+| --- | --- |
+| `workspace` | 编译整个工作空间；默认模式，不写参数时等价于该模式。 |
+| `arm-full` | 仅编译 `arm_controller`；启用 utility + motion + velocity + teach。 |
+| `motion` | 仅编译 `arm_controller`；启用 utility + motion。 |
+| `velocity` | 仅编译 `arm_controller`；启用 utility + velocity。 |
+| `teach` | 仅编译 `arm_controller`；启用 utility + teach。 |
+| `motion-velocity` | 仅编译 `arm_controller`；启用 utility + motion + velocity。 |
+| `motion-teach` | 仅编译 `arm_controller`；启用 utility + motion + teach。 |
+| `velocity-teach` | 仅编译 `arm_controller`；启用 utility + velocity + teach。 |
+
+通用选项单独追加在构建模式后：
+
+| 通用选项 | 作用 |
+| --- | --- |
+| `--profile <name>` | 显式指定构建模式，`<name>` 可取上表中的任一构建模式。 |
+| `--dev` | 开发调试构建；启用 LTO，内存峰值更高，建议 32GB+ RAM/Swap。 |
+| `--help` | 查看脚本帮助。 |
+| `-- <COLCON_ARGS>` | 将后续参数原样透传给 `colcon build`。 |
+
+```bash
+# 编译整个工作空间（默认模式）
+./src/universal-arm-controller/build.sh
+
+# 等价写法：显式指定 workspace profile
+./src/universal-arm-controller/build.sh workspace
+
+# 仅编译 arm_controller，并启用全部控制器族
+./src/universal-arm-controller/build.sh arm-full
+
+# 仅编译 arm_controller，并只启用运动规划相关控制器
+./src/universal-arm-controller/build.sh motion
+
+# 仅编译 arm_controller，并只启用速度控制相关控制器
+./src/universal-arm-controller/build.sh velocity
+
+# 仅编译 arm_controller，并只启用示教/轨迹记录回放相关控制器
+./src/universal-arm-controller/build.sh teach
+
+# 组合启用 motion + velocity
+./src/universal-arm-controller/build.sh motion-velocity
+
+# 开发调试模式：启用 LTO，内存峰值更高，建议 32GB+ RAM/Swap
+./src/universal-arm-controller/build.sh arm-full --dev
+
+# 也可以使用 --profile 显式指定模式
+./src/universal-arm-controller/build.sh --profile motion
+
+# 如需继续传递 colcon 参数，放在 -- 后面
+./src/universal-arm-controller/build.sh motion -- --event-handlers console_direct+
+```
+
+```bash
 # 或者手动使用 colcon build
 # colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
@@ -240,6 +297,7 @@ cd ~/robotic_arm_ws
 - 使用内存优化的链接器标志
 - 顺序编译避免 OOM
 - 支持 `--dev` 模式用于开发调试
+- 支持通过 profile 明确启用 motion、velocity、teach 或它们的组合
 
 ### 步骤 6：环境配置
 
@@ -292,4 +350,3 @@ ls ~/robotic_arm_ws/install/robotic_arm_bringup/share/robotic_arm_bringup/
 
 - 按照 **[控制命令使用指南](CONTROLLERS.md)** 启动系统并尝试发送第一条控制命令
 - 如果在启动过程中遇到问题，请优先参考 **[故障排除](TROUBLESHOOTING.md)**
-

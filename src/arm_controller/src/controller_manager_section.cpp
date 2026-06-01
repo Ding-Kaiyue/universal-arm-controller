@@ -27,9 +27,10 @@
 namespace {
 
 bool is_controller_enabled_for_build(const std::string& key) {
+    (void)key;
 #if !ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
     if (key == "JointVelocity" || key == "CartesianVelocity" ||
-        key == "MinkServo" || key == "CommandStreaming") {
+        key == "CommandStreaming") {
         return false;
     }
 #endif
@@ -234,7 +235,6 @@ void ControllerManagerNode::init_controllers() {
         const std::unordered_set<std::string> arm_only_controllers = {
             "JointVelocity",
             "CartesianVelocity",
-            "MinkServo",
             "CommandStreaming",
             "MoveJ",
             "MoveL",
@@ -314,7 +314,7 @@ void ControllerManagerNode::init_controllers() {
 
                 // ✅ 为 velocity controllers 注册 hook 请求回调
                 if (key == "JointVelocity" || key == "CartesianVelocity" ||
-                    key == "MinkServo" || key == "CommandStreaming") {
+                    key == "CommandStreaming") {
                     auto velocity_ctrl = std::dynamic_pointer_cast<VelocityControllerBase>(shared_controller);
                     if (velocity_ctrl) {
                         velocity_ctrl->set_hook_request_callback(

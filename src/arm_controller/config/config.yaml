@@ -34,23 +34,17 @@ controllers:
       name: /controller_api/cartesian_velocity_action/{mapping}
       type: geometry_msgs/msg/Twist
 
-  - key: MinkServo
-    class: MinkServoController
-    input_topic:
-      name: /controller_api/mink_servo_action/{mapping}
-      type: geometry_msgs/msg/PoseStamped
-
   - key: CommandStreaming
     class: CommandStreamingController
     input_topic:
       name: /controller_api/command_streaming_action/{mapping}
       type: sensor_msgs/msg/JointState
 
-  # - key: Move2Initial
-  #   class: Move2InitialController
+  - key: Move2Initial
+    class: Move2InitialController
 
-  # - key: Move2Start
-  #   class: Move2StartController
+  - key: Move2Start
+    class: Move2StartController
 
   - key: ROS2ActionControl
     class: ROS2ActionControlController

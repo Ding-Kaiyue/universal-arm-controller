@@ -1,16 +1,14 @@
 #include "arm_controller/controller_interface.hpp"
 
-// 只保留测试需要的控制器
 #include "hold_state/hold_state_controller.hpp"
+#include "move2initial/move2initial_controller.hpp"
+#include "move2start/move2start_controller.hpp"
 #include "system_start/system_start_controller.hpp"
 #if ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
 #include "joint_velocity/joint_velocity_controller.hpp"
 #include "cartesian_velocity/cartesian_velocity_controller.hpp"
-#include "mink_servo/mink_servo_controller.hpp"
 #include "command_streaming/command_streaming_controller.hpp"
 #endif
-// #include "move2initial/move2initial_controller.hpp"
-// #include "move2start/move2start_controller.hpp"
 #include "ros2_action_control/ros2_action_control_controller.hpp"
 #if ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS
 #include "movec/movec_controller.hpp"
@@ -27,25 +25,22 @@
 
 std::unordered_map<std::string, ControllerInterface::Creator> get_available_controllers() {
     return {
-        // 只注册测试需要的控制器
         {"SystemStartController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<SystemStartController>(node); }},
         {"HoldStateController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<HoldStateController>(node); }},
+        {"Move2InitialController", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<Move2InitialController>(node); }},
+        {"Move2StartController", [](rclcpp::Node::SharedPtr node) {
+            return std::make_shared<Move2StartController>(node); }},
 #if ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
         {"JointVelocityController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<JointVelocityController>(node); }},
         {"CartesianVelocityController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<CartesianVelocityController>(node); }},
-        {"MinkServoController", [](rclcpp::Node::SharedPtr node) {
-            return std::make_shared<MinkServoController>(node); }},
         {"CommandStreamingController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<CommandStreamingController>(node); }},
 #endif
-        // {"Move2InitialController", [](rclcpp::Node::SharedPtr node) {
-        //     return std::make_shared<Move2InitialController>(node); }},
-        // {"Move2StartController", [](rclcpp::Node::SharedPtr node) {
-        //     return std::make_shared<Move2StartController>(node); }},
         {"ROS2ActionControlController", [](rclcpp::Node::SharedPtr node) {
             return std::make_shared<ROS2ActionControlController>(node); }},
 #if ARM_CONTROLLER_ENABLE_MOTION_CONTROLLERS

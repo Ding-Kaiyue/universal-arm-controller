@@ -12,7 +12,6 @@
 #if ARM_CONTROLLER_ENABLE_VELOCITY_CONTROLLERS
 #include "controller/joint_velocity/joint_velocity_ipc_interface.hpp"
 #include "controller/cartesian_velocity/cartesian_velocity_ipc_interface.hpp"
-#include "controller/mink_servo/mink_servo_ipc_interface.hpp"
 #endif
 #if ARM_CONTROLLER_ENABLE_TEACH_CONTROLLERS
 #include "controller/trajectory_record/trajectory_record_ipc_interface.hpp"
@@ -110,15 +109,6 @@ PYBIND11_MODULE(arm_controller_ipc, m) {
              py::arg("mapping"))
         .def("get_last_error", &arm_controller::cartesian_velocity::CartesianVelocityIPCInterface::getLastError);
 
-    py::class_<arm_controller::mink_servo::MinkServoIPCInterface>(m, "MinkServo")
-        .def(py::init<>())
-        .def("execute", &arm_controller::mink_servo::MinkServoIPCInterface::execute,
-             py::arg("target_pose"), py::arg("mapping"))
-        .def("get_current_mode", &arm_controller::mink_servo::MinkServoIPCInterface::getCurrentMode,
-             py::arg("mapping"))
-        .def("get_execution_state", &arm_controller::mink_servo::MinkServoIPCInterface::getExecutionState,
-             py::arg("mapping"))
-        .def("get_last_error", &arm_controller::mink_servo::MinkServoIPCInterface::getLastError);
 #endif
 
 #if ARM_CONTROLLER_ENABLE_TEACH_CONTROLLERS
