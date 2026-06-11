@@ -31,7 +31,7 @@ sudo ip link set can0 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000
 # sudo ip link set can1 up type can bitrate 1000000 sample-point 0.8 dbitrate 5000000 dsample-point 0.75 fd on loopback off
 
 # 可选：隔离 ROS 网络，避免同网段其他机器干扰
-export ROS_DOMAIN_ID=42
+export ROS_DOMAIN_ID=42 
 ```
 
 ### Docker 部署（推荐）
