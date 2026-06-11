@@ -78,6 +78,90 @@ bool loadRuntimeConfigFromYaml(
       cfg.global_trajectory.control_cycle_sec = cfg.neo_control_cycle_sec;
     }
   }
+  if (const YAML::Node feedback = rtc["feedback"];
+      feedback && feedback.IsMap()) {
+    if (feedback["arm_state_source"]) {
+      cfg.arm_state_source = feedback["arm_state_source"].as<std::string>();
+      normalizeSourceName(cfg.arm_state_source);
+    }
+    if (feedback["command_output"]) {
+      cfg.command_output = feedback["command_output"].as<std::string>();
+      normalizeSourceName(cfg.command_output);
+    }
+    if (feedback["joint_state_topic"]) {
+      cfg.joint_state_topic = feedback["joint_state_topic"].as<std::string>();
+    }
+    if (feedback["left_arm_velocity_command_topic"]) {
+      cfg.left_arm_velocity_command_topic =
+          feedback["left_arm_velocity_command_topic"].as<std::string>();
+    }
+    if (feedback["right_arm_velocity_command_topic"]) {
+      cfg.right_arm_velocity_command_topic =
+          feedback["right_arm_velocity_command_topic"].as<std::string>();
+    }
+    if (feedback["arm_velocity_command_topic"]) {
+      cfg.arm_velocity_command_topic =
+          feedback["arm_velocity_command_topic"].as<std::string>();
+    }
+    if (feedback["joint_state_stale_timeout_sec"]) {
+      cfg.joint_state_stale_timeout_sec =
+          std::max(0.01, feedback["joint_state_stale_timeout_sec"].as<double>());
+    }
+  }
+  if (cfg.arm_state_source != "hardware" &&
+      cfg.arm_state_source != "joint_states") {
+    setError("Invalid reactive_task_controller.feedback.arm_state_source, "
+             "expected 'hardware' or 'joint_states'");
+    return false;
+  }
+  if (cfg.command_output != "real" && cfg.command_output != "gazebo") {
+    setError("Invalid reactive_task_controller.feedback.command_output, "
+             "expected 'real' or 'gazebo'");
+    return false;
+  }
+  if (const YAML::Node whole_body = rtc["whole_body"];
+      whole_body && whole_body.IsMap()) {
+    if (whole_body["enable_mobile_base_in_planning"]) {
+      cfg.enable_mobile_base_in_planning =
+          whole_body["enable_mobile_base_in_planning"].as<bool>();
+    }
+    if (whole_body["enable_mobile_base_in_neo"]) {
+      cfg.enable_mobile_base_in_neo =
+          whole_body["enable_mobile_base_in_neo"].as<bool>();
+    }
+    if (whole_body["mobile_base_type"]) {
+      cfg.mobile_base_type = whole_body["mobile_base_type"].as<std::string>();
+      normalizeSourceName(cfg.mobile_base_type);
+    }
+    if (whole_body["mobile_base_state_source"]) {
+      cfg.mobile_base_state_source =
+          whole_body["mobile_base_state_source"].as<std::string>();
+      normalizeSourceName(cfg.mobile_base_state_source);
+    }
+    if (whole_body["mobile_base_odom_frame"]) {
+      cfg.mobile_base_odom_frame =
+          whole_body["mobile_base_odom_frame"].as<std::string>();
+    }
+    if (whole_body["mobile_base_frame"]) {
+      cfg.mobile_base_frame = whole_body["mobile_base_frame"].as<std::string>();
+    }
+    if (whole_body["cmd_vel_topic"]) {
+      cfg.cmd_vel_topic = whole_body["cmd_vel_topic"].as<std::string>();
+    }
+    if (whole_body["base_max_vx"]) {
+      cfg.base_max_vx = std::max(0.0, whole_body["base_max_vx"].as<double>());
+    }
+    if (whole_body["base_max_vy"]) {
+      cfg.base_max_vy = std::max(0.0, whole_body["base_max_vy"].as<double>());
+    }
+    if (whole_body["base_max_wz"]) {
+      cfg.base_max_wz = std::max(0.0, whole_body["base_max_wz"].as<double>());
+    }
+    if (whole_body["base_velocity_weight_scale"]) {
+      cfg.base_velocity_weight_scale = std::max(
+          1e-6, whole_body["base_velocity_weight_scale"].as<double>());
+    }
+  }
   if (const YAML::Node global = rtc["global_planner"];
       global && global.IsMap()) {
     if (global["planning_latency_sec"]) {
@@ -224,20 +308,18 @@ bool loadRuntimeConfigFromYaml(
     cfg.distance_field_source = rtc["distance_field_source"].as<std::string>();
     normalizeSourceName(cfg.distance_field_source);
   }
-  if (!isValidMapSource(cfg.distance_field_source) ||
-      cfg.distance_field_source == "camera_driver_pointcloud") {
+  if (!isValidMapSource(cfg.distance_field_source)) {
     setError("Invalid reactive_task_controller.distance_field_source, expected "
-             "'dummy' or 'camera_driver_esdf'");
+             "'dummy', 'camera_driver_pointcloud', or 'camera_driver_esdf'");
     return false;
   }
   if (rtc["collision_map_source"]) {
     cfg.collision_map_source = rtc["collision_map_source"].as<std::string>();
     normalizeSourceName(cfg.collision_map_source);
   }
-  if (!isValidMapSource(cfg.collision_map_source) ||
-      cfg.collision_map_source == "camera_driver_esdf") {
+  if (!isValidMapSource(cfg.collision_map_source)) {
     setError("Invalid reactive_task_controller.collision_map_source, expected "
-             "'dummy' or 'camera_driver_pointcloud'");
+             "'dummy', 'camera_driver_pointcloud', or 'camera_driver_esdf'");
     return false;
   }
 
@@ -292,6 +374,19 @@ bool loadRuntimeConfigFromYaml(
       cfg.camera_driver_pointcloud.observation_margin_m =
           std::max(0.0, live["observation_margin_m"].as<double>());
     }
+    if (live["occupancy_retention_sec"]) {
+      cfg.camera_driver_pointcloud.occupancy_retention_sec =
+          std::max(0.0, live["occupancy_retention_sec"].as<double>());
+    }
+    if (live["max_cached_cells"]) {
+      cfg.camera_driver_pointcloud.max_cached_cells =
+          std::max<std::size_t>(
+              1u, live["max_cached_cells"].as<std::size_t>());
+    }
+    if (live["accumulate_observed_bounds"]) {
+      cfg.camera_driver_pointcloud.accumulate_observed_bounds =
+          live["accumulate_observed_bounds"].as<bool>();
+    }
     if (live["isolated_min_neighbor_count"]) {
       cfg.camera_driver_pointcloud.isolated_min_neighbor_count =
           std::max(0, live["isolated_min_neighbor_count"].as<int>());
@@ -304,30 +399,23 @@ bool loadRuntimeConfigFromYaml(
       cfg.camera_driver_pointcloud.min_cluster_cell_count =
           std::max(1, live["min_cluster_cell_count"].as<int>());
     }
-  } else if (cfg.collision_map_source == "camera_driver_pointcloud") {
+  } else if (cfg.collision_map_source == "camera_driver_pointcloud" ||
+             cfg.distance_field_source == "camera_driver_pointcloud") {
     setError("Missing required map: "
              "reactive_task_controller.camera_driver_pointcloud");
     return false;
   }
 
   if (const YAML::Node live = rtc["camera_driver_esdf"]; live && live.IsMap()) {
-    if (live["service_name"]) {
-      cfg.camera_driver_esdf.service_name =
-          live["service_name"].as<std::string>();
-    }
-    if (live["request_timeout_ms"]) {
-      cfg.camera_driver_esdf.request_timeout_ms =
-          std::max(1, live["request_timeout_ms"].as<int>());
-    }
-    if (live["startup_wait_timeout_ms"]) {
-      cfg.camera_driver_esdf.startup_wait_timeout_ms =
-          std::max(1, live["startup_wait_timeout_ms"].as<int>());
+    if (live["shm_name"]) {
+      cfg.camera_driver_esdf.shm_name = live["shm_name"].as<std::string>();
     }
     if (live["cache_max_entries"]) {
       cfg.camera_driver_esdf.cache_max_entries = std::max<std::size_t>(
           1u, live["cache_max_entries"].as<std::size_t>());
     }
-  } else if (cfg.distance_field_source == "camera_driver_esdf") {
+  } else if (cfg.distance_field_source == "camera_driver_esdf" ||
+             cfg.collision_map_source == "camera_driver_esdf") {
     setError(
         "Missing required map: reactive_task_controller.camera_driver_esdf");
     return false;
@@ -564,6 +652,137 @@ bool loadRuntimeConfigFromYaml(
   return true;
 }
 
+template <typename T>
+T declareOrGetParam(
+    const rclcpp::Node::SharedPtr &node,
+    const std::string &name,
+    const T &fallback) {
+  if (!node) {
+    return fallback;
+  }
+  if (!node->has_parameter(name)) {
+    return node->declare_parameter<T>(name, fallback);
+  }
+  return node->get_parameter(name).get_value<T>();
+}
+
+template <typename T>
+void applyParamOverride(
+    const rclcpp::Node::SharedPtr &node,
+    const std::vector<std::string> &names,
+    T *value) {
+  if (value == nullptr) {
+    return;
+  }
+  for (const std::string &name : names) {
+    *value = declareOrGetParam<T>(node, name, *value);
+  }
+}
+
+void applyRosParameterOverrides(
+    const rclcpp::Node::SharedPtr &node,
+    ReactiveTaskController::ControllerRuntimeConfig *cfg) {
+  if (!node || cfg == nullptr) {
+    return;
+  }
+
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.feedback.arm_state_source",
+       "reactive_task.feedback.arm_state_source"},
+      &cfg->arm_state_source);
+  normalizeSourceName(cfg->arm_state_source);
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.feedback.command_output",
+       "reactive_task.feedback.command_output"},
+      &cfg->command_output);
+  normalizeSourceName(cfg->command_output);
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.feedback.joint_state_topic",
+       "reactive_task.feedback.joint_state_topic"},
+      &cfg->joint_state_topic);
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.feedback.left_arm_velocity_command_topic",
+       "reactive_task.feedback.left_arm_velocity_command_topic"},
+      &cfg->left_arm_velocity_command_topic);
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.feedback.right_arm_velocity_command_topic",
+       "reactive_task.feedback.right_arm_velocity_command_topic"},
+      &cfg->right_arm_velocity_command_topic);
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.feedback.arm_velocity_command_topic",
+       "reactive_task.feedback.arm_velocity_command_topic"},
+      &cfg->arm_velocity_command_topic);
+  applyParamOverride<double>(
+      node,
+      {"reactive_task_controller.feedback.joint_state_stale_timeout_sec",
+       "reactive_task.feedback.joint_state_stale_timeout_sec"},
+      &cfg->joint_state_stale_timeout_sec);
+  cfg->joint_state_stale_timeout_sec =
+      std::max(0.01, cfg->joint_state_stale_timeout_sec);
+
+  applyParamOverride<bool>(
+      node,
+      {"reactive_task_controller.whole_body.enable_mobile_base_in_planning",
+       "reactive_task.whole_body.enable_mobile_base_in_planning"},
+      &cfg->enable_mobile_base_in_planning);
+  applyParamOverride<bool>(
+      node,
+      {"reactive_task_controller.whole_body.enable_mobile_base_in_neo",
+       "reactive_task.whole_body.enable_mobile_base_in_neo"},
+      &cfg->enable_mobile_base_in_neo);
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.whole_body.mobile_base_type",
+       "reactive_task.whole_body.mobile_base_type"},
+      &cfg->mobile_base_type);
+  normalizeSourceName(cfg->mobile_base_type);
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.whole_body.mobile_base_state_source",
+       "reactive_task.whole_body.mobile_base_state_source"},
+      &cfg->mobile_base_state_source);
+  normalizeSourceName(cfg->mobile_base_state_source);
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.whole_body.mobile_base_odom_frame",
+       "reactive_task.whole_body.mobile_base_odom_frame"},
+      &cfg->mobile_base_odom_frame);
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.whole_body.mobile_base_frame",
+       "reactive_task.whole_body.mobile_base_frame"},
+      &cfg->mobile_base_frame);
+  applyParamOverride<std::string>(
+      node,
+      {"reactive_task_controller.whole_body.cmd_vel_topic",
+       "reactive_task.whole_body.cmd_vel_topic"},
+      &cfg->cmd_vel_topic);
+  applyParamOverride<double>(
+      node,
+      {"reactive_task_controller.whole_body.base_max_vx",
+       "reactive_task.whole_body.base_max_vx"},
+      &cfg->base_max_vx);
+  applyParamOverride<double>(
+      node,
+      {"reactive_task_controller.whole_body.base_max_vy",
+       "reactive_task.whole_body.base_max_vy"},
+      &cfg->base_max_vy);
+  applyParamOverride<double>(
+      node,
+      {"reactive_task_controller.whole_body.base_max_wz",
+       "reactive_task.whole_body.base_max_wz"},
+      &cfg->base_max_wz);
+  cfg->base_max_vx = std::max(0.0, cfg->base_max_vx);
+  cfg->base_max_vy = std::max(0.0, cfg->base_max_vy);
+  cfg->base_max_wz = std::max(0.0, cfg->base_max_wz);
+}
+
 } // namespace
 
 bool ReactiveTaskController::loadReactiveConfig() {
@@ -588,6 +807,7 @@ bool ReactiveTaskController::loadReactiveConfig() {
                    cfg_path.c_str(), error.c_str());
       return false;
     }
+    applyRosParameterOverrides(node_, &runtime_cfg_);
     return true;
   } catch (const std::exception &e) {
     RCLCPP_ERROR(node_->get_logger(), "reactive_task: load config exception: %s",

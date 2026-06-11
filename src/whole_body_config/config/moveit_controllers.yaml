@@ -1,0 +1,75 @@
+# MoveIt uses this configuration for controller management
+
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+
+moveit_simple_controller_manager:
+  controller_names:
+    - left_arm_controller
+    - right_arm_controller
+    - dual_arm_controller
+    - left_gripper_controller
+    - right_gripper_controller
+
+  left_arm_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - left_joint1
+      - left_joint2
+      - left_joint3
+      - left_joint4
+      - left_joint5
+      - left_joint6
+  right_arm_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - right_joint1
+      - right_joint2
+      - right_joint3
+      - right_joint4
+      - right_joint5
+      - right_joint6
+  dual_arm_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - left_joint1
+      - left_joint2
+      - left_joint3
+      - left_joint4
+      - left_joint5
+      - left_joint6
+      - right_joint1
+      - right_joint2
+      - right_joint3
+      - right_joint4
+      - right_joint5
+      - right_joint6
+  left_gripper_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    joints:
+      - left_hand_narrow1_joint
+      - left_hand_narrow2_joint
+      - left_hand_narrow3_joint
+      - left_hand_narrow_loop_joint
+      - left_hand_wide1_joint
+      - left_hand_wide2_joint
+      - left_hand_wide3_joint
+      - left_hand_wide_loop_joint
+  right_gripper_controller:
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    joints:
+      - right_hand_narrow1_joint
+      - right_hand_narrow2_joint
+      - right_hand_narrow3_joint
+      - right_hand_narrow_loop_joint
+      - right_hand_wide1_joint
+      - right_hand_wide2_joint
+      - right_hand_wide3_joint
+      - right_hand_wide_loop_joint

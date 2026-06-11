@@ -44,6 +44,16 @@ Eigen::Vector3d TaskVelocityGenerator::applyDeadband(
     return v;
 }
 
+double TaskVelocityGenerator::normalizeAngle(double angle) {
+    while (angle > M_PI) {
+        angle -= 2.0 * M_PI;
+    }
+    while (angle < -M_PI) {
+        angle += 2.0 * M_PI;
+    }
+    return angle;
+}
+
 TaskVelocityOutput TaskVelocityGenerator::compute(
     const TaskVelocityInput& in,
     const TaskVelocityConfig& cfg) const {
@@ -86,6 +96,50 @@ TaskVelocityOutput TaskVelocityGenerator::compute(
     out.v_des.tail<3>() =
         clampNorm(out.v_des.tail<3>(), cfg.max_angular_speed);
 
+    return out;
+}
+
+MobileBaseVelocityOutput TaskVelocityGenerator::computeMobileBaseVelocity(
+    const MobileBaseVelocityInput& in,
+    const MobileBaseVelocityConfig& cfg) const {
+    MobileBaseVelocityOutput out;
+    const double dt = std::max(1e-3, in.dt_sec);
+    const double yaw = in.current_pose.z();
+    const Eigen::Matrix2d R_world_base =
+        Eigen::Rotation2Dd(yaw).toRotationMatrix();
+
+    Eigen::Vector2d ff_world = Eigen::Vector2d::Zero();
+    double ff_wz = 0.0;
+    if (in.has_next_target_pose) {
+        ff_world =
+            (in.next_target_pose.head<2>() - in.target_pose.head<2>()) / dt;
+        ff_wz =
+            normalizeAngle(in.next_target_pose.z() - in.target_pose.z()) / dt;
+    }
+
+    out.position_error_world =
+        in.target_pose.head<2>() - in.current_pose.head<2>();
+    out.yaw_error = normalizeAngle(in.target_pose.z() - in.current_pose.z());
+    if (out.position_error_world.norm() < std::max(0.0, cfg.xy_deadband)) {
+        out.position_error_world.setZero();
+    }
+    if (std::abs(out.yaw_error) < std::max(0.0, cfg.yaw_deadband)) {
+        out.yaw_error = 0.0;
+    }
+
+    out.feedforward_body_twist.head<2>() =
+        R_world_base.transpose() * ff_world;
+    out.feedforward_body_twist.z() = ff_wz;
+    out.feedback_body_twist.head<2>() =
+        cfg.kp_xy * (R_world_base.transpose() * out.position_error_world);
+    out.feedback_body_twist.z() = cfg.kp_yaw * out.yaw_error;
+    out.body_twist = out.feedforward_body_twist + out.feedback_body_twist;
+    out.body_twist.x() =
+        std::clamp(out.body_twist.x(), -std::abs(cfg.max_vx), std::abs(cfg.max_vx));
+    out.body_twist.y() =
+        std::clamp(out.body_twist.y(), -std::abs(cfg.max_vy), std::abs(cfg.max_vy));
+    out.body_twist.z() =
+        std::clamp(out.body_twist.z(), -std::abs(cfg.max_wz), std::abs(cfg.max_wz));
     return out;
 }
 

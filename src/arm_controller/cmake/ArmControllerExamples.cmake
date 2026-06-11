@@ -16,7 +16,8 @@ if(EXAMPLE_SOURCES)
     if((EXAMPLE_NAME STREQUAL "example_dual_arm"
         OR EXAMPLE_NAME STREQUAL "example_reactive_task_consumer"
         OR EXAMPLE_NAME STREQUAL "example_reactive_qp_neo"
-        OR EXAMPLE_NAME STREQUAL "example_visualize_link_spheres")
+        OR EXAMPLE_NAME STREQUAL "example_visualize_link_spheres"
+        OR EXAMPLE_NAME STREQUAL "example_whole_body_obstacle_crossing")
        AND NOT ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
       set(BUILD_THIS_EXAMPLE OFF)
     endif()

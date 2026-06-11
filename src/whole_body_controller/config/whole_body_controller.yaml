@@ -1,0 +1,53 @@
+whole_body_controller_node:
+    ros__parameters:
+        target_topic: whole_body_controller/dual_hand_targets
+        cmd_vel_topic: cmd_vel
+        left_hand_topic: /controller_api/reactive_task_action/left_arm
+        right_hand_topic: /controller_api/reactive_task_action/right_arm
+        world_frame: odom
+        base_frame: base_footprint
+
+        control_frequency_hz: 30.0
+        desired_target_x_in_base: 0.55
+        desired_target_y_in_base: 0.0
+        base_ready_tolerance_m: 0.08
+        base_kp_xy: 0.8
+        max_vx: 0.25
+        max_vy: 0.25
+
+        obstacle_robot_radius_m: 0.40
+        obstacle_safety_margin_m: 0.12
+        obstacle_influence_distance_m: 0.80
+        obstacle_gain: 0.20
+        obstacle_max_speed: 0.20
+
+        # [x, y, radius] triples in world_frame. These match
+        # robot_simulation/worlds/pillar_obstacles.world by default.
+        pillar_obstacles:
+            - 1.10
+            - 0.55
+            - 0.075
+            - 1.45
+            - -0.75
+            - 0.075
+            - 1.95
+            - 0.20
+            - 0.075
+            - 2.35
+            - -1.05
+            - 0.075
+            - 2.65
+            - 0.75
+            - 0.075
+            - 3.20
+            - -0.25
+            - 0.075
+            - 3.65
+            - 1.05
+            - 0.075
+            - 4.05
+            - -0.85
+            - 0.075
+            - 4.55
+            - 0.35
+            - 0.075

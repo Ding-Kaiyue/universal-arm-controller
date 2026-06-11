@@ -165,6 +165,8 @@ bool runMapPrecheck(
         std::cout << "Waiting for ESDF query service:\n"
                   << "  - " << cfg.esdf_service_name << "\n";
         ok = waitForEsdfService(node, cfg.esdf_service_name, timeout) && ok;
+    } else if (cfg.distance_field_source == "camera_driver_pointcloud") {
+        std::cout << "ReactiveTask distance_field_source=camera_driver_pointcloud\n";
     } else if (cfg.distance_field_source == "dummy") {
         std::cout << "ReactiveTask distance_field_source=dummy\n";
     } else {
@@ -190,6 +192,9 @@ bool runMapPrecheck(
 std::string timeoutHint(const RuntimeMapConfig& cfg) {
     if (cfg.collision_map_source == "camera_driver_pointcloud") {
         return "Check controller log for collision_map_source=camera_driver_pointcloud, active_cells, local_trajopt obstacle count, and camera_driver pointcloud publishing.";
+    }
+    if (cfg.distance_field_source == "camera_driver_pointcloud") {
+        return "Check controller log for distance_field_source=camera_driver_pointcloud, frames/cells, local_trajopt obstacle count, and camera_driver pointcloud publishing.";
     }
     if (cfg.distance_field_source == "camera_driver_esdf") {
         return "Check controller log for distance_field_source=camera_driver_esdf and service_ready.";

@@ -28,6 +28,8 @@ public:
     void post_init();
 
 private:
+    bool is_gazebo_mode() const;
+
     // 配置加载和初始化
     void init_hardware();
     void init_controllers();

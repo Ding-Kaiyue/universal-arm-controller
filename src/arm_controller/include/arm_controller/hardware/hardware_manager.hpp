@@ -37,9 +37,11 @@ public:
 
     // 初始化硬件驱动
     bool initialize(rclcpp::Node::SharedPtr node);
+    bool initialize_for_simulation(rclcpp::Node::SharedPtr node);
 
     // ============= 硬件驱动实例访问 =============
     std::shared_ptr<RobotHardware> get_hardware_driver() const;
+    bool is_simulation_mode() const { return simulation_mode_; }
 
     // ============= 核心接口 =============
     bool is_robot_stopped(const std::string& mapping) const;
@@ -150,6 +152,7 @@ private:
     // ============= 核心状态 ============
     std::shared_ptr<RobotHardware> hardware_driver_;
     rclcpp::Node::SharedPtr node_;
+    bool simulation_mode_{false};
 
     static inline std::shared_ptr<HardwareManager> instance_ = nullptr;
     static inline std::mutex instance_mutex_;
@@ -157,6 +160,7 @@ private:
     // ============= 关节状态发布 =============
     mutable std::mutex joint_state_mutex_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr sim_joint_state_sub_;
 
     // ============= Lock-free 关节位置缓存（用于实时读取，避免竞争） =============
     // 计算线程使用此缓存，避免竞争 joint_state_mutex_
@@ -210,6 +214,7 @@ private:
     // ============= 内部方法 =============
     void update_joint_state(const std::string& interface, uint32_t motor_id,
                            const hardware_driver::motor_driver::Motor_Status& status);
+    void handle_sim_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg);
     void publish_joint_state();
     bool load_joint_limits_config();
     bool load_hardware_config();

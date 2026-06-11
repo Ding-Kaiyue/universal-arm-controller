@@ -186,6 +186,9 @@ bool LinkSphereModel::buildFromYamlExplicit(
         } else if (n["radii"] && n["radii"].IsSequence() && n["radii"].size() == 3) {
             const YAML::Node r = n["radii"];
             s.radius = std::max({r[0].as<double>(), r[1].as<double>(), r[2].as<double>()});
+        } else if (n["size"] && n["size"].IsSequence() && n["size"].size() == 3) {
+            const YAML::Node size = n["size"];
+            s.radius = 0.5 * std::max({size[0].as<double>(), size[1].as<double>(), size[2].as<double>()});
         } else {
             continue;
         }
@@ -233,6 +236,9 @@ bool LinkSphereModel::buildEllipsoidsFromYamlExplicit(
         if (n["radii"] && n["radii"].IsSequence() && n["radii"].size() == 3) {
             const YAML::Node r = n["radii"];
             e.radii = Eigen::Vector3d(r[0].as<double>(), r[1].as<double>(), r[2].as<double>());
+        } else if (n["size"] && n["size"].IsSequence() && n["size"].size() == 3) {
+            const YAML::Node size = n["size"];
+            e.radii = 0.5 * Eigen::Vector3d(size[0].as<double>(), size[1].as<double>(), size[2].as<double>());
         } else if (n["radius"]) {
             const double r = n["radius"].as<double>();
             e.radii = Eigen::Vector3d::Constant(r);

@@ -136,6 +136,48 @@ bool hasMeaningfulMargin(
            diag.has_failed_pose;
 }
 
+double normalizeAngle(const double angle) {
+    return std::atan2(std::sin(angle), std::cos(angle));
+}
+
+struct GoalErrorBreakdown {
+    double total{std::numeric_limits<double>::infinity()};
+    double base_position{std::numeric_limits<double>::quiet_NaN()};
+    double base_yaw{std::numeric_limits<double>::quiet_NaN()};
+    double arm_joint{std::numeric_limits<double>::quiet_NaN()};
+    double left_arm_joint{std::numeric_limits<double>::quiet_NaN()};
+    double right_arm_joint{std::numeric_limits<double>::quiet_NaN()};
+};
+
+GoalErrorBreakdown computeGoalErrorBreakdown(
+    const Eigen::VectorXd& q,
+    const Eigen::VectorXd& q_goal) {
+    GoalErrorBreakdown out;
+    if (q.size() == 0 || q.size() != q_goal.size() ||
+        !q.allFinite() || !q_goal.allFinite()) {
+        return out;
+    }
+
+    out.total = (q - q_goal).norm();
+    if (q.size() < 3) {
+        return out;
+    }
+
+    out.base_position = (q.head<2>() - q_goal.head<2>()).norm();
+    out.base_yaw = std::abs(normalizeAngle(q[2] - q_goal[2]));
+    if (q.size() > 3) {
+        out.arm_joint =
+            (q.tail(q.size() - 3) - q_goal.tail(q_goal.size() - 3)).norm();
+    }
+    if (q.size() >= 9) {
+        out.left_arm_joint = (q.segment(3, 6) - q_goal.segment(3, 6)).norm();
+    }
+    if (q.size() >= 15) {
+        out.right_arm_joint = (q.segment(9, 6) - q_goal.segment(9, 6)).norm();
+    }
+    return out;
+}
+
 Eigen::Vector3d normalizedOrZero(const Eigen::Vector3d& v) {
     if (!v.allFinite()) {
         return Eigen::Vector3d::Zero();
@@ -446,6 +488,7 @@ cp::PathPlanningOutput OmplRrtConnectGlobalPlanner::planDirectPath(
     std::vector<JointPathCandidate> candidates;
     candidates.reserve(valid_goals.size());
     int solved_paths = 0;
+    int accepted_approximate_paths = 0;
     int invalid_solution_paths = 0;
     si->setMotionValidator(std::make_shared<WholeBodyMotionValidator>(
         si,
@@ -458,6 +501,17 @@ cp::PathPlanningOutput OmplRrtConnectGlobalPlanner::planDirectPath(
         if (q_goal.size() != q_start.size() || !q_goal.allFinite()) {
             continue;
         }
+        const GoalErrorBreakdown start_goal_error =
+            computeGoalErrorBreakdown(q_start, q_goal);
+        std::cout << "[global_planner] rrt_connect goal_error: goal="
+                  << (goal_index + 1)
+                  << " start_distance=" << start_goal_error.total
+                  << " start_base_pos_error=" << start_goal_error.base_position
+                  << " start_base_yaw_error=" << start_goal_error.base_yaw
+                  << " start_arm_joint_error=" << start_goal_error.arm_joint
+                  << " start_left_arm_error=" << start_goal_error.left_arm_joint
+                  << " start_right_arm_error=" << start_goal_error.right_arm_joint
+                  << std::endl;
 
         ob::ScopedState<> goal(space);
         eigenToState(q_goal, goal);
@@ -468,18 +522,68 @@ cp::PathPlanningOutput OmplRrtConnectGlobalPlanner::planDirectPath(
         planner.setup();
         const ob::PlannerStatus solved =
             planner.solve(ob::timedPlannerTerminationCondition(solve_time_sec));
-        if (solved != ob::PlannerStatus::EXACT_SOLUTION) {
-            if (solved == ob::PlannerStatus::APPROXIMATE_SOLUTION) {
-                std::cout << "[global_planner] rrt_connect rejected approximate solution: goal="
-                          << (goal_index + 1) << std::endl;
-            }
+        const bool exact_solution = solved == ob::PlannerStatus::EXACT_SOLUTION;
+        const bool approximate_solution =
+            solved == ob::PlannerStatus::APPROXIMATE_SOLUTION;
+        if (!exact_solution && !approximate_solution) {
             continue;
         }
-        ++solved_paths;
 
         auto path = std::dynamic_pointer_cast<og::PathGeometric>(pdef->getSolutionPath());
         if (!path || path->getStateCount() < 2) {
             continue;
+        }
+        Eigen::VectorXd approximate_tail = stateToEigen(path->getState(path->getStateCount() - 1));
+        const GoalErrorBreakdown approximate_goal_error =
+            computeGoalErrorBreakdown(approximate_tail, q_goal);
+        double approximate_goal_distance = approximate_goal_error.total;
+        const double approximate_accept_distance =
+            std::max({input.goal_tolerance,
+                      common_cfg_.joint_space_sampling_connect_threshold_rad,
+                      common_cfg_.joint_space_sampling_step_rad});
+        if (!exact_solution) {
+            cp::PathPlanningInput::WholeBodyPoseDiagnostic approx_diag;
+            const bool close_enough =
+                approximate_goal_distance <= approximate_accept_distance;
+            const bool tail_to_goal_valid =
+                close_enough &&
+                validateJointSegment(
+                    approximate_tail,
+                    q_goal,
+                    input,
+                    ompl_safe_distance,
+                    &approx_diag);
+            if (!tail_to_goal_valid) {
+                std::cout << "[global_planner] rrt_connect rejected approximate solution: goal="
+                          << (goal_index + 1)
+                          << " tail_distance=" << approximate_goal_distance
+                          << " base_pos_error=" << approximate_goal_error.base_position
+                          << " base_yaw_error=" << approximate_goal_error.base_yaw
+                          << " arm_joint_error=" << approximate_goal_error.arm_joint
+                          << " left_arm_error=" << approximate_goal_error.left_arm_joint
+                          << " right_arm_error=" << approximate_goal_error.right_arm_joint
+                          << " accept_distance=" << approximate_accept_distance
+                          << " tail_valid=" << (close_enough ? "false" : "skipped")
+                          << " tail_margin=" << approx_diag.min_margin
+                          << " tail_reason=" << approx_diag.reason
+                          << std::endl;
+                continue;
+            }
+            ++accepted_approximate_paths;
+            std::cout << "[global_planner] rrt_connect accepted approximate solution: goal="
+                      << (goal_index + 1)
+                      << " tail_distance=" << approximate_goal_distance
+                      << " base_pos_error=" << approximate_goal_error.base_position
+                      << " base_yaw_error=" << approximate_goal_error.base_yaw
+                      << " arm_joint_error=" << approximate_goal_error.arm_joint
+                      << " left_arm_error=" << approximate_goal_error.left_arm_joint
+                      << " right_arm_error=" << approximate_goal_error.right_arm_joint
+                      << " accept_distance=" << approximate_accept_distance
+                      << " tail_margin=" << approx_diag.min_margin
+                      << " tail_reason=" << approx_diag.reason
+                      << std::endl;
+        } else {
+            ++solved_paths;
         }
         const std::size_t raw_state_count = path->getStateCount();
         path->interpolate();
@@ -488,6 +592,10 @@ cp::PathPlanningOutput OmplRrtConnectGlobalPlanner::planDirectPath(
         joint_path.reserve(path->getStateCount());
         for (std::size_t i = 0; i < path->getStateCount(); ++i) {
             joint_path.push_back(stateToEigen(path->getState(i)));
+        }
+        if (!exact_solution && !joint_path.empty() &&
+            jointDistance(joint_path.back(), q_goal) > 1e-9) {
+            joint_path.push_back(q_goal);
         }
         cp::PathPlanningInput::WholeBodyPoseDiagnostic direct_diag;
         const bool direct_segment_valid =
@@ -517,6 +625,13 @@ cp::PathPlanningOutput OmplRrtConnectGlobalPlanner::planDirectPath(
                   << " interpolated_states=" << interpolated_state_count
                   << " shortcut_trials=" << common_cfg_.joint_space_shortcut_trials
                   << " output_states=" << joint_path.size()
+                  << " exact=" << (exact_solution ? "true" : "false")
+                  << " approximate_tail_distance=" << approximate_goal_distance
+                  << " approximate_base_pos_error=" << approximate_goal_error.base_position
+                  << " approximate_base_yaw_error=" << approximate_goal_error.base_yaw
+                  << " approximate_arm_joint_error=" << approximate_goal_error.arm_joint
+                  << " approximate_left_arm_error=" << approximate_goal_error.left_arm_joint
+                  << " approximate_right_arm_error=" << approximate_goal_error.right_arm_joint
                   << " direct_valid=" << (direct_segment_valid ? "true" : "false")
                   << " direct_margin=" << direct_diag.min_margin
                   << " direct_reason=" << direct_diag.reason
@@ -535,6 +650,7 @@ cp::PathPlanningOutput OmplRrtConnectGlobalPlanner::planDirectPath(
     if (candidates.empty()) {
         std::cout << "[global_planner] rrt_connect failed: goals=" << valid_goals.size()
                   << " solved_paths=" << solved_paths
+                  << " accepted_approximate_paths=" << accepted_approximate_paths
                   << " invalid_solution_paths=" << invalid_solution_paths
                   << " feasibility_safe_distance=" << feasibility_safe_distance
                   << " preference_safe_distance=" << input.safe_distance

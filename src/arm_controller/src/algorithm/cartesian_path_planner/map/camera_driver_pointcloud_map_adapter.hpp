@@ -24,9 +24,21 @@ public:
         double voxel_size_m{0.05};
         double max_distance_m{0.60};
         double observation_margin_m{0.15};
+        double occupancy_retention_sec{30.0};
+        std::size_t max_cached_cells{200000u};
+        bool accumulate_observed_bounds{true};
         int isolated_min_neighbor_count{2};
         int isolated_neighbor_radius_cells{1};
         int min_cluster_cell_count{1};
+    };
+
+    struct PlanarBaseCollisionConfig {
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+        Eigen::Vector3d center_in_base{Eigen::Vector3d(0.0, 0.0, 0.22)};
+        Eigen::Vector3d size{Eigen::Vector3d(0.64, 0.64, 0.24)};
+        double check_radius{0.17};
+        bool unknown_is_free{true};
     };
 
     CameraDriverPointcloudMapAdapter(const Config& config,
@@ -44,6 +56,12 @@ public:
     std::size_t activeCellCount() const;
     double voxelSize() const { return config_.voxel_size_m; }
     Vector3dList occupiedCellCenters(std::size_t max_count) const;
+    bool isPlanarBaseCollisionFree(
+        double x,
+        double y,
+        double yaw,
+        const PlanarBaseCollisionConfig& base_config,
+        double clearance) const;
 
 private:
     struct CellKey {
@@ -79,12 +97,20 @@ private:
         int count{0};
     };
 
+    struct OccupiedCell {
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+        Eigen::Vector3d center{Eigen::Vector3d::Zero()};
+        double last_observed_time_sec{0.0};
+        std::uint64_t last_observed_frame{0u};
+    };
+
     using OccupancyMap = std::unordered_map<
         CellKey,
-        Eigen::Vector3d,
+        OccupiedCell,
         CellKeyHash,
         std::equal_to<CellKey>,
-        Eigen::aligned_allocator<std::pair<const CellKey, Eigen::Vector3d>>>;
+        Eigen::aligned_allocator<std::pair<const CellKey, OccupiedCell>>>;
     using AccumulatorMap = std::unordered_map<
         CellKey,
         CellAccum,
@@ -95,9 +121,17 @@ private:
     void onPointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
     CellKey toCellKey(const Eigen::Vector3d& p) const;
     bool pointWithinObservedBounds(const Eigen::Vector3d& p) const;
+    DistanceFieldQueryResult queryDistanceAndGradientUnlocked(
+        const Eigen::Vector3d& p) const;
+    bool isSphereCollisionFreeUnlocked(
+        const Eigen::Vector3d& center,
+        double radius) const;
     int countOccupiedNeighbors(const CellKey& key,
                                const AccumulatorMap& accumulators) const;
     OccupancyMap filterSmallClusters(const OccupancyMap& occupied_cells) const;
+    void purgeExpiredCellsUnlocked(double now_sec);
+    void enforceCacheLimitUnlocked();
+    void updateBoundsUnlocked();
 
     Config config_;
     rclcpp::Node::SharedPtr node_;
@@ -109,6 +143,7 @@ private:
     Eigen::Vector3d min_bound_{Eigen::Vector3d::Zero()};
     Eigen::Vector3d max_bound_{Eigen::Vector3d::Zero()};
     int search_radius_cells_{1};
+    std::uint64_t processed_frame_seq_{0u};
 
     std::atomic<int> processed_frames_{0};
 };

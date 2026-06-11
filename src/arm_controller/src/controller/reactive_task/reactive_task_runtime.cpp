@@ -3,12 +3,32 @@
 #include "arm_controller/ipc/command_queue_ipc.hpp"
 #include "arm_controller/ipc/ipc_context.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <sstream>
 #include <thread>
+
+namespace {
+constexpr std::size_t kPoseParamCount = 7;
+constexpr std::size_t kDualArmPoseParamCount = 2 * kPoseParamCount;
+
+geometry_msgs::msg::Pose poseFromParams(
+    const std::vector<double>& parameters,
+    const std::size_t offset) {
+    geometry_msgs::msg::Pose pose;
+    pose.position.x = parameters[offset + 0];
+    pose.position.y = parameters[offset + 1];
+    pose.position.z = parameters[offset + 2];
+    pose.orientation.x = parameters[offset + 3];
+    pose.orientation.y = parameters[offset + 4];
+    pose.orientation.z = parameters[offset + 5];
+    pose.orientation.w = parameters[offset + 6];
+    return pose;
+}
+}  // namespace
 
 ReactiveTaskController::~ReactiveTaskController() {
     planning_worker_running_ = false;
@@ -27,6 +47,10 @@ ReactiveTaskController::~ReactiveTaskController() {
 bool ReactiveTaskController::send_joint_velocities(
     const std::string& mapping,
     const std::vector<double>& joint_velocities) const {
+    if (runtime_cfg_.command_output == "gazebo") {
+        return send_gazebo_arm_joint_velocities(mapping, joint_velocities);
+    }
+
     if (!hardware_manager_) {
         return false;
     }
@@ -125,26 +149,100 @@ bool ReactiveTaskController::send_joint_velocities(
     }
 }
 
+bool ReactiveTaskController::send_gazebo_arm_joint_velocities(
+    const std::string& mapping,
+    const std::vector<double>& joint_velocities) const {
+    auto publish = [&](const std::string& pub_key,
+                       const std::vector<double>& values) -> bool {
+        const auto it = gazebo_joint_velocity_pubs_.find(pub_key);
+        if (it == gazebo_joint_velocity_pubs_.end() || !it->second) {
+            RCLCPP_ERROR(
+                node_->get_logger(),
+                "[%s] gazebo velocity publisher unavailable for key=%s",
+                mapping.c_str(),
+                pub_key.c_str());
+            return false;
+        }
+        std_msgs::msg::Float64MultiArray msg;
+        msg.data = values;
+        it->second->publish(msg);
+        return true;
+    };
+
+    if (mapping == "dual_arm") {
+        if (joint_velocities.size() != 12u) {
+            RCLCPP_ERROR(
+                node_->get_logger(),
+                "[dual_arm] gazebo velocity command expected 12 arm values, got %zu",
+                joint_velocities.size());
+            return false;
+        }
+        const std::vector<double> left(
+            joint_velocities.begin(), joint_velocities.begin() + 6);
+        const std::vector<double> right(
+            joint_velocities.begin() + 6, joint_velocities.end());
+        const bool left_ok = publish("left_arm", left);
+        const bool right_ok = publish("right_arm", right);
+        return left_ok && right_ok;
+    }
+
+    const std::string pub_key =
+        (mapping == "left_arm" || mapping == "right_arm") ? mapping : "default";
+    return publish(pub_key, joint_velocities);
+}
+
+void ReactiveTaskController::publish_chassis_twist(
+    const Eigen::Vector3d& base_velocity) const {
+    geometry_msgs::msg::Twist msg;
+    msg.linear.x = std::clamp(
+        base_velocity.x(), -runtime_cfg_.base_max_vx, runtime_cfg_.base_max_vx);
+    msg.linear.y = std::clamp(
+        base_velocity.y(), -runtime_cfg_.base_max_vy, runtime_cfg_.base_max_vy);
+    msg.angular.z = std::clamp(
+        base_velocity.z(), -runtime_cfg_.base_max_wz, runtime_cfg_.base_max_wz);
+
+    if (cmd_vel_pub_) {
+        cmd_vel_pub_->publish(msg);
+    }
+}
+
+void ReactiveTaskController::stop_whole_body_motion() const {
+    const Eigen::Vector3d zero_base = Eigen::Vector3d::Zero();
+    const std::vector<double> zero_arm(12u, 0.0);
+    const int repeats = runtime_cfg_.command_output == "gazebo" ? 12 : 3;
+    for (int i = 0; i < repeats; ++i) {
+        publish_chassis_twist(zero_base);
+        if (runtime_cfg_.command_output == "gazebo") {
+            (void)send_gazebo_arm_joint_velocities("dual_arm", zero_arm);
+        }
+        if (i + 1 < repeats) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    }
+}
+
 bool ReactiveTaskController::execute(
     const std::string& mapping,
     const std::vector<double>& parameters) {
-    if (parameters.size() != 7) {
+    if (mapping == "dual_arm" && parameters.size() == kDualArmPoseParamCount) {
+        DualArmTarget target;
+        target.left = poseFromParams(parameters, 0);
+        target.right = poseFromParams(parameters, kPoseParamCount);
+        last_execution_success_[mapping] = false;
+        return executeDualArmTask(mapping, target);
+    }
+
+    if (parameters.size() != kPoseParamCount) {
         RCLCPP_ERROR(
             node_->get_logger(),
-            "[%s] reactive_task expected 7 params [x y z qx qy qz qw], got %zu",
+            "[%s] reactive_task expected 7 params [x y z qx qy qz qw] or dual_arm 14 params [left_pose right_pose], got %zu",
             mapping.c_str(),
             parameters.size());
         return false;
     }
 
-    auto pose = std::make_shared<geometry_msgs::msg::Pose>();
-    pose->position.x = parameters[0];
-    pose->position.y = parameters[1];
-    pose->position.z = parameters[2];
-    pose->orientation.x = parameters[3];
-    pose->orientation.y = parameters[4];
-    pose->orientation.z = parameters[5];
-    pose->orientation.w = parameters[6];
+    auto pose = std::make_shared<geometry_msgs::msg::Pose>(
+        poseFromParams(parameters, 0));
 
     last_execution_success_[mapping] = false;
     plan_and_execute(mapping, pose);

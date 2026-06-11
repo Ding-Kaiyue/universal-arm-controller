@@ -11,7 +11,11 @@
 
   <exec_depend>arm_controller</exec_depend>
   <exec_depend>camera_driver</exec_depend>
+  <exec_depend>moveit_configs_utils</exec_depend>
+  <exec_depend>moveit_ros_move_group</exec_depend>
+  <exec_depend>robot_simulation</exec_depend>
   <exec_depend>trajectory_planning_bringup</exec_depend>
+  <exec_depend>whole_body_config</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

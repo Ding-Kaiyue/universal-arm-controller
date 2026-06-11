@@ -16,6 +16,8 @@ ReactiveTaskController::ReactiveTaskController(const rclcpp::Node::SharedPtr& no
     : TrajectoryControllerImpl<geometry_msgs::msg::Pose>("ReactiveTask", node),
       diagnostics_publisher_(node) {
     hardware_manager_ = HardwareManager::getInstance();
+    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(node_->get_clock());
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     reactive_cfg_loaded_ = loadReactiveConfig();
     terminal_policy_ =
         arm_controller::controller::reactive_task::ReactiveTaskTerminalPolicy();
@@ -28,6 +30,36 @@ ReactiveTaskController::ReactiveTaskController(const rclcpp::Node::SharedPtr& no
     watchdog_ =
         arm_controller::controller::reactive_task::ReactiveTaskWatchdog(watchdog_cfg);
     local_planner_.configure(runtime_cfg_.local_planner);
+    if (runtime_cfg_.command_output == "gazebo") {
+        gazebo_joint_velocity_pubs_["left_arm"] =
+            node_->create_publisher<std_msgs::msg::Float64MultiArray>(
+                runtime_cfg_.left_arm_velocity_command_topic,
+                rclcpp::QoS(10).reliable());
+        gazebo_joint_velocity_pubs_["right_arm"] =
+            node_->create_publisher<std_msgs::msg::Float64MultiArray>(
+                runtime_cfg_.right_arm_velocity_command_topic,
+                rclcpp::QoS(10).reliable());
+        gazebo_joint_velocity_pubs_["default"] =
+            node_->create_publisher<std_msgs::msg::Float64MultiArray>(
+                runtime_cfg_.arm_velocity_command_topic,
+                rclcpp::QoS(10).reliable());
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "[reactive_task] command_output=gazebo left=%s right=%s default=%s",
+            runtime_cfg_.left_arm_velocity_command_topic.c_str(),
+            runtime_cfg_.right_arm_velocity_command_topic.c_str(),
+            runtime_cfg_.arm_velocity_command_topic.c_str());
+    }
+    if (runtime_cfg_.enable_mobile_base_in_planning ||
+        runtime_cfg_.enable_mobile_base_in_neo) {
+        cmd_vel_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>(
+            runtime_cfg_.cmd_vel_topic,
+            rclcpp::QoS(10).reliable());
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "[reactive_task] mobile base output cmd_vel_topic=%s",
+            runtime_cfg_.cmd_vel_topic.c_str());
+    }
     ensureCameraDriverDistanceFieldInitialized();
     collision_ellipsoid_marker_timer_ = node_->create_wall_timer(
         std::chrono::milliseconds(100),
@@ -85,7 +117,8 @@ void ReactiveTaskController::ensureCameraDriverDistanceFieldInitialized() {
     }
 
     std::lock_guard<std::mutex> lock(live_distance_field_mutex_);
-    if (runtime_cfg_.collision_map_source == "camera_driver_pointcloud" &&
+    if ((runtime_cfg_.collision_map_source == "camera_driver_pointcloud" ||
+         runtime_cfg_.distance_field_source == "camera_driver_pointcloud") &&
         !camera_driver_pointcloud_map_) {
         camera_driver_pointcloud_map_ =
             std::make_shared<cp::CameraDriverPointcloudMapAdapter>(
@@ -103,7 +136,7 @@ void ReactiveTaskController::ensureCameraDriverDistanceFieldInitialized() {
                 node_);
         RCLCPP_INFO(
             node_->get_logger(),
-            "[reactive_task] camera_driver ESDF client ready.");
+            "[reactive_task] camera_driver ESDF SHM map ready.");
     }
 }
 

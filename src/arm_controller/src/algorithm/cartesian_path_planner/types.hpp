@@ -134,6 +134,21 @@ struct PathPlanningInput {
         double /*safe_distance*/,
         WholeBodyPoseDiagnostic* /*diag*/)>;
 
+    using MobileBaseStateValidatorFn = std::function<bool(
+        double /*x*/,
+        double /*y*/,
+        double /*yaw*/,
+        double /*safe_distance*/)>;
+
+    using MobileBaseSegmentValidatorFn = std::function<bool(
+        double /*from_x*/,
+        double /*from_y*/,
+        double /*from_yaw*/,
+        double /*to_x*/,
+        double /*to_y*/,
+        double /*to_yaw*/,
+        double /*safe_distance*/)>;
+
     using JointToPoseFn = std::function<bool(
         const Eigen::VectorXd& /*q*/,
         CartesianWaypoint& /*wp*/)>;
@@ -165,6 +180,12 @@ struct PathPlanningInput {
     WholeBodyPoseDiagnosticFn whole_body_pose_diagnostic;
     JointStateValidatorFn joint_state_validator;
     JointSegmentValidatorFn joint_segment_validator;
+    JointStateValidatorFn manipulator_state_validator;
+    JointSegmentValidatorFn manipulator_segment_validator;
+    MobileBaseStateValidatorFn mobile_base_state_validator;
+    MobileBaseSegmentValidatorFn mobile_base_segment_validator;
+    MobileBaseStateValidatorFn kino_mobile_base_state_validator;
+    MobileBaseSegmentValidatorFn kino_mobile_base_segment_validator;
     JointToPoseFn joint_to_pose_fn;
 };
 

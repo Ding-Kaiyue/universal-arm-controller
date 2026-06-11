@@ -15,6 +15,8 @@ include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}
+  ${camera_driver_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../camera_driver/include
 )
 
 install(

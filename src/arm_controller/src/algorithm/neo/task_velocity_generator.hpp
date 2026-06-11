@@ -58,11 +58,49 @@ struct TaskVelocityOutput {
         Eigen::Matrix<double, 6, 1>::Zero();
 };
 
+struct MobileBaseVelocityConfig {
+    double kp_xy{0.80};
+    double kp_yaw{1.20};
+    double max_vx{0.5};
+    double max_vy{0.5};
+    double max_wz{1.0};
+    double xy_deadband{1e-4};
+    double yaw_deadband{1e-4};
+};
+
+struct MobileBaseVelocityInput {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    // Current base pose in world/odom frame: [x, y, yaw].
+    Eigen::Vector3d current_pose{Eigen::Vector3d::Zero()};
+    // Reference base pose in world/odom frame: [x, y, yaw].
+    Eigen::Vector3d target_pose{Eigen::Vector3d::Zero()};
+    // Optional next reference pose for feedforward velocity.
+    bool has_next_target_pose{false};
+    Eigen::Vector3d next_target_pose{Eigen::Vector3d::Zero()};
+    double dt_sec{0.01};
+};
+
+struct MobileBaseVelocityOutput {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    // Body-frame base command [vx_body, vy_body, wz].
+    Eigen::Vector3d body_twist{Eigen::Vector3d::Zero()};
+    Eigen::Vector2d position_error_world{Eigen::Vector2d::Zero()};
+    double yaw_error{0.0};
+    Eigen::Vector3d feedforward_body_twist{Eigen::Vector3d::Zero()};
+    Eigen::Vector3d feedback_body_twist{Eigen::Vector3d::Zero()};
+};
+
 class TaskVelocityGenerator {
     public:
     TaskVelocityOutput compute(
         const TaskVelocityInput& in,
         const TaskVelocityConfig& cfg) const;
+
+    MobileBaseVelocityOutput computeMobileBaseVelocity(
+        const MobileBaseVelocityInput& in,
+        const MobileBaseVelocityConfig& cfg) const;
 
     private:
     // 计算姿态误差，返回“当前姿态到目标姿态”的旋转向量（在基坐标系表达）
@@ -77,6 +115,8 @@ class TaskVelocityGenerator {
     static Eigen::Vector3d applyDeadband(
         const Eigen::Vector3d& v,
         double threshold);
+
+    static double normalizeAngle(double angle);
 };
 
 // Frame conversion helpers for feeding world-frame references into NEO.

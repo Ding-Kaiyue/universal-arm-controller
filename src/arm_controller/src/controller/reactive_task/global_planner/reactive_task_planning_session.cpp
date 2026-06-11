@@ -152,6 +152,16 @@ bool ReactiveTaskController::preparePlanningSession(
     if (runtime_cfg_.distance_field_source == "camera_driver_esdf") {
       distance_field_map = std::static_pointer_cast<cp::DistanceFieldInterface>(
           camera_driver_esdf_map_);
+    } else if (runtime_cfg_.distance_field_source == "camera_driver_pointcloud") {
+      distance_field_map = std::static_pointer_cast<cp::DistanceFieldInterface>(
+          camera_driver_pointcloud_map_);
+    }
+    if (runtime_cfg_.distance_field_source == "camera_driver_esdf") {
+      collision_map = std::static_pointer_cast<cp::DistanceFieldInterface>(
+          camera_driver_esdf_map_);
+    } else if (runtime_cfg_.collision_map_source == "camera_driver_esdf") {
+      collision_map = std::static_pointer_cast<cp::DistanceFieldInterface>(
+          camera_driver_esdf_map_);
     }
     if (runtime_cfg_.collision_map_source == "camera_driver_pointcloud") {
       collision_map = std::static_pointer_cast<cp::DistanceFieldInterface>(
@@ -171,6 +181,7 @@ bool ReactiveTaskController::preparePlanningSession(
   session->enable_obstacle_constraints =
       reactive_cfg_.qp_build.enable_obstacle_damper &&
       (runtime_cfg_.distance_field_source == "camera_driver_esdf" ||
+       runtime_cfg_.distance_field_source == "camera_driver_pointcloud" ||
        (runtime_cfg_.distance_field_source == "dummy" &&
         runtime_cfg_.enable_dummy_obstacle));
 

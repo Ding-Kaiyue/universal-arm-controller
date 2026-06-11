@@ -45,6 +45,10 @@
 #include "trajectory_planning_v3/infrastructure/integration/tracik_adapter.hpp"
 #include <Eigen/Core>
 #include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/twist.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 
 class ReactiveTaskController final
     : public TrajectoryControllerImpl<geometry_msgs::msg::Pose> {
@@ -78,6 +82,24 @@ public:
     Eigen::Vector3d map_margin_xyz{0.60, 0.60, 0.60};
     std::string distance_field_source{"camera_driver_esdf"};
     std::string collision_map_source{"camera_driver_pointcloud"};
+    std::string arm_state_source{"hardware"};
+    std::string command_output{"real"};
+    std::string joint_state_topic{"/joint_states"};
+    std::string left_arm_velocity_command_topic{"/left_arm_velocity_controller/commands"};
+    std::string right_arm_velocity_command_topic{"/right_arm_velocity_controller/commands"};
+    std::string arm_velocity_command_topic{"/arm_velocity_controller/commands"};
+    double joint_state_stale_timeout_sec{0.25};
+    bool enable_mobile_base_in_planning{false};
+    bool enable_mobile_base_in_neo{false};
+    std::string mobile_base_type{"fixed"};
+    std::string mobile_base_state_source{"tf"};
+    std::string mobile_base_odom_frame{"odom"};
+    std::string mobile_base_frame{"base_footprint"};
+    std::string cmd_vel_topic{"/cmd_vel"};
+    double base_max_vx{0.20};
+    double base_max_vy{0.20};
+    double base_max_wz{0.45};
+    double base_velocity_weight_scale{2.0};
     arm_controller::algorithm::cartesian_path_planner::
         CameraDriverPointcloudMapAdapter::Config camera_driver_pointcloud;
     arm_controller::algorithm::cartesian_path_planner::
@@ -100,6 +122,11 @@ private:
   struct PlanningTask {
     std::string mapping;
     geometry_msgs::msg::Pose::SharedPtr msg;
+  };
+
+  struct DualArmTarget {
+    geometry_msgs::msg::Pose left;
+    geometry_msgs::msg::Pose right;
   };
 
   struct MappingContext {
@@ -220,9 +247,26 @@ private:
   bool runPlanningControlLoop(const std::string &mapping,
                               const PlanningSession &session,
                               PlanningRuntime *runtime);
+  bool executeDualArmTask(const std::string &mapping,
+                          const DualArmTarget &target);
+  bool executeWholeBodyReference(
+      const std::string &mapping,
+      const arm_controller::algorithm::cartesian_path_planner::
+          TimedJointTrajectory &trajectory,
+      const arm_controller::algorithm::cartesian_path_planner::
+          PathPlanningInput &planning_input,
+      const MappingContext &ctx,
+      std::shared_ptr<const arm_controller::algorithm::cartesian_path_planner::
+                          DistanceFieldInterface>
+          collision_map);
 
   bool send_joint_velocities(const std::string &mapping,
                              const std::vector<double> &joint_velocities) const;
+  bool send_gazebo_arm_joint_velocities(
+      const std::string &mapping,
+      const std::vector<double> &joint_velocities) const;
+  void publish_chassis_twist(const Eigen::Vector3d &base_velocity) const;
+  void stop_whole_body_motion() const;
 
 private:
   std::shared_ptr<HardwareManager> hardware_manager_;
@@ -261,6 +305,9 @@ private:
   arm_controller::controller::reactive_task::ArmLocalPlanner local_planner_;
   arm_controller::controller::reactive_task::ReactiveTaskObstacleSelector
       obstacle_selector_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
+  std::map<std::string, rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr>
+      gazebo_joint_velocity_pubs_;
 
   std::map<std::string, bool> last_execution_success_;
 
@@ -273,4 +320,6 @@ private:
   std::mutex planning_queue_mutex_;
   std::condition_variable planning_queue_cv_;
   rclcpp::TimerBase::SharedPtr collision_ellipsoid_marker_timer_;
+  std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 };

@@ -10,6 +10,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(trajectory_planning_interfaces REQUIRED)
 find_package(controller_interfaces REQUIRED)
+find_package(camera_driver REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(urdf REQUIRED)
 find_package(ament_index_cpp REQUIRED)
@@ -23,6 +24,7 @@ find_package(orocos_kdl REQUIRED)
 find_package(kdl_parser REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(osqp REQUIRED)
+find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(csaps REQUIRED)
@@ -64,6 +66,7 @@ set(ARM_CONTROLLER_COMMON_AMENT_DEPS
   orocos_kdl
   kdl_parser
   Eigen3
+  tf2
   tf2_ros
   tf2_geometry_msgs
   csaps

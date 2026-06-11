@@ -57,6 +57,29 @@ TEST(ReactiveQpTaskVelocityTest, SpeedLimitIsApplied) {
     EXPECT_NEAR(out.v_des.tail<3>().norm(), 0.3, 1e-9);
 }
 
+TEST(ReactiveQpMobileBaseVelocityTest, ProducesBodyFrameBaseTwist) {
+    rq::TaskVelocityGenerator generator;
+    rq::MobileBaseVelocityInput input;
+    rq::MobileBaseVelocityConfig config;
+    config.kp_xy = 1.0;
+    config.kp_yaw = 2.0;
+    config.max_vx = 10.0;
+    config.max_vy = 10.0;
+    config.max_wz = 10.0;
+
+    input.current_pose = Eigen::Vector3d(0.0, 0.0, M_PI / 2.0);
+    input.target_pose = Eigen::Vector3d(0.0, 1.0, M_PI);
+    input.next_target_pose = Eigen::Vector3d(0.0, 1.2, M_PI);
+    input.has_next_target_pose = true;
+    input.dt_sec = 0.2;
+
+    const rq::MobileBaseVelocityOutput out =
+        generator.computeMobileBaseVelocity(input, config);
+    EXPECT_NEAR(out.body_twist.x(), 2.0, 1e-9);
+    EXPECT_NEAR(out.body_twist.y(), 0.0, 1e-9);
+    EXPECT_NEAR(out.body_twist.z(), M_PI, 1e-9);
+}
+
 TEST(ReactiveQpProblemTest, RejectsNonSymmetricHessian) {
     rq::ReactiveQpProblem p;
     p.hessian = Eigen::Matrix2d::Zero();

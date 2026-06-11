@@ -39,6 +39,7 @@ ament_target_dependencies(arm_controller_lib
 )
 
 target_link_libraries(arm_controller_lib
+  camera_driver::camera_driver_esdf_ipc
   hardware_driver::hardware_driver_canfd
   osqp::osqp
   csaps::csaps

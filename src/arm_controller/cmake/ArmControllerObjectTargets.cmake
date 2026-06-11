@@ -76,12 +76,18 @@ endif()
 
 if(ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
   add_library(arm_controller_planning_objects OBJECT
+    src/algorithm/cartesian_path_planner/base/kino_astar_base_planner.cpp
+    src/algorithm/cartesian_path_planner/collision/base_footprint_collision_checker.cpp
     src/algorithm/cartesian_path_planner/collision/cartesian_collision_checker.cpp
     src/algorithm/cartesian_path_planner/collision/clearance_evaluator.cpp
     src/algorithm/cartesian_path_planner/collision/whole_body_ellipsoid_collision_checker.cpp
     src/algorithm/cartesian_path_planner/core/trajectory_parameterizer.cpp
+    src/algorithm/global_planner/base_guided_whole_body_planner.cpp
+    src/algorithm/global_planner/layer_gap_rrt_connector.cpp
     src/algorithm/global_planner/ompl_rrt_connect_global_planner.cpp
     src/algorithm/cartesian_path_planner/map/dummy_distance_field.cpp
+    src/algorithm/cartesian_path_planner/map/composite_distance_field.cpp
+    src/algorithm/cartesian_path_planner/map/static_pillar_distance_field.cpp
     src/algorithm/cartesian_path_planner/map/camera_driver_pointcloud_map_adapter.cpp
     src/algorithm/cartesian_path_planner/map/camera_driver_esdf_map_client.cpp
     src/algorithm/cartesian_path_planner/global_trajectory/global_trajectory_manager.cpp
@@ -104,6 +110,7 @@ if(ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
     pinocchio
   )
   target_link_libraries(arm_controller_planning_objects
+    camera_driver::camera_driver_esdf_ipc
     pinocchio::pinocchio
     ${OMPL_LIBRARIES}
   )
@@ -215,6 +222,8 @@ if(ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
     src/controller/reactive_task/controller/reactive_task_execution_state_machine.cpp
     src/controller/reactive_task/reactive_task_mapping_context.cpp
     src/controller/reactive_task/reactive_task_runtime.cpp
+    src/controller/reactive_task/controller/reactive_task_dual_arm_execution.cpp
+    src/controller/reactive_task/goal/whole_body_goal_generator.cpp
     src/controller/reactive_task/global_planner/reactive_task_planning_execution.cpp
     src/controller/reactive_task/global_planner/reactive_task_planning_session.cpp
     src/controller/reactive_task/global_planner/reactive_task_planning_runtime.cpp
@@ -239,6 +248,7 @@ if(ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
     ${ARM_CONTROLLER_COMMON_AMENT_DEPS}
   )
   target_link_libraries(arm_controller_reactive_task_core_objects
+    camera_driver::camera_driver_esdf_ipc
     hardware_driver::hardware_driver_canfd
     osqp::osqp
     csaps::csaps
@@ -251,6 +261,11 @@ endif()
 if(ARM_CONTROLLER_BUILD_MOTION_CONTROLLERS)
   add_library(arm_controller_motion_local_planner_objects OBJECT
     src/controller/reactive_task/local_planner/reactive_task_local_planner.cpp
+    src/controller/reactive_task/local_planner/reactive_task_whole_body_local_planner.cpp
+    src/controller/reactive_task/local_planner/whole_body_frontend_initializer.cpp
+    src/controller/reactive_task/local_planner/whole_body_lbfgs_optimizer.cpp
+    src/controller/reactive_task/local_planner/whole_body_local_target_selector.cpp
+    src/controller/reactive_task/local_planner/whole_body_polynomial_trajectory.cpp
   )
   arm_controller_configure_object_target(arm_controller_motion_local_planner_objects)
   ament_target_dependencies(arm_controller_motion_local_planner_objects

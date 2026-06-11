@@ -81,6 +81,8 @@ PYBIND11_MODULE(arm_controller_ipc, m) {
         .def(py::init<>())
         .def("execute", &arm_controller::reactive_task::ReactiveTaskIPCInterface::execute,
              py::arg("target_pose"), py::arg("mapping"))
+        .def("execute_dual_arm", &arm_controller::reactive_task::ReactiveTaskIPCInterface::executeDualArm,
+             py::arg("left_target_pose"), py::arg("right_target_pose"), py::arg("mapping") = "dual_arm")
         .def("get_current_mode", &arm_controller::reactive_task::ReactiveTaskIPCInterface::getCurrentMode,
              py::arg("mapping"))
         .def("get_execution_state", &arm_controller::reactive_task::ReactiveTaskIPCInterface::getExecutionState,

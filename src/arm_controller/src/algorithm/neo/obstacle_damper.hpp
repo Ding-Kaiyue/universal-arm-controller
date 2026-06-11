@@ -26,6 +26,8 @@ struct ObstacleConstraintInput {
     Eigen::RowVectorXd normal_jacobian;
     // Full linear Jacobian at the queried point, shape: 3 x dof.
     Eigen::MatrixXd linear_jacobian;
+    // Queried collision point in world frame.
+    Eigen::Vector3d point_world{Eigen::Vector3d::Zero()};
     // Obstacle outward normal in world frame.
     Eigen::Vector3d normal_world{Eigen::Vector3d::Zero()};
 

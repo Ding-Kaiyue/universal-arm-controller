@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="simple_omni_dual_arm">
+    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+
+    <!-- Import simple_omni_dual_arm urdf file -->
+    <xacro:include filename="$(find whole_body_description)/urdf/simple_omni_dual_arm.urdf" />
+
+    <!-- Import control_xacro -->
+    <xacro:include filename="simple_omni_dual_arm.ros2_control.xacro" />
+
+
+    <xacro:simple_omni_dual_arm_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
+
+</robot>

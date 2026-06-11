@@ -6,6 +6,10 @@
 
 完整的机械臂控制系统解决方案。基于 ROS2 的模块化架构，集成轨迹规划、轨迹插值、硬件驱动等核心功能。
 
+
+![Whole-body-control](demo/whole_body_control.gif)
+![single-arm](demo/single_arm.gif)
+
 ## 核心特性
 
 - **13+ 控制模式**: MoveJ、MoveL、MoveC、JointVelocity、CartesianVelocity 等

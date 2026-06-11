@@ -51,7 +51,8 @@ bool ReactiveTaskController::initializePlanningRuntime(
   std::size_t active_cells = 0u;
   std::size_t successful_queries = 0u;
   std::size_t failed_queries = 0u;
-  bool service_ready = false;
+  bool esdf_ready = false;
+  int esdf_frames = 0;
   {
     std::lock_guard<std::mutex> lock(live_distance_field_mutex_);
     if (camera_driver_pointcloud_map_) {
@@ -61,14 +62,20 @@ bool ReactiveTaskController::initializePlanningRuntime(
     if (camera_driver_esdf_map_) {
       successful_queries = camera_driver_esdf_map_->successfulQueries();
       failed_queries = camera_driver_esdf_map_->failedQueries();
-      service_ready = camera_driver_esdf_map_->isServiceReady();
+      esdf_ready = camera_driver_esdf_map_->isMapReady();
+      esdf_frames = camera_driver_esdf_map_->processedFrames();
     }
   }
-  map_summary << "distance_field=" << runtime_cfg_.distance_field_source
-              << "(ready=" << (service_ready ? "true" : "false")
-              << " ok=" << successful_queries << " fail=" << failed_queries
-              << ")"
-              << " collision_map=" << runtime_cfg_.collision_map_source
+  map_summary << "distance_field=" << runtime_cfg_.distance_field_source;
+  if (runtime_cfg_.distance_field_source == "camera_driver_esdf") {
+    map_summary << "(shm_ready=" << (esdf_ready ? "true" : "false")
+                << " frames=" << esdf_frames << " ok=" << successful_queries
+                << " fail=" << failed_queries << ")";
+  } else if (runtime_cfg_.distance_field_source == "camera_driver_pointcloud") {
+    map_summary << "(frames=" << processed_frames << " cells=" << active_cells
+                << ")";
+  }
+  map_summary << " collision_map=" << runtime_cfg_.collision_map_source
               << "(frames=" << processed_frames << " cells=" << active_cells
               << ")";
 

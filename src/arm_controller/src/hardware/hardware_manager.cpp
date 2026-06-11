@@ -9,6 +9,30 @@
 #include <set>
 #include <limits>
 
+namespace {
+
+std::string resolveUrdfPathForRobotType(const std::string& robot_type) {
+    if (robot_type == "simple_omni_dual_arm" ||
+        robot_type == "simple_omni_dual_arm_gazebo") {
+        return ament_index_cpp::get_package_share_directory("whole_body_description") +
+               "/urdf/simple_omni_dual_arm.urdf";
+    }
+    return ament_index_cpp::get_package_share_directory("robot_description") +
+           "/urdf/" + robot_type + ".urdf";
+}
+
+std::string resolveJointLimitsPathForRobotType(const std::string& robot_type) {
+    if (robot_type == "simple_omni_dual_arm" ||
+        robot_type == "simple_omni_dual_arm_gazebo") {
+        return ament_index_cpp::get_package_share_directory("whole_body_config") +
+               "/config/joint_limits.yaml";
+    }
+    return ament_index_cpp::get_package_share_directory("arm_controller") +
+           "/config/" + robot_type + "_joint_limits.yaml";
+}
+
+}  // namespace
+
 std::shared_ptr<HardwareManager> HardwareManager::getInstance() {
     std::lock_guard<std::mutex> lock(instance_mutex_);
     if (!instance_) {
@@ -19,6 +43,7 @@ std::shared_ptr<HardwareManager> HardwareManager::getInstance() {
 
 bool HardwareManager::initialize(rclcpp::Node::SharedPtr node) {
     node_ = node;
+    simulation_mode_ = false;
 
     // 加载硬件配置
     load_hardware_config();
@@ -105,6 +130,33 @@ bool HardwareManager::initialize(rclcpp::Node::SharedPtr node) {
         RCLCPP_ERROR(node_->get_logger(), "❎ Failed to initialize HardwareManager: %s", e.what());
         return false;
     }
+}
+
+bool HardwareManager::initialize_for_simulation(rclcpp::Node::SharedPtr node) {
+    node_ = node;
+    simulation_mode_ = true;
+    hardware_driver_.reset();
+
+    if (!load_hardware_config()) {
+        return false;
+    }
+    load_joint_limits_config();
+
+    for (const auto& mapping : get_all_mappings()) {
+        reset_system_health(mapping);
+        clear_emergency_stops(mapping);
+    }
+
+    sim_joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
+        "/joint_states",
+        10,
+        [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
+            handle_sim_joint_state(msg);
+        });
+
+    RCLCPP_INFO(node_->get_logger(),
+                "✅ HardwareManager initialized for Gazebo simulation: config and joint metadata loaded, real drivers disabled");
+    return true;
 }
 
 std::shared_ptr<RobotHardware> HardwareManager::get_hardware_driver() const {
@@ -218,7 +270,9 @@ bool HardwareManager::is_system_healthy(const std::string& mapping) const {
     bool mapping_healthy = mapping_health_it != mapping_health_status_.end() ? 
                           mapping_health_it->second : true;
     
-    bool overall_healthy = system_healthy_ && hardware_driver_ != nullptr && mapping_healthy;
+    bool overall_healthy = system_healthy_ &&
+                           (simulation_mode_ || hardware_driver_ != nullptr) &&
+                           mapping_healthy;
 
     // 如果系统不健康，打印原因
     if (!overall_healthy) {
@@ -335,6 +389,13 @@ const std::string& HardwareManager::get_robot_type(const std::string& mapping) c
 
 // ============ 轨迹执行 ============
 bool HardwareManager::executeTrajectory(const std::string& interface, const trajectory_interpolator::Trajectory& trajectory) {
+    if (simulation_mode_) {
+        RCLCPP_INFO(node_->get_logger(),
+                    "Gazebo simulation mode: skip real trajectory execution for interface '%s'",
+                    interface.c_str());
+        (void)trajectory;
+        return true;
+    }
     if (!hardware_driver_) {
         RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
         return false;
@@ -527,6 +588,13 @@ std::vector<double> HardwareManager::get_current_joint_positions_lockfree(const 
 
 bool HardwareManager::send_hold_state_command(const std::string& mapping,
                                                   const std::vector<double>& positions) {
+    if (simulation_mode_) {
+        RCLCPP_DEBUG(node_->get_logger(),
+                    "[%s] Skip hold-state MIT command in Gazebo simulation mode",
+                    mapping.c_str());
+        (void)positions;
+        return true;
+    }
     if (!hardware_driver_) {
         RCLCPP_ERROR(node_->get_logger(), "❎ Hardware driver not initialized");
         return false;
@@ -660,8 +728,58 @@ void HardwareManager::update_joint_state(const std::string& interface, uint32_t 
     }
 }
 
+void HardwareManager::handle_sim_joint_state(
+    const sensor_msgs::msg::JointState::SharedPtr msg) {
+    if (!simulation_mode_ || !msg) {
+        return;
+    }
+
+    std::unordered_map<std::string, std::size_t> index_by_name;
+    index_by_name.reserve(msg->name.size());
+    for (std::size_t i = 0; i < msg->name.size(); ++i) {
+        index_by_name[msg->name[i]] = i;
+    }
+
+    std::lock_guard<std::mutex> lock(joint_state_mutex_);
+    for (auto& [mapping, joint_state] : mapping_joint_states_) {
+        bool updated = false;
+        for (std::size_t local_index = 0; local_index < joint_state.name.size();
+             ++local_index) {
+            const auto source_it =
+                index_by_name.find(joint_state.name[local_index]);
+            if (source_it == index_by_name.end()) {
+                continue;
+            }
+            const std::size_t source_index = source_it->second;
+            if (source_index < msg->position.size()) {
+                joint_state.position[local_index] = msg->position[source_index];
+                auto cache_it = joint_positions_cache_.find(mapping);
+                if (cache_it != joint_positions_cache_.end() &&
+                    local_index < cache_it->second.size() &&
+                    cache_it->second[local_index]) {
+                    cache_it->second[local_index]->store(
+                        msg->position[source_index], std::memory_order_release);
+                }
+                updated = true;
+            }
+            if (source_index < msg->velocity.size() &&
+                local_index < joint_state.velocity.size()) {
+                joint_state.velocity[local_index] = msg->velocity[source_index];
+            }
+            if (source_index < msg->effort.size() &&
+                local_index < joint_state.effort.size()) {
+                joint_state.effort[local_index] = msg->effort[source_index];
+            }
+        }
+        if (updated) {
+            joint_state.header.stamp = msg->header.stamp;
+        }
+    }
+}
+
 void HardwareManager::publish_joint_state() {
     if (!joint_state_pub_) return;
+    if (simulation_mode_) return;
 
     // ✅ CRITICAL FIX: 分离数据复制和发布操作
     // 1. 在锁内复制数据（快速操作）
@@ -699,7 +817,7 @@ void HardwareManager::publish_joint_state() {
 // =========== 配置文件加载 ===========
 bool HardwareManager::load_joint_limits_config() {
     try {
-        if (mapping_to_interface_.empty()) {
+        if (mapping_to_interface_.empty() && software_mapping_to_interface_.empty()) {
             RCLCPP_WARN_ONCE(node_->get_logger(), "No mapping available before loading joint limits.");
             return false;
         }
@@ -707,7 +825,7 @@ bool HardwareManager::load_joint_limits_config() {
         joint_limits_config_.clear();
 
         // 为每个 mapping 加载对应的 joint limit 文件
-        for (const auto& [mapping_name, interface] : mapping_to_interface_) {
+        for (const auto& mapping_name : get_all_mappings()) {
             const std::string& robot_type = get_robot_type(mapping_name);
             bool robot_type_undefined = robot_type.empty() || robot_type == "unknown_robot";
             
@@ -716,9 +834,7 @@ bool HardwareManager::load_joint_limits_config() {
                 continue;
             }
 
-            // 拼接文件路径
-            std::string pkg_path = ament_index_cpp::get_package_share_directory("arm_controller");
-            std::string config_file = pkg_path + "/config/" + robot_type + "_joint_limits.yaml";
+            std::string config_file = resolveJointLimitsPathForRobotType(robot_type);
 
             RCLCPP_DEBUG(node_->get_logger(), "[%s] Loading joint limits: %s", mapping_name.c_str(), config_file.c_str());
             YAML::Node config = YAML::LoadFile(config_file);
@@ -738,7 +854,8 @@ bool HardwareManager::load_joint_limits_config() {
                 const YAML::Node& limits = joint.second;
                 JointLimits jl;
 
-                jl.has_position_limits      = limits["has_position_limits"] ? limits["has_position_limits"].as<bool>() : false;
+                jl.has_position_limits      = limits["has_position_limits"] ? limits["has_position_limits"].as<bool>() :
+                                              (limits["min_position"] || limits["max_position"]);
                 jl.min_position             = limits["min_position"]        ? limits["min_position"].as<double>() : -3.14;
                 jl.max_position             = limits["max_position"]        ? limits["max_position"].as<double>() : 3.14;
 
@@ -953,19 +1070,25 @@ bool HardwareManager::parse_mapping(const std::string& mapping_name, const YAML:
     // ===== URDF路径 (根据robot_type自动查找) =====
     std::string urdf_path;
     try {
-        std::string robot_desc_path = ament_index_cpp::get_package_share_directory("robot_description");
-        urdf_path = robot_desc_path + "/urdf/" + robot_type_config_[mapping_name] + ".urdf";
+        urdf_path = resolveUrdfPathForRobotType(robot_type_config_[mapping_name]);
     } catch (const std::exception& e) {
-        RCLCPP_WARN(node_->get_logger(), "[%s] Could not find robot_description package: %s",
-            mapping_name.c_str(), e.what());
+        RCLCPP_WARN(node_->get_logger(), "[%s] Could not resolve URDF for robot_type '%s': %s",
+            mapping_name.c_str(), robot_type_config_[mapping_name].c_str(), e.what());
     }
 
     // ===== 加载重力补偿模型 URDF (只在第一阶段加载) =====
     // 第一阶段：记录 URDF 路径，供第二阶段使用
     // 第二阶段：使用 URDF 路径创建和初始化重力补偿器
     if (!urdf_path.empty()) {
-        if (loaded_urdf_path_ != urdf_path) {
-            RCLCPP_INFO(node_->get_logger(), "[%s] URDF path: %s", mapping_name.c_str(), urdf_path.c_str());
+        const bool is_whole_body_mapping =
+            robot_type_config_[mapping_name] == "simple_omni_dual_arm" ||
+            robot_type_config_[mapping_name] == "simple_omni_dual_arm_gazebo";
+        const bool current_is_whole_body =
+            loaded_urdf_path_.find("simple_omni_dual_arm.urdf") != std::string::npos;
+        if (loaded_urdf_path_.empty() || is_whole_body_mapping || !current_is_whole_body) {
+            if (loaded_urdf_path_ != urdf_path) {
+                RCLCPP_INFO(node_->get_logger(), "[%s] URDF path: %s", mapping_name.c_str(), urdf_path.c_str());
+            }
             loaded_urdf_path_ = urdf_path;
         }
     }
@@ -1192,6 +1315,14 @@ void HardwareManager::clear_emergency_stops(const std::string& mapping) {
 }
 
 bool HardwareManager::enable_motors(const std::string& mapping, uint8_t mode) {
+    if (simulation_mode_) {
+        RCLCPP_INFO(node_->get_logger(),
+                    "[%s] Gazebo simulation mode: skip real motor enable (mode: %u)",
+                    mapping.c_str(), mode);
+        clear_emergency_stops(mapping);
+        reset_system_health(mapping);
+        return true;
+    }
     if (!hardware_driver_) {
         RCLCPP_ERROR(node_->get_logger(), "Hardware driver not initialized");
         return false;
@@ -1222,6 +1353,12 @@ bool HardwareManager::enable_motors(const std::string& mapping, uint8_t mode) {
 }
 
 bool HardwareManager::disable_motors(const std::string& mapping, uint8_t mode) {
+    if (simulation_mode_) {
+        RCLCPP_INFO(node_->get_logger(),
+                    "[%s] Gazebo simulation mode: skip real motor disable (mode: %u)",
+                    mapping.c_str(), mode);
+        return true;
+    }
     if (!hardware_driver_) {
         RCLCPP_ERROR(node_->get_logger(), "Hardware driver not initialized");
         return false;

@@ -77,6 +77,26 @@ reactive_task_controller:
   controller:
     type: neo
     frequency_hz: 100.0
+  feedback:
+    arm_state_source: hardware
+    command_output: real
+    joint_state_topic: /joint_states
+    left_arm_velocity_command_topic: /left_arm_velocity_controller/commands
+    right_arm_velocity_command_topic: /right_arm_velocity_controller/commands
+    arm_velocity_command_topic: /arm_velocity_controller/commands
+    joint_state_stale_timeout_sec: 0.25
+  whole_body:
+    enable_mobile_base_in_planning: true
+    enable_mobile_base_in_neo: true
+    mobile_base_type: omnidirectional
+    mobile_base_state_source: tf
+    mobile_base_odom_frame: odom
+    mobile_base_frame: base_footprint
+    cmd_vel_topic: /cmd_vel
+    base_max_vx: 0.20
+    base_max_vy: 0.20
+    base_max_wz: 0.45
+    base_velocity_weight_scale: 2.0
   global_planner:
     type: rrt_connect
     planning_latency_sec: 0.06
@@ -108,15 +128,16 @@ reactive_task_controller:
     pointcloud_queue_depth: 2
     voxel_size_m: 0.05
     max_distance_m: 0.60
-    observation_margin_m: 0.15
+    observation_margin_m: 3.00
+    occupancy_retention_sec: 45.0
+    max_cached_cells: 200000
+    accumulate_observed_bounds: true
     isolated_min_neighbor_count: 4
     isolated_neighbor_radius_cells: 1
     min_cluster_cell_count: 20
 
   camera_driver_esdf:
-    service_name: /camera_driver/query_distance_field
-    request_timeout_ms: 25
-    startup_wait_timeout_ms: 1000
+    shm_name: camera_driver_esdf_shm_v1
     cache_max_entries: 8192
 
   dummy_obstacle:
@@ -130,9 +151,9 @@ reactive_task_controller:
       default_segment_speed: 0.15
       use_joint_space_sampling: true
       joint_space_sampling_max_iterations: 6000
-      joint_space_sampling_step_rad: 0.06
+      joint_space_sampling_step_rad: 0.35
       joint_space_sampling_goal_bias: 0.25
-      joint_space_sampling_connect_threshold_rad: 0.18
+      joint_space_sampling_connect_threshold_rad: 0.45
       joint_space_sampling_local_window_rad: 0.35
       joint_space_sampling_search_stages: 2
       enable_two_way_bypass: true
@@ -157,7 +178,7 @@ reactive_task_controller:
       joint_space_start_recovery_enable: true
       joint_space_start_recovery_samples: 96
       joint_space_start_recovery_target_margin_m: 0.020
-      joint_space_sampling_time_budget_sec: 1.50
+      joint_space_sampling_time_budget_sec: 12.00
       enable_joint_trajectory_post_optimization: false
       joint_trajectory_postopt_iterations: 0
       joint_trajectory_postopt_samples_per_waypoint: 12

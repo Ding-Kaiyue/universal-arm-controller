@@ -8,6 +8,7 @@
 #include "controller_interface.hpp"
 #include "ipc/ipc_context.hpp"
 #include <algorithm>
+#include <cctype>
 #include <unordered_set>
 #include <thread>
 #include <rcl_interfaces/msg/parameter_descriptor.hpp>
@@ -65,6 +66,7 @@ ControllerManagerNode::ControllerManagerNode()
     this->declare_parameter("movel.acceleration_scaling_factor", 0.5, descriptor);
     this->declare_parameter("movec.velocity_scaling_factor", 0.3, descriptor);
     this->declare_parameter("movec.acceleration_scaling_factor", 0.3, descriptor);
+    this->declare_parameter("hardware_mode", std::string("real"), descriptor);
 
     // 只加载配置，其他初始化延迟到post_init
     load_config();
@@ -75,6 +77,15 @@ ControllerManagerNode::~ControllerManagerNode() {
         basic_ops_ipc_service_->stop();
         basic_ops_ipc_service_.reset();
     }
+}
+
+bool ControllerManagerNode::is_gazebo_mode() const {
+    std::string hardware_mode = this->get_parameter("hardware_mode").as_string();
+    std::transform(
+        hardware_mode.begin(), hardware_mode.end(), hardware_mode.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return hardware_mode == "gazebo" || hardware_mode == "sim" ||
+           hardware_mode == "simulation";
 }
 
 void ControllerManagerNode::post_init() {
@@ -97,34 +108,49 @@ void ControllerManagerNode::post_init() {
     init_controllers();
     init_basic_ops_ipc();
 
-    // 启动默认控制器 - 初始化 MIT 模式
-    for (const auto& mapping : mappings) {
-        auto key_pair = std::make_pair("SystemStart", mapping);
-        auto it = controller_map_.find(key_pair);
-        if (it != controller_map_.end()) {
-            it->second->start(mapping);
+    if (is_gazebo_mode()) {
+        for (const auto& mapping : mappings) {
             {
                 std::lock_guard<std::mutex> lock(mapping_state_mutex_);
-                mapping_to_mode_[mapping] = "SystemStart";
+                mapping_to_mode_[mapping] = "Idle";
             }
-
-            // ✅ 同步 IPC 侧的状态
             auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
             if (state_mgr) {
-                state_mgr->initializeCurrentMode("SystemStart");
+                state_mgr->initializeCurrentMode("Idle");
             }
         }
-    }
+        RCLCPP_INFO(this->get_logger(),
+                    "Gazebo hardware_mode active: skipped SystemStart/HoldState MIT startup commands");
+    } else {
+        // 启动默认控制器 - 初始化 MIT 模式
+        for (const auto& mapping : mappings) {
+            auto key_pair = std::make_pair("SystemStart", mapping);
+            auto it = controller_map_.find(key_pair);
+            if (it != controller_map_.end()) {
+                it->second->start(mapping);
+                {
+                    std::lock_guard<std::mutex> lock(mapping_state_mutex_);
+                    mapping_to_mode_[mapping] = "SystemStart";
+                }
 
-    // 然后切换到 HoldState 保持当前位置（为每个mapping都启动）
-    for (const auto& mapping : mappings) {
-        start_working_controller("HoldState", mapping);
+                // ✅ 同步 IPC 侧的状态
+                auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+                if (state_mgr) {
+                    state_mgr->initializeCurrentMode("SystemStart");
+                }
+            }
+        }
 
-        // ✅ 同步初始化 IPC 侧的状态，确保 current_mode 被正确设置
-        auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
-        if (state_mgr) {
-            state_mgr->initializeCurrentMode("HoldState");
-            RCLCPP_DEBUG(this->get_logger(), "[%s] ✅ IPC state initialized: current_mode=HoldState", mapping.c_str());
+        // 然后切换到 HoldState 保持当前位置（为每个mapping都启动）
+        for (const auto& mapping : mappings) {
+            start_working_controller("HoldState", mapping);
+
+            // ✅ 同步初始化 IPC 侧的状态，确保 current_mode 被正确设置
+            auto state_mgr = arm_controller::ipc::IPCContext::getInstance().getStateManager(mapping);
+            if (state_mgr) {
+                state_mgr->initializeCurrentMode("HoldState");
+                RCLCPP_DEBUG(this->get_logger(), "[%s] ✅ IPC state initialized: current_mode=HoldState", mapping.c_str());
+            }
         }
     }
 
@@ -165,15 +191,19 @@ void ControllerManagerNode::init_hardware() {
         return;
     }
 
-    // 关键：初始化硬件管理器以启用电机通信
-    if (!hardware_manager_->initialize(this->shared_from_this())) {
+    const bool gazebo_mode = is_gazebo_mode();
+    const bool initialized = gazebo_mode
+                                 ? hardware_manager_->initialize_for_simulation(this->shared_from_this())
+                                 : hardware_manager_->initialize(this->shared_from_this());
+    if (!initialized) {
         RCLCPP_WARN(this->get_logger(), "⚠️ Failed to initialize HardwareManager - running in NO-HARDWARE mode");
         // 不调用 rclcpp::shutdown()，允许系统继续运行以支持 IPC 测试
         hardware_manager_ = nullptr;
         return;
     }
 
-    RCLCPP_INFO(this->get_logger(), "✅ Hardware manager initialized successfully");
+    RCLCPP_INFO(this->get_logger(), "✅ Hardware manager initialized successfully (%s mode)",
+                gazebo_mode ? "gazebo" : "real");
 }
 
 void ControllerManagerNode::init_commons() {
@@ -448,7 +478,7 @@ bool ControllerManagerNode::start_working_controller(const std::string& mode_nam
     // 如果需要钩子状态，进入钩子状态并开始持续监控
     // ⚠️ 例外：如果目标模式是 HoldState，不需要 hook，直接切换
     // 因为 HoldState 本身就是安全状态，用来作为过渡点
-    if (need_hook && mode_name != "HoldState") {
+    if (need_hook && mode_name != "HoldState" && !is_gazebo_mode()) {
         enter_hook_state(mode_name, mapping);
         return true;    // 进入等待状态，持续监控会处理实际转换
     }
@@ -810,6 +840,12 @@ void ControllerManagerNode::handle_motor_control(
     std::string action = request->action;
 
     RCLCPP_INFO(this->get_logger(), "Motor control request: action=%s, mapping=%s", action.c_str(), mapping.c_str());
+
+    if (is_gazebo_mode()) {
+        response->success = true;
+        response->message = "Gazebo hardware_mode: ignored real motor control request";
+        return;
+    }
 
     if (!hardware_manager_) {
         response->success = false;

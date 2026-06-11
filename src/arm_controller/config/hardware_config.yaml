@@ -65,6 +65,53 @@ hardware:
         - {link_name: "right_Link5", center: [0.006, 0.070, 0.000], radii: [0.031, 0.033, 0.025], debug_name: "ellipsoid_right_Link5_1"}
         - {link_name: "right_Link6", center: [0.000, 0.000, 0.011], radii: [0.033, 0.033, 0.010], debug_name: "ellipsoid_right_Link6_0"}
 
+  dual_arm:
+      robot_type: "simple_omni_dual_arm"
+      interface: ""
+      motors: []
+      joint_names: [
+        "left_joint1", "left_joint2", "left_joint3", "left_joint4", "left_joint5", "left_joint6",
+        "right_joint1", "right_joint2", "right_joint3", "right_joint4", "right_joint5", "right_joint6"
+      ]
+      frame_id: "center_column_link"
+      controller_name: "dual_arm_controller"
+      planning_group: "dual_arm"
+      initial_position: [0.707, -0.5236, -0.7854, 0.0, 0.5236, 0.0, -0.707, 0.5236, 0.7854, 0.0, -0.5236, 0.0]
+      start_position: [0.0, -0.5236, -0.7854, 0.0, 0.5236, 0.0, 0.0, 0.5236, 0.7854, 0.0, -0.5236, 0.0]
+      collision_spheres:
+        - {shape: "box", link_name: "base_link", center: [0.0, 0.0, 0.22], size: [0.64, 0.64, 0.24], debug_name: "box_mobile_base"}
+        - {shape: "box", link_name: "center_column_link", center: [0.0, 0.0, 0.36], size: [0.18, 0.18, 0.72], debug_name: "box_center_column"}
+        - {shape: "ellipsoid", link_name: "left_Link1", center: [0.004, 0.000, 0.037], radii: [0.036, 0.033, 0.025], debug_name: "ellipsoid_left_Link1_0"}
+        - {shape: "ellipsoid", link_name: "left_Link1", center: [0.004, 0.000, 0.088], radii: [0.037, 0.033, 0.025], debug_name: "ellipsoid_left_Link1_1"}
+        - {shape: "ellipsoid", link_name: "left_Link2", center: [0.000, 0.004, 0.000], radii: [0.035, 0.048, 0.049], debug_name: "ellipsoid_left_Link2_0"}
+        - {shape: "ellipsoid", link_name: "left_Link2", center: [0.000, 0.099, 0.001], radii: [0.035, 0.048, 0.040], debug_name: "ellipsoid_left_Link2_1"}
+        - {shape: "ellipsoid", link_name: "left_Link2", center: [0.000, 0.200, 0.000], radii: [0.027, 0.048, 0.033], debug_name: "ellipsoid_left_Link2_2"}
+        - {shape: "ellipsoid", link_name: "left_Link2", center: [0.000, 0.292, 0.001], radii: [0.032, 0.048, 0.043], debug_name: "ellipsoid_left_Link2_3"}
+        - {shape: "ellipsoid", link_name: "left_Link3", center: [0.000, -0.137, 0.000], radii: [0.022, 0.025, 0.022], debug_name: "ellipsoid_left_Link3_0"}
+        - {shape: "ellipsoid", link_name: "left_Link3", center: [0.000, -0.087, 0.001], radii: [0.026, 0.025, 0.027], debug_name: "ellipsoid_left_Link3_1"}
+        - {shape: "ellipsoid", link_name: "left_Link3", center: [0.000, -0.036, 0.006], radii: [0.030, 0.025, 0.042], debug_name: "ellipsoid_left_Link3_2"}
+        - {shape: "ellipsoid", link_name: "left_Link3", center: [0.000, 0.015, 0.040], radii: [0.033, 0.025, 0.010], debug_name: "ellipsoid_left_Link3_3"}
+        - {shape: "ellipsoid", link_name: "left_Link4", center: [0.002, 0.000, 0.024], radii: [0.034, 0.024, 0.023], debug_name: "ellipsoid_left_Link4_0"}
+        - {shape: "ellipsoid", link_name: "left_Link4", center: [0.002, 0.000, 0.070], radii: [0.035, 0.024, 0.023], debug_name: "ellipsoid_left_Link4_1"}
+        - {shape: "ellipsoid", link_name: "left_Link5", center: [0.006, 0.004, 0.000], radii: [0.038, 0.033, 0.026], debug_name: "ellipsoid_left_Link5_0"}
+        - {shape: "ellipsoid", link_name: "left_Link5", center: [0.006, 0.070, 0.000], radii: [0.031, 0.033, 0.025], debug_name: "ellipsoid_left_Link5_1"}
+        - {shape: "ellipsoid", link_name: "left_Link6", center: [0.000, 0.000, 0.011], radii: [0.033, 0.033, 0.010], debug_name: "ellipsoid_left_Link6_0"}
+        - {shape: "ellipsoid", link_name: "right_Link1", center: [0.004, 0.000, 0.037], radii: [0.036, 0.033, 0.025], debug_name: "ellipsoid_right_Link1_0"}
+        - {shape: "ellipsoid", link_name: "right_Link1", center: [0.004, 0.000, 0.088], radii: [0.037, 0.033, 0.025], debug_name: "ellipsoid_right_Link1_1"}
+        - {shape: "ellipsoid", link_name: "right_Link2", center: [0.000, 0.004, 0.000], radii: [0.035, 0.048, 0.049], debug_name: "ellipsoid_right_Link2_0"}
+        - {shape: "ellipsoid", link_name: "right_Link2", center: [0.000, 0.099, 0.001], radii: [0.035, 0.048, 0.040], debug_name: "ellipsoid_right_Link2_1"}
+        - {shape: "ellipsoid", link_name: "right_Link2", center: [0.000, 0.200, 0.000], radii: [0.027, 0.048, 0.033], debug_name: "ellipsoid_right_Link2_2"}
+        - {shape: "ellipsoid", link_name: "right_Link2", center: [0.000, 0.292, 0.001], radii: [0.032, 0.048, 0.043], debug_name: "ellipsoid_right_Link2_3"}
+        - {shape: "ellipsoid", link_name: "right_Link3", center: [0.000, -0.137, 0.000], radii: [0.022, 0.025, 0.022], debug_name: "ellipsoid_right_Link3_0"}
+        - {shape: "ellipsoid", link_name: "right_Link3", center: [0.000, -0.087, 0.001], radii: [0.026, 0.025, 0.027], debug_name: "ellipsoid_right_Link3_1"}
+        - {shape: "ellipsoid", link_name: "right_Link3", center: [0.000, -0.036, 0.006], radii: [0.030, 0.025, 0.042], debug_name: "ellipsoid_right_Link3_2"}
+        - {shape: "ellipsoid", link_name: "right_Link3", center: [0.000, 0.015, 0.040], radii: [0.033, 0.025, 0.010], debug_name: "ellipsoid_right_Link3_3"}
+        - {shape: "ellipsoid", link_name: "right_Link4", center: [0.002, 0.000, 0.024], radii: [0.034, 0.024, 0.023], debug_name: "ellipsoid_right_Link4_0"}
+        - {shape: "ellipsoid", link_name: "right_Link4", center: [0.002, 0.000, 0.070], radii: [0.035, 0.024, 0.023], debug_name: "ellipsoid_right_Link4_1"}
+        - {shape: "ellipsoid", link_name: "right_Link5", center: [0.006, 0.004, 0.000], radii: [0.038, 0.033, 0.026], debug_name: "ellipsoid_right_Link5_0"}
+        - {shape: "ellipsoid", link_name: "right_Link5", center: [0.006, 0.070, 0.000], radii: [0.031, 0.033, 0.025], debug_name: "ellipsoid_right_Link5_1"}
+        - {shape: "ellipsoid", link_name: "right_Link6", center: [0.000, 0.000, 0.011], radii: [0.033, 0.033, 0.010], debug_name: "ellipsoid_right_Link6_0"}
+
   # left_gripper:
   #     robot_type: "dual_arm_with_omnipicker_humanoid"
   #     gripper_model: "omnipicker"

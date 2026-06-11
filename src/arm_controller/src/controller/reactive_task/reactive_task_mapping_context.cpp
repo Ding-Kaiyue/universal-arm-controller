@@ -14,6 +14,11 @@ namespace cp = arm_controller::algorithm::cartesian_path_planner;
 namespace gp = arm_controller::algorithm::global_planner;
 
 namespace {
+struct RobotDescriptionPaths {
+    std::string urdf_path;
+    std::string srdf_path;
+};
+
 std::string normalizeArmTypeForTracIk(const std::string& robot_type) {
     if (robot_type == "dual_arm620" || robot_type == "dual_arm380") {
         return robot_type;
@@ -25,6 +30,32 @@ std::string normalizeArmTypeForTracIk(const std::string& robot_type) {
         return "arm380";
     }
     return robot_type.empty() ? "arm620" : robot_type;
+}
+
+RobotDescriptionPaths resolveRobotDescriptionPaths(const std::string& robot_type) {
+    RobotDescriptionPaths paths;
+    if (robot_type == "simple_omni_dual_arm" ||
+        robot_type == "simple_omni_dual_arm_gazebo") {
+        paths.urdf_path =
+            ament_index_cpp::get_package_share_directory("whole_body_description") +
+            "/urdf/simple_omni_dual_arm.urdf";
+        paths.srdf_path =
+            ament_index_cpp::get_package_share_directory("whole_body_config") +
+            "/config/simple_omni_dual_arm.srdf";
+        return paths;
+    }
+
+    paths.urdf_path =
+        ament_index_cpp::get_package_share_directory("robot_description") +
+        "/urdf/" + robot_type + ".urdf";
+    try {
+        paths.srdf_path =
+            ament_index_cpp::get_package_share_directory(robot_type + "_config") +
+            "/config/" + robot_type + ".srdf";
+    } catch (const std::exception&) {
+        paths.srdf_path.clear();
+    }
+    return paths;
 }
 }  // namespace
 
@@ -51,12 +82,21 @@ bool ReactiveTaskController::initializeMappingContext(const std::string& mapping
         return false;
     }
 
+    RobotDescriptionPaths description_paths;
+    try {
+        description_paths = resolveRobotDescriptionPaths(ctx.robot_type);
+    } catch (const std::exception& e) {
+        if (error != nullptr) {
+            *error = std::string("resolve robot description failed: ") + e.what();
+        }
+        return false;
+    }
+
     pinocchio::Model model;
     try {
-        const std::string urdf_path =
-            ament_index_cpp::get_package_share_directory("robot_description") +
-            "/urdf/" + ctx.robot_type + ".urdf";
-        pinocchio::urdf::buildModel(urdf_path, model);
+        pinocchio::urdf::buildModel(description_paths.urdf_path, model);
+        ctx.urdf_path = description_paths.urdf_path;
+        ctx.srdf_path = description_paths.srdf_path;
     } catch (const std::exception& e) {
         if (error != nullptr) {
             *error = std::string("build pinocchio model failed: ") + e.what();
@@ -124,10 +164,7 @@ bool ReactiveTaskController::initializeMappingContext(const std::string& mapping
 
                 std::string urdf_xml = ctx.moveit_adapter->getURDFString(ctx.robot_type);
                 if (urdf_xml.empty()) {
-                    const std::string urdf_path =
-                        ament_index_cpp::get_package_share_directory("robot_description") +
-                        "/urdf/" + ctx.robot_type + ".urdf";
-                    std::ifstream ifs(urdf_path);
+                    std::ifstream ifs(ctx.urdf_path);
                     urdf_xml.assign(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
                 }
 
@@ -144,21 +181,6 @@ bool ReactiveTaskController::initializeMappingContext(const std::string& mapping
         }
     } catch (const std::exception&) {
         ctx.tracik_ready = false;
-    }
-
-    try {
-        ctx.urdf_path =
-            ament_index_cpp::get_package_share_directory("robot_description") +
-            "/urdf/" + ctx.robot_type + ".urdf";
-    } catch (const std::exception&) {
-        ctx.urdf_path.clear();
-    }
-    try {
-        ctx.srdf_path =
-            ament_index_cpp::get_package_share_directory(ctx.robot_type + "_config") +
-            "/config/" + ctx.robot_type + ".srdf";
-    } catch (const std::exception&) {
-        ctx.srdf_path.clear();
     }
 
     const std::string reactive_cfg_path =

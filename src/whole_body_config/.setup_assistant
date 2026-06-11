@@ -1,0 +1,25 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: whole_body_description
+    relative_path: urdf/simple_omni_dual_arm.urdf
+  srdf:
+    relative_path: config/simple_omni_dual_arm.srdf
+  package_settings:
+    author_name: dky
+    author_email: d570737261@163.com
+    generated_timestamp: 1779845841
+  control_xacro:
+    command:
+      - position
+    state:
+      - position
+      - velocity
+  modified_urdf:
+    xacros:
+      - control_xacro
+  control_xacro:
+    command:
+      - position
+    state:
+      - position
+      - velocity

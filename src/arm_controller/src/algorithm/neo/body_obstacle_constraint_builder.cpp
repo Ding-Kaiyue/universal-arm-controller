@@ -139,6 +139,7 @@ int appendPreparedEllipsoidConstraints(
         ObstacleConstraintInput c;
         c.normal_jacobian = n_world.transpose() * J_point.topRows(3);
         c.linear_jacobian = J_point.topRows(3);
+        c.point_world = prepared.point_world;
         c.normal_world = n_world;
         c.distance = dq.distance - r_eff;
         c.debug_name = e.debug_name.empty()
